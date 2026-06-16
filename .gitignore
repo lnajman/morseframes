@@ -27,5 +27,7 @@ dist/
 *.log
 *.out
 *.toc
+docs/*_prose.tex
+docs/experiments_morse_persistence*.pdf
 
 .DS_Store

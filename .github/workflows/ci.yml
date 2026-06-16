@@ -29,9 +29,14 @@ jobs:
       - name: Test C++
         run: ctest --test-dir build --output-on-failure
 
-      - name: Install Python test dependencies
-        run: python -m pip install pytest
+      - name: Install Python package
+        run: python -m pip install -e .
+
+      - name: Smoke-test Python package
+        run: python -c "import morseframes as mf; print(mf.__version__, mf.cpp_backend_available()); assert mf.cpp_backend_available()"
 
       - name: Test Python
-        run: PYTHONPATH=python python -m pytest python/tests
+        run: MORSEFRAMES_DISABLE_CPP_BACKEND=1 python -m unittest discover -s python/tests -p "test_*.py"
 
+      - name: Run Python quickstart
+        run: python python/examples/quickstart.py

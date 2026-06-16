@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.12", "nanobind>=2.0", "wheel"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "morseframes"
@@ -22,13 +22,18 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest>=7,<9"]
 plotting = ["plotly"]
 
-[tool.setuptools]
-package-dir = { "" = "python" }
+[tool.scikit-build]
+build-dir = "build/{wheel_tag}"
+cmake.args = [
+  "-DMORSEFRAMES_BUILD_PYTHON=ON",
+  "-DMORSEFRAMES_BUILD_TESTS=OFF",
+  "-DMORSEFRAMES_BUILD_EXAMPLES=OFF",
+  "-DMORSEFRAMES_BUILD_GUDHI_TOOLS=OFF",
+]
+wheel.packages = ["python/morseframes"]
 
-[tool.setuptools.packages.find]
-where = ["python"]
-include = ["morseframes*"]
-
+[tool.scikit-build.editable]
+mode = "inplace"

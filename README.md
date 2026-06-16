@@ -45,11 +45,18 @@ cmake -S . -B build -DMORSEFRAMES_BUILD_GUDHI_TOOLS=OFF
 
 ## Python Quick Start
 
-The Python package is importable from the `python/` directory, or installable in
-editable mode:
+The Python package is installable in editable mode. This uses
+`scikit-build-core` and `nanobind` to build the optional native backend:
 
 ```sh
 python3 -m pip install -e .
+python3 -c "import morseframes as mf; print(mf.__version__, mf.cpp_backend_available())"
+```
+
+For development, install the test dependency as well:
+
+```sh
+python3 -m pip install -e ".[dev]"
 ```
 
 Example:
@@ -80,7 +87,16 @@ diagram = mf.compute_morse_persistence(complex_, algorithm="f-min", modulus=3)
 ## Python Tests
 
 ```sh
-PYTHONPATH=python python3 -m pytest python/tests
+MORSEFRAMES_DISABLE_CPP_BACKEND=1 python3 -m unittest discover -s python/tests -p "test_*.py"
+python3 python/examples/quickstart.py
+```
+
+The pure-Python fallback can still be exercised directly from the source tree
+without building the native backend, or by disabling the backend explicitly:
+
+```sh
+PYTHONPATH=python python3 -c "import morseframes as mf; print(mf.cpp_backend_available())"
+MORSEFRAMES_DISABLE_CPP_BACKEND=1 python3 -m unittest discover -s python/tests -p "test_*.py"
 ```
 
 ## Documentation
@@ -94,4 +110,3 @@ PYTHONPATH=python python3 -m pytest python/tests
 
 This is research code. The public API is useful for experimentation, but names
 and interfaces may still change while the paper and GUDHI integration mature.
-

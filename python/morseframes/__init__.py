@@ -1,14 +1,15 @@
-"""Prototype Python interface for Morse persistence.
+"""Python interface for MorseFrames.
 
-This module intentionally mirrors the small C++ core in ``include/morse``.
+This module intentionally mirrors the C++ core in ``include/morseframes``.
 When the nanobind extension is available, finalized complexes and Morse
 sequences carry stateful C++ objects; otherwise the same API falls back to
-the pure-Python prototype.
+the pure-Python implementation.
 """
 
 from __future__ import annotations
 
 import heapq
+import os
 from collections import deque
 from dataclasses import dataclass, field
 from itertools import combinations
@@ -16,10 +17,15 @@ from math import inf, isclose
 from time import perf_counter
 from typing import Callable, Iterable, Iterator, Mapping, Sequence
 
-try:
-    from . import _morse_core
-except ImportError:
+__version__ = "0.1.0"
+
+if os.environ.get("MORSEFRAMES_DISABLE_CPP_BACKEND"):
     _morse_core = None
+else:
+    try:
+        from . import _morse_core
+    except ImportError:
+        _morse_core = None
 
 CppFilteredComplex = getattr(_morse_core, "FilteredComplex", None)
 CppMorseSequence = getattr(_morse_core, "MorseSequence", None)
@@ -5047,6 +5053,7 @@ def _xor_into_all_containing(annotations: list[Annotation], label: int, value: A
 
 
 __all__ = [
+    "__version__",
     "AUTO_MORSE_SEQUENCE_ALGORITHM",
     "CRITICAL",
     "COREDUCTION_SEQUENCE",

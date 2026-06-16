@@ -4,7 +4,13 @@ cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
 CTestTestfile.cmake
+CMakeInit.txt
 Makefile
+build.ninja
+.ninja_deps
+.ninja_log
+.cmake/
+.skbuild-info.json
 cmake_install.cmake
 
 __pycache__/
@@ -23,4 +29,3 @@ dist/
 *.toc
 
 .DS_Store
-

@@ -1,0 +1,20 @@
+\begin{table}[ht]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{p{0.30\linewidth}rp{0.50\linewidth}}
+\toprule
+Direct-view stage group & Share & Interpretation \\
+\midrule
+Read-only view construction & 37.4\% & Simplex extraction, boundary lookup, coboundaries, and order arrays. \\
+Morse frame construction & 37.9\% & Morse sequence plus reference/reduction-input construction. \\
+Reducer kernel & 25.5\% & Annotation reduction after the Morse input has been built. \\
+\midrule
+All pre-reducer work & 74.5\% & Current native-plugin bottleneck before the reducer starts. \\
+\bottomrule
+\end{tabular}
+\caption{Compact decomposition of the direct native \texttt{Simplex\_tree} view path,
+averaged over the quick plugin stage-profile rows.  The percentages are rounded from the
+generated stage profile and therefore need not sum to exactly $100\%$.}
+\label{tab:native-gudhi-overhead-summary}
+\end{table}

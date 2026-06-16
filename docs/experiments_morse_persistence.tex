@@ -1,0 +1,994 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  citecolor=blue!50!black,
+  urlcolor=blue!50!black
+}
+
+\newcommand{\Ftwo}{\mathbb{F}_2}
+\newcommand{\Fp}{\mathbb{F}_p}
+\newcommand{\us}{\ensuremath{\mu\mathrm{s}}}
+\newcommand{\slred}{\texttt{same-level}}
+\newcommand{\ratioiqr}[3]{\shortstack[c]{#1\\[-0.25ex]{\tiny #2--#3}}}
+
+\title{Experimental Notes on Morse Persistence}
+\author{Draft note for discussion}
+\date{June 16, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This note summarizes the current experimental status of the Morse persistence prototype.
+The main message is now twofold.  First, the compact C++ backend is already useful for
+comparing Morse-sequence strategies, and on selected Roadmap Rips averages it is faster
+than the GUDHI baseline used here.  Second, the native \texttt{Gudhi::Simplex\_tree}
+integration path has become competitive on structured plateau grids: in the current
+30-repeat Release benchmark the direct view beats or essentially matches GUDHI on the
+medium grid cases, while GUDHI remains faster on the flag/Rips-like case and on the
+largest grid.  The reducer kernel is consistently faster than GUDHI persistence once the
+Morse input has been built, but view and Morse-frame construction still dominate the
+integrated path.  Across the strategy experiments, critical-cell ratio alone is not a
+reliable performance target; annotation volume, mutation work, and construction overhead
+explain the observed timings more consistently.  For strategy selection,
+\texttt{adaptive} remains the conservative control, while the structured-grid extension
+\texttt{adaptive-structured} has become a serious candidate for the next validation round
+rather than merely a curiosity.
+\end{abstract}
+
+\section{Executive summary}
+
+The goal is not yet to make universal performance claims, but to identify which
+implementation choices and algorithmic directions are now supported by measurements.  The
+experiments were designed to answer five practical questions:
+\begin{enumerate}
+  \item Can a Morse-sequence based pipeline reproduce the same barcodes as a standard
+        persistence reduction?
+  \item Is the number of critical simplices a reliable predictor of performance?
+  \item How does the current prototype compare with GUDHI/CAM-style persistence on
+        classical Rips benchmarks?
+  \item What is the cost of starting directly from a \texttt{Gudhi::Simplex\_tree}, as a
+        possible path toward GUDHI integration?
+  \item Should we pursue a coreference/cohomological direction, or keep using reference
+        annotations after constructing a same-level reduction sequence?
+\end{enumerate}
+
+The main conclusion is that the current prototype is already useful for comparing
+strategies, while the integration result should be stated carefully.  The compact backend
+is faster than GUDHI on the selected Roadmap averages.  The native GUDHI-view path has
+become a credible integration route because it avoids the large compact-import cost.  In
+the current large Release benchmark it is faster than GUDHI on the smaller structured
+grid, at parity on the medium grid, and slower on the flag/Rips-like case and largest
+grid.  The technical lesson is unchanged but sharper: critical-cell ratio alone is not
+the right optimization target.  Annotation volume, reducer mutation cost, and
+frame-construction overhead are more predictive of the observed running time.
+
+\paragraph{Current takeaways.}
+\begin{itemize}
+  \item Correctness is checked systematically against standard reduction, with selected
+        GUDHI validation and optional Perseus barcode export.
+  \item On selected Roadmap Rips objects, \slred and
+        \texttt{f-max} are the most competitive current strategies in the current
+        portfolio artifact, even though
+        \slred leaves many more cells critical.
+  \item The direct \texttt{Gudhi::Simplex\_tree} view is now a credible integration path
+        because it is much faster than importing the tree into the compact complex.
+        In the new large 30-repeat native benchmark, the median
+        \texttt{GUDHI/Direct} ratio is above $1$ on the $64^2$ plateau grid,
+        approximately $1$ on the $96^2$ plateau grid, and below $1$ on the
+        flag/Rips-like case and the $128^2$ plateau grid.
+  \item On synthetic size-$48$ examples, \texttt{f-max} is the fastest of the four core
+        same-level strategies in the representative run, so it must remain in the measured
+        portfolio.
+  \item The coreference recurrence is correct but too expensive on dense Rips complexes;
+        reference reduction remains the useful direction for now.
+  \item The selector experiments are now generated from CSV artifacts.  The conservative
+        \texttt{adaptive} selector remains the reported control, while
+        \texttt{adaptive-structured} eliminates the current image-grid gap in the aggregate
+        audit and should be the next selector variant to validate.
+  \item The main timing tables below are still over $\Ftwo$ unless stated otherwise, but
+        the C++ core and Python interface now also support prime fields $\Fp$; validation
+        over $\mathbb{F}_3$ and $\mathbb{F}_5$ shows no barcode mismatches on the tested
+        synthetic cases.
+\end{itemize}
+
+\tableofcontents
+
+\section{Experimental setup}
+
+\subsection{Implementation used in the experiments}
+
+The implementation is a C++ core with a Python interface.  The Python layer mirrors the C++
+objects, but when the nanobind extension is available the finalized complex and Morse
+sequence carry stateful C++ objects.  All timings reported here use the C++ backend.
+
+\paragraph{Filtered complex representation.}
+The prototype stores an explicit filtered abstract simplicial complex.  Each simplex is
+assigned a compact integer identifier.  The finalized representation stores:
+\begin{itemize}
+  \item the sorted vertex list of each simplex;
+  \item the dimension and scalar filtration value;
+  \item the discrete filtration level, i.e. the rank of the filtration value among all
+        distinct values;
+  \item the codimension-one boundary as simplex identifiers;
+  \item the coboundary as simplex identifiers;
+  \item buckets of simplices by filtration level;
+  \item a filtration order compatible with boundary-before-coface reduction.
+\end{itemize}
+This is not a simplex tree.  At this stage it is deliberately simple: after finalization,
+most computations are vector-based and use simplex identifiers rather than vertex tuples.
+This makes it convenient to implement Morse steps, reference maps, coreference maps, and
+instrumented reductions.  Most performance experiments in this note use $\Ftwo$, because
+that is the coefficient field used for the current GUDHI-facing comparison, but the same
+core data structure is also used by the prime-field reducers.
+
+\paragraph{Annotations.}
+Reference and coreference annotations over $\Ftwo$ are stored as sparse sorted lists of
+critical-cell identifiers, where addition is symmetric difference.  The current core uses a
+small inline representation for these lists: the common empty, singleton, and two-label
+cases avoid a heap allocation, and longer annotations spill to dynamic storage.  This
+optimization is shared by the compact C++ backend, the Python bindings, and the native
+GUDHI-view path.  Over an odd prime field $\Fp$, annotations become sparse sorted vectors of pairs
+$(\hbox{critical id},\hbox{coefficient})$, and boundary/coboundary signs are reduced
+modulo $p$.  The reducer uses an inverse annotation store: for each critical label, it
+maintains the list of annotations currently containing that label.  This makes pivot
+elimination local to the annotations that actually contain the pivot label.  The
+instrumentation records the initial annotation volume, inverse-list entries, candidate
+scans, applied updates, total input/output annotation sizes, and maximum annotation sizes.
+Composite coefficient rings $\mathbb{Z}_n$ are deliberately rejected by the barcode API;
+the current extension is prime-field persistence, not general ring-valued persistence.
+
+\paragraph{Morse sequence strategies.}
+We currently compare a strategy portfolio of sequence constructors:
+\begin{description}
+  \item[\texttt{saturated}] A valid F-sequence constructor that greedily inserts available
+        same-level regular pairs, and otherwise inserts a critical simplex.  It pairs until
+        it is stuck, marks one fillable simplex critical, then continues.
+  \item[\texttt{plateau-greedy}] A variant of \texttt{saturated} that chooses critical
+        insertions intended to unlock more same-level pair opportunities.  It pairs until
+        it is stuck, marks one strategically chosen fillable simplex critical, then
+        continues.  Among the fillable candidates, it scores each candidate by how many
+        currently ``almost pairable'' cofaces it would unlock.
+  \item[\texttt{same-level-reduction}] An experimental same-level free-face collapse
+        strategy.  It discovers free-face pairs inside each filtration level, then emits
+        the reverse order as an F-sequence so that the existing reference-map recurrence
+        applies.  It collapses until there is no free face, then marks all leftover
+        simplices critical.
+  \item[\texttt{f-max/min}] Paper-faithful implementations of \textbf{Max}$(S,F)$ and
+        \textbf{Min}$(S,F)$ from the Morse-sequence algorithms paper.  The former scans in
+        increasing filtration and dimension, while the latter scans in decreasing
+        filtration and dimension and prepends the decreasing operations.
+  \item[\texttt{flooding-max/min}] Flooding constructors restricted respectively to
+        maximal/increasing operations and minimal/decreasing operations.  Candidate
+        selection uses extremal priority queues inside each level.
+  \item[\texttt{flooding-minmax/maxmin}] Mixed flooding constructors.  The former tries
+        minimal/decreasing moves first, while the latter tries maximal/increasing moves
+        first.
+\end{description}
+The interface is intentionally strategy-based, so future Morse sequence algorithms can be
+added without changing the persistence entry points.
+
+\paragraph{Reference and coreference paths.}
+For an F-sequence, the reference recurrence computes annotations in the direction of
+simplex insertion.  For a regular pair $(\sigma,\tau)$ it updates
+\[
+  R(\tau)=0, \qquad
+  R(\sigma)=\bigoplus_{\eta\in \partial \tau,\ \eta\ne\sigma} R(\eta).
+\]
+We also implemented the dual coreference recurrence.  It scans the sequence backward and
+uses coboundaries:
+\[
+  C(\sigma)=0, \qquad
+  C(\tau)=\bigoplus_{\eta\in \mathrm{cobd}(\sigma),\ \eta\ne\tau} C(\eta).
+\]
+For the \texttt{same-level-reduction} strategy we added a native coreference builder:
+it records the free-face collapses, computes coreferences in the natural reverse direction,
+and returns the compatible F-sequence for validation and comparison.
+
+\subsection{Benchmark families}
+
+The current benchmark script generates or loads the following families.
+\begin{description}
+  \item[Lower-star.] Random facet closures with random vertex values.  A simplex receives
+        the maximum value of its vertices.
+  \item[Plateau.] Random monotone integer-level filtrations over facet closures.  These are
+        not forced through a lower-star construction, so same-level plateaus are explicit.
+  \item[Rips.] Random distance matrices with Vietoris--Rips filtrations truncated at
+        dimension two.
+  \item[CAM-style sphere Rips.] Random points on the unit sphere $S^4$ in $\mathbb{R}^5$,
+        using the threshold profile from the CAM experiments, downscaled for the prototype.
+  \item[Terrain.] Triangulated two-dimensional grids with lower-star filtrations from a
+        smooth synthetic scalar field.  The field combines a low-frequency trend,
+        sinusoidal oscillations, seeded Gaussian bumps, and small noise, then quantizes the
+        vertex values to a small number of levels.  These examples keep spatial structure
+        while still producing explicit plateaus.
+  \item[Image-grid.] Triangulated two-dimensional grids with stronger image-like plateaus.
+        The vertex values come from coarse block regions modified by a seeded rectangle,
+        disk, and diagonal stripe, then quantized to a few levels.  These are not cubical
+        complexes in the current experiment: the grid is triangulated and then treated as
+        an ordinary filtered simplicial complex.  They are intended as a structured
+        proxy for grayscale image filtrations.
+  \item[Roadmap Rips.] Three distance-matrix datasets from the persistent-homology roadmap
+        benchmark collection: random50-16d, random100-4d, and senate104.
+\end{description}
+
+For GUDHI comparisons, the GUDHI simplex tree is fed exactly the same simplices and scalar
+filtration values stored in our finalized complex.  Thus the comparison is on the same
+filtered complex.  The GUDHI timing is used as a current CAM-style baseline, not as a claim
+about the original CAM implementation.
+
+\subsection{Correctness checks}
+
+Every benchmark validates the Morse barcode against a standard reduction over the full
+filtered complex.  The C++ benchmark path can validate compact barcode signatures without
+materializing all intervals in Python.  Additional tests compare:
+\begin{itemize}
+  \item separate construction of a Morse sequence and reference map;
+  \item fused construction of the Morse sequence and reference map;
+  \item compact fused reduction input versus a full reference table;
+  \item reference reduction versus coreference reduction;
+  \item selected examples against GUDHI.
+\end{itemize}
+Perseus export support is kept as an optional validation path: the benchmark can export the
+same finalized complex to \texttt{nmfsimtop}, rank-compress filtration values to positive
+integer birth levels, and compare the returned barcode with the standard reducer.  We do
+not use Perseus timings in the main experimental comparison because that would mix an
+external command-line/file-I/O benchmark with in-process algorithmic timings.
+At the time of writing, the C++ test suite, the nanobind build test suite, Python tests, and
+GUDHI example validation all pass.
+
+For ratio columns, we report the median with the interquartile interval underneath whenever
+the artifact contains several paired observations.  In the native GUDHI tables these
+intervals are computed over paired timing repeats.  In the portfolio and synthetic summary
+tables whose CSV artifacts already collapse timing repeats, the intervals describe
+variation across benchmark cases.  Tables with one aggregate observation per row are
+marked as point estimates.
+
+\subsection{Coefficient fields}
+
+The original experimental pipeline was written over $\Ftwo$.  This is still the coefficient
+field used for the main tables and for the current GUDHI-facing contribution sketch.
+However, the C++ core and Python interface now also expose ordinary persistence,
+Morse-reference persistence, and Morse-coreference persistence over prime fields $\Fp$.
+The Morse sequence itself is coefficient-independent; the coefficient field enters when
+oriented reference/coreference annotations and persistence reductions are computed.
+
+Table~\ref{tab:prime-field-overhead} summarizes a prime-field overhead check on the
+synthetic lower-star, plateau, and Rips families.  The run used the
+\texttt{saturated}, \texttt{f-max}, \texttt{f-min}, and
+\texttt{same-level-reduction} strategies and compared $\mathbb{F}_3$ and
+$\mathbb{F}_5$ against the $\Ftwo$ path.  All prime-field
+barcodes matched the corresponding standard prime-field reducer.  The ratios below should
+not be interpreted as a claim that odd prime fields are faster than $\Ftwo$: they are
+best-of-repeat microbenchmarks.  The useful conclusion is that the prime-field path has no
+validation mismatches and keeps the same qualitative strategy behavior, with a moderate
+overhead in the Morse reducer on these small synthetic cases.
+
+\begin{table}[ht]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrccc}
+\toprule
+Field & Cases & $\Fp/\Ftwo$ Morse & $\Fp/\Ftwo$ standard
+      & Morse speedup vs standard \\
+\midrule
+$\mathbb{F}_3$ & 180 & \ratioiqr{1.231}{1.190}{1.267} & \ratioiqr{1.040}{1.022}{1.066} & \ratioiqr{1.466}{1.078}{1.898} \\
+$\mathbb{F}_5$ & 180 & \ratioiqr{1.216}{1.175}{1.253} & \ratioiqr{1.041}{1.023}{1.062} & \ratioiqr{1.465}{1.122}{1.969} \\
+\bottomrule
+\end{tabular}
+\caption{Prime-field overhead check on synthetic lower-star, plateau, and Rips complexes.
+Validation mismatches: 0.  Morse timings exclude sequence construction, which is
+coefficient-independent and reported separately in the CSV artifact.  Ratio entries are
+case-level medians with $Q_1$--$Q_3$ underneath over the aggregate benchmark rows.}
+\label{tab:prime-field-overhead}
+\end{table}
+
+\section{Backend and integration comparisons with GUDHI}
+
+We now separate two comparisons that answer different questions.  The backend comparison
+uses the compact C++ Morse backend, currently driven through the Python-facing benchmark
+pipeline, and compares it with GUDHI on the same filtered complexes.  This is the comparison
+where the Morse pipeline is often faster.  The integration comparison starts instead from
+an existing \texttt{Gudhi::Simplex\_tree}.  It measures the cost of a possible GUDHI-facing
+plugin/interface, including the additional data needed by the Morse sequence, reference map,
+and reducer.  After replacing per-simplex heap allocations by inline local storage for
+small vertex, boundary, coboundary, and annotation lists, this second path is now
+substantially better than compact import.  It is now competitive with GUDHI end-to-end on
+structured plateau grids, but not on the flag/Rips-like validation case.  The reducer
+kernel is fast; the view and Morse-frame construction stages remain the integration
+bottleneck.
+
+\begin{table}[ht]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{p{0.16\linewidth}p{0.23\linewidth}p{0.23\linewidth}p{0.27\linewidth}}
+\toprule
+Comparison & Starting object & Timed Morse path & Current conclusion \\
+\midrule
+Backend & Compact filtered complex & C++ Morse backend & Faster than GUDHI on selected Roadmap averages. \\
+Integration & \texttt{Gudhi::Simplex\_tree} & Direct read-only view or import & Direct view is much faster than import; current Release timings are competitive on structured grids but still favor GUDHI on flag/Rips-like input. \\
+\bottomrule
+\end{tabular}
+\caption{The two GUDHI comparisons reported below.  The first measures the Morse backend;
+the second measures the present cost of integrating that backend with a GUDHI simplex tree.}
+\label{tab:gudhi-comparison-map}
+\end{table}
+
+\subsection{Backend comparison on Roadmap datasets}
+
+Table~\ref{tab:roadmap-sat-reduction} compares \texttt{saturated}, \texttt{f-max},
+\texttt{f-min}, and \texttt{same-level-reduction} on three objects from the
+PH-roadmap benchmark collection:
+\texttt{random50-16d}, \texttt{random100-4d}, and \texttt{senate104}.  These are useful
+external reference cases because they are not tuned to our implementation and because they
+were already used to compare persistent-homology software.  The present experiment should
+be read as a targeted comparison on selected Roadmap objects, not as a full reproduction of
+the Roadmap benchmark study.
+
+For each object, we build the same truncated Vietoris--Rips filtered complex for our
+pipeline and for GUDHI.  The columns report the number of simplices, critical-cell
+percentage, total Morse time, GUDHI time, and the GUDHI/Morse point estimate.  A ratio
+larger than $1$ means GUDHI is slower than the Morse pipeline.  GUDHI is timed once per complex and
+reused across Morse strategies, because it does not depend on the chosen Morse sequence.
+
+\begin{table}[ht]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{tabular}{llrrrrr}
+\toprule
+Object & Strategy & Simplices & Critical \% & Morse (\us) & GUDHI (\us) & GUDHI/Morse (point) \\
+\midrule
+\texttt{random50-16d} & \texttt{saturated} & 20,875 & 89.1 & 6,731 & 9,298 & 1.38 \\
+\texttt{random50-16d} & \texttt{f-max} & 20,875 & 89.1 & 5,735 & 9,298 & 1.62 \\
+\texttt{random50-16d} & \texttt{f-min} & 20,875 & 89.1 & 6,039 & 9,298 & 1.54 \\
+\texttt{random50-16d} & \slred & 20,875 & 99.3 & 5,431 & 9,298 & 1.71 \\
+\midrule
+\texttt{random100-4d} & \texttt{saturated} & 166,750 & 94.2 & 91,902 & 82,858 & 0.90 \\
+\texttt{random100-4d} & \texttt{f-max} & 166,750 & 94.2 & 82,689 & 82,858 & 1.00 \\
+\texttt{random100-4d} & \texttt{f-min} & 166,750 & 94.2 & 89,447 & 82,858 & 0.93 \\
+\texttt{random100-4d} & \slred & 166,750 & 99.8 & 76,253 & 82,858 & 1.09 \\
+\midrule
+\texttt{senate104} & \texttt{saturated} & 182,207 & 94.4 & 91,024 & 87,125 & 0.96 \\
+\texttt{senate104} & \texttt{f-max} & 182,207 & 94.4 & 80,962 & 87,125 & 1.08 \\
+\texttt{senate104} & \texttt{f-min} & 182,207 & 94.4 & 92,470 & 87,125 & 0.94 \\
+\texttt{senate104} & \slred & 182,207 & 99.9 & 80,891 & 87,125 & 1.08 \\
+\bottomrule
+\end{tabular}
+\caption{Selected PH-roadmap Rips datasets, with GUDHI timed on the same filtered
+complexes.  The \texttt{f-max}, \texttt{f-min}, and \texttt{saturated} rows often have
+the same critical-cell ratio, but different reducer costs.  The
+\texttt{same-level-reduction} strategy leaves many more cells critical, yet remains
+competitive on these instances because it performs less annotation mutation work.  Each
+row is a single aggregate observation, so the ratio column is a point estimate.}
+\label{tab:roadmap-sat-reduction}
+\end{table}
+
+The same Roadmap run also covered the full strategy portfolio, including the flooding
+variants and plateau-greedy.  Averaged over the three Roadmap objects,
+\texttt{same-level-reduction} and \texttt{f-max} were the two fastest strategies:
+\texttt{same-level-reduction} averaged $54{,}192~\us$, while \texttt{f-max} averaged
+$56{,}462~\us$.  The \texttt{f-min} strategy averaged $62{,}652~\us$, close to
+\texttt{saturated} at $63{,}219~\us$.  The older priority-queue flooding variants ranged
+from $74{,}674~\us$ for \texttt{plateau-greedy} to $84{,}056~\us$ for
+\texttt{flooding-minmax}.
+
+\begin{table}[ht]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrcc}
+\toprule
+Strategy & Critical \% & Morse (\us) & Std/Morse & GUDHI/Morse \\
+\midrule
+\slred                   & 99.8 & 54,192 & \ratioiqr{4.74}{3.23}{6.40} & \ratioiqr{1.09}{1.08}{1.40} \\
+\texttt{f-max}           & 94.0 & 56,462 & \ratioiqr{4.57}{3.16}{6.01} & \ratioiqr{1.08}{1.04}{1.35} \\
+\texttt{f-min}           & 94.0 & 62,652 & \ratioiqr{4.17}{2.84}{5.51} & \ratioiqr{0.94}{0.93}{1.24} \\
+\texttt{saturated}       & 94.0 & 63,219 & \ratioiqr{3.80}{2.66}{5.22} & \ratioiqr{0.96}{0.93}{1.17} \\
+\texttt{plateau-greedy}  & 94.0 & 74,674 & \ratioiqr{2.95}{2.12}{4.33} & \ratioiqr{0.81}{0.79}{0.92} \\
+\texttt{flooding-min}    & 94.0 & 75,659 & \ratioiqr{2.58}{1.90}{4.25} & \ratioiqr{0.80}{0.78}{0.85} \\
+\texttt{flooding-max}    & 94.0 & 77,831 & \ratioiqr{2.69}{1.93}{4.16} & \ratioiqr{0.78}{0.76}{0.85} \\
+\texttt{flooding-maxmin} & 94.0 & 79,268 & \ratioiqr{2.50}{1.85}{3.97} & \ratioiqr{0.75}{0.75}{0.84} \\
+\texttt{flooding-minmax} & 94.0 & 84,056 & \ratioiqr{2.66}{1.86}{3.91} & \ratioiqr{0.71}{0.70}{0.82} \\
+\bottomrule
+\end{tabular}
+\caption{Roadmap averages after adding paper-faithful \texttt{f-max} and \texttt{f-min}.
+\texttt{f-min} and \texttt{f-max} have the same critical-cell ratio as
+\texttt{saturated} on these objects, but their direct Min/Max loops are faster in this
+three-repeat freeze.  Ratio entries are case-level medians with $Q_1$--$Q_3$ underneath
+over the three Roadmap objects.}
+\label{tab:roadmap-fmax-fmin}
+\end{table}
+
+\subsection{Integration benchmark from \texorpdfstring{\texttt{Gudhi::Simplex\_tree}}{Gudhi::Simplex\_tree}}
+
+After adding the GUDHI-shaped C++ entry point, we also ran a fully native simplex-tree
+benchmark.  This is a different comparison from the Roadmap table above.  The Roadmap
+table compares our Python-facing benchmark pipeline with GUDHI on selected external Rips
+complexes.  The native benchmark starts from an actual \texttt{Gudhi::Simplex\_tree} and
+compares three in-process paths:
+\begin{itemize}
+  \item GUDHI's persistent cohomology on the input simplex tree;
+  \item our Morse pipeline through the direct read-only \texttt{Simplex\_tree} view;
+  \item our Morse pipeline after importing the tree into the compact owning complex.
+\end{itemize}
+
+\input{docs/native_gudhi_view_quick_table.tex}
+
+The direct view path is consistently faster than compact import, so the GUDHI interface is
+useful.  The quick table is retained as a small smoke test.  After adding inline storage
+for the small local lists used by the view and for small reducer annotations, dense
+low-dimensional face lookup when vertex handles are compact, rank-based Morse candidate
+queues, byte-valued hot state flags, fixed-dimension ordering inside the native view,
+level-aware candidate filtering, and cheaper production-mode sequence emission checks, the
+larger 30-repeat Release run gives a more useful picture.
+
+\input{docs/native_gudhi_large_lean_r30_table.tex}
+
+Table~\ref{tab:native-gudhi-large-lean-r30} is the current integration checkpoint.  On
+\texttt{grid-64x64-plateau}, all three reported strategies beat GUDHI end-to-end; on
+\texttt{grid-96x96-plateau}, \texttt{f-max} and \texttt{f-min} are essentially at parity;
+on \texttt{grid-128x128-plateau}, GUDHI is still faster; and on the flag/Rips-like case
+GUDHI remains clearly faster.  The reducer-only ratio remains favorable throughout, so the
+result does not argue against the Morse reduction itself.  It identifies view
+construction, Morse-sequence construction, and fused reference/reduction-input
+construction as the next integration bottlenecks.
+
+\input{docs/native_gudhi_stage_profile_quick_table.tex}
+
+\input{docs/native_gudhi_stage_profile_quick_prose.tex}
+
+\input{docs/native_gudhi_overhead_summary_table.tex}
+
+Table~\ref{tab:native-gudhi-overhead-summary} is the key integration diagnostic.  Inline
+local storage reduced view construction substantially, especially coboundary construction,
+and the dense low-dimensional face lookup reduces boundary construction on compact-handle
+cases.  Rank-based Morse candidate queues and one-pass rank/level/dimension setup reduce
+sequence-construction overhead in the important \texttt{f-max}/\texttt{f-min} rows.
+Byte-valued hot state flags remove \texttt{std::vector<bool>} proxy overhead in the
+sequence/reference construction loops.
+Inline storage for small annotations and the specialized \(\mathbb{Z}_2\) reducer update
+also reduced the reducer share.  Roughly three quarters of the direct native path is
+still spent before the reducer starts.
+This explains both the improvement and the remaining below-parity native rows: the compact
+backend avoids most of this \texttt{Simplex\_tree}-view construction cost, while the
+GUDHI-facing path must rebuild enough incidence and ordering information for the Morse
+frame.  The current evidence is therefore ``competitive on structured grids, still
+unresolved on flag/Rips-like inputs'', not a uniform speedup claim.
+
+The important observation is counterintuitive: \texttt{same-level-reduction} leaves almost every
+cell critical on these datasets, but it still improves running time.  For example, on
+Roadmap 100, \texttt{saturated} has $157{,}154$ critical cells and \texttt{same-level-reduction} has
+$166{,}470$, yet \texttt{same-level-reduction} is faster.  The instrumentation explains this:
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{lrrrrr}
+\toprule
+Strategy & Initial labels & Pivots & XOR input & XOR output & Morse (\us) \\
+\midrule
+saturated   & 208,954 & 152   & 89,676 & 50,040 & 89,505 \\
+\slred & 166,822 & 4,810 & 10,786 & 420    & 56,289 \\
+\bottomrule
+\end{tabular}
+\caption{Roadmap 100 reducer metrics.  The \slred strategy uses more pivots, but much
+smaller annotation updates; the critical-cell ratio alone is therefore misleading.}
+\label{tab:roadmap100-metrics}
+\end{table}
+
+\section{Strategy selection and profiling}
+
+The Roadmap experiment suggests that no single Morse sequence strategy should be hard-coded
+as the default.  We therefore added profiling tools that construct candidate Morse frames,
+record cheap work proxies, and compare the profile-selected strategy with the actually
+fastest measured strategy.  This section separates three related questions:
+\begin{itemize}
+  \item which cheap score should rank strategies;
+  \item which subset of strategies should be profiled;
+  \item whether structured families, especially image-like grids, need a special policy.
+\end{itemize}
+
+\subsection{Roadmap profile selection}
+We then tested the new cheap profile mode on the same Roadmap objects.  For each strategy,
+the profiler constructs the Morse sequence and compact reference-reduction input, but does
+not run pivot elimination.  It records the working set, initial annotation volume, boundary
+annotation work, and an estimated reducer-work score.  Table~\ref{tab:roadmap-profile}
+compares the profile-selected strategy with the strategy selected by full timings.
+
+\begin{table}[ht]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lllrrrr}
+\toprule
+Object & Profile best & Timing best & Penalty \% & GUDHI (\us) & Profile portfolio (ms) & Measured portfolio (ms) \\
+\midrule
+\texttt{random50-16d}  & \slred & \texttt{f-max} & 0.13 & 9,367  & 109.3 & 80.5 \\
+\texttt{random100-4d} & \slred & \slred         & 0.00 & 85,158 & 1,160.9 & 887.3 \\
+\texttt{senate104}    & \slred & \slred         & 0.00 & 90,015 & 1,109.9 & 922.8 \\
+\bottomrule
+\end{tabular}
+\caption{Profile-based strategy selection on selected PH-roadmap objects using the
+time-adjusted \texttt{profile-total-work} score.  On \texttt{random50-16d}, the measured
+best strategy is \texttt{f-max}, but the \texttt{same-level-reduction} penalty is only
+$0.13\%$.  The portfolio timings are sums over the nine candidate strategies, not timings
+for the selected strategy alone.}
+\label{tab:roadmap-profile}
+\end{table}
+
+This is encouraging, but it also shows a practical limitation of the current prototype:
+profiling avoids pivot elimination and barcode construction, yet profiling the full
+strategy portfolio is not always cheap enough on large Rips complexes.  The selector should
+therefore either profile a smaller candidate set or make the profile path cheaper.
+
+\subsection{Profile-versus-measured calibration}
+We added a benchmark mode that compares the profile-selected strategy with the actually
+fastest measured Morse strategy on each generated complex.  The output reports the profile
+choice, the measured best choice, the measured rank of the profile choice, the timing
+penalty, and diagnostic gaps in constructor time and measured reducer work.  We used it to
+compare the old \texttt{estimated-reducer-work} score with a new
+\texttt{profile-total-work} score, defined as estimated reducer work plus profiled frame
+time converted to nanoseconds.
+
+\begin{table}[ht]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llrrrrr}
+\toprule
+Dataset & Score & Cases & Match \% & Avg. pen. \% & Max pen. \% & Avg. rank \\
+\midrule
+base families & estimated work & 27 & 22.2 & 39.9 & 190.3 & 3.67 \\
+base families & total work     & 27 & 51.9 & 7.4  & 38.9  & 1.89 \\
+\midrule
+CAM $S^4$ Rips & estimated work & 9 & 44.4 & 3.2 & 15.9 & 1.89 \\
+CAM $S^4$ Rips & total work     & 9 & 11.1 & 6.5 & 38.0 & 2.78 \\
+\midrule
+Roadmap Rips & estimated work & 3 & 66.7 & 2.3 & 6.8 & 1.67 \\
+Roadmap Rips & total work     & 3 & 66.7 & 0.0 & 0.1 & 1.33 \\
+\bottomrule
+\end{tabular}
+\caption{Profile-versus-measured calibration with the full current strategy portfolio.
+The base-family experiment uses lower-star, plateau, and Rips examples at sizes $16$,
+$24$, and $32$ with three seeds.  The CAM experiment uses the downscaled sphere-Rips
+family, also at sizes $16$, $24$, and $32$.  The Roadmap experiment uses the three selected
+PH-roadmap Rips objects.}
+\label{tab:profile-calibration-base}
+\end{table}
+
+This mixed result is useful.  The time-adjusted score largely fixes the base-family
+failure mode, where the old score often chose a strategy with an attractive reduction input
+but too much construction overhead.  However, it is worse on the CAM-style sphere examples,
+where measured times are very close and the additional profile-time term perturbs the
+ranking.  The selector should therefore become family- or scale-aware rather than use a
+single global score.
+
+\subsection{Candidate-gate pilot}
+We then added experimental gates that profile only a small subset of the full strategy
+portfolio, while still measuring the full portfolio for evaluation.  The
+\texttt{family-aware} gate uses the benchmark family label.  The \texttt{shape-aware} gate
+uses only cheap complex-shape features recorded in the CSV: dimension counts, edge and
+triangle density, boundary/coboundary fan-in, and filtration-level concentration.
+Table~\ref{tab:profile-gate} compares these gates with full-portfolio profiling, using the
+\texttt{profile-total-work} score in all cases.
+
+\begin{table}[ht]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llrrrrr}
+\toprule
+Dataset & Gate & Profiled & Match \% & Avg. pen. \% & Max pen. \% & Profile overhead \% \\
+\midrule
+base families & full portfolio & 9.0 & 51.9 & 7.4 & 38.9 & 68.0 \\
+base families & family-aware   & 3.0 & 40.7 & 6.5 & 26.6 & 15.9 \\
+base families & shape-aware    & 3.8 & 29.6 & 12.2 & 109.8 & 18.8 \\
+\midrule
+CAM $S^4$ Rips & full portfolio & 9.0 & 11.1 & 6.5 & 38.0 & 51.9 \\
+CAM $S^4$ Rips & family-aware   & 3.0 & 33.3 & 5.9 & 26.2 & 11.1 \\
+CAM $S^4$ Rips & shape-aware    & 4.0 & 66.7 & 2.0 & 9.2 & 14.7 \\
+\midrule
+Roadmap Rips & full portfolio & 9.0 & 66.7 & 0.0 & 0.1 & 125.9 \\
+Roadmap Rips & family-aware   & 2.0 & 66.7 & 0.7 & 2.0 & 23.2 \\
+Roadmap Rips & shape-aware    & 2.0 & 33.3 & 5.4 & 15.4 & 18.1 \\
+\bottomrule
+\end{tabular}
+\caption{Candidate-gate pilot.  ``Profile overhead'' is the total profile time divided by
+the total measured Morse-portfolio time.  The family-aware gate sharply reduces profiling
+cost with small average penalties.  The first shape-aware gate helps on the CAM-style
+sphere-Rips examples, but is not robust on the base and Roadmap samples.}
+\label{tab:profile-gate}
+\end{table}
+
+These gates are not final selectors.  In this first pilot, the hand-written
+\texttt{family-aware} gate is the most useful simple control: it reduces profiling cost
+substantially and keeps penalties small.  The \texttt{shape-aware} gate is useful
+diagnostically because it identifies sparse CAM-style sphere-Rips examples, but its
+hand-written rules overreact on some small base examples and on Roadmap objects where
+\texttt{f-max} and \texttt{same-level-reduction} are close.  The shape fields are
+therefore worth keeping, but the rule should be learned or tabulated from more calibration
+data rather than tuned by hand.  The hold-out paragraph below is the first step in that
+direction.
+
+\subsubsection*{Tabulated candidate gates.}
+We added \texttt{calibrate\_profile\_gate.py} to turn calibration CSVs into candidate
+tables.  The utility groups \texttt{profile-vs-measured} rows by family and/or cheap shape
+bins, then reports which measured winners should be retained in each gate.  On the current
+calibration rows, a two-candidate family-level table covers all observed winners:
+\begin{itemize}
+  \item lower-star: \texttt{f-max}/\texttt{saturated};
+  \item plateau and synthetic Rips: \texttt{f-max}/\texttt{f-min};
+  \item CAM-style sphere Rips: \texttt{f-min}/\texttt{same-level-reduction};
+  \item Roadmap Rips: \texttt{f-max}/\texttt{same-level-reduction}.
+\end{itemize}
+This is a calibration hint, not a final selector.  The benchmark driver can consume such a
+table with \texttt{--profile-candidate-gate tabulated} and
+\texttt{--profile-candidate-table}, separating calibration runs from hold-out validation
+runs.  The calibration utility also supports \texttt{--include-candidates}, so conservative
+tables can retain guard strategies even when they were not winners in the calibration
+subset.
+
+\subsubsection*{Hold-out behavior.}
+A small fresh base-family hold-out on sizes $16$, $24$, and $32$ with seeds $8$ and $9$
+compared the current \texttt{family-aware} gate with an updated conservative tabulated
+gate.  Both gates had zero unavailable measured winners.  The conservative tabulated gate
+had lower aggregate average penalty, $4.5\%$ versus $6.9\%$, and lower aggregate profiling
+overhead, $12.4\%$ versus $15.0\%$.
+
+The tradeoff is concentrated in the plateau family: retaining \texttt{f-max},
+\texttt{f-min}, \texttt{saturated}, and \texttt{plateau-greedy} prevents excluded winners
+but raises plateau profiling overhead and did not improve the plateau selector on this
+small split.  A family-size tabulated gate reduced aggregate profiling overhead to
+$10.7\%$, but introduced one unavailable lower-star winner and increased plateau average
+penalty to $9.6\%$.  Thus finer table keys are useful diagnostically, but they do not by
+themselves solve the plateau selector problem.
+
+\subsection{Fair metric validation and selector audit}
+We then compared fixed \texttt{profile-total-work}, fixed \texttt{critical-ratio}, and two
+adaptive profile metrics.  The conservative \texttt{adaptive} metric uses
+\texttt{critical-ratio} except on Roadmap Rips, where it keeps
+\texttt{profile-total-work}.  The structured-grid variant,
+\texttt{adaptive-structured}, keeps the Roadmap rule, uses
+\texttt{profile-total-work} for image-grid filtrations, and leaves generic plateau and
+terrain cases on \texttt{critical-ratio}.  The first version of this comparison used
+separate benchmark runs for each metric, which made the conclusion vulnerable to timing
+noise.  We therefore added a fair multi-metric mode: a single
+\texttt{profile-vs-measured} run can now evaluate several profile metrics against the same
+profiles and the same measured portfolio timings.  The generated rows record both the
+requested profile metric and the effective metric used after resolving adaptive policies.
+They also record cheap shape and plateau descriptors, including level concentration,
+entropy, largest-level size, and simplex-to-vertex ratio, so future selector experiments
+can be analyzed without rerunning the measured portfolio.
+
+\input{docs/profile_metric_fair_validation_table.tex}
+
+\input{docs/profile_metric_fair_validation_prose.tex}
+
+After generating the report split, the extended hold-out, the plateau-focused hold-out,
+the terrain hold-out, the image-grid hold-out, and the larger image-grid stress split, we
+combine their aggregate rows into the selector-decision audit in
+Table~\ref{tab:selector-decision-summary}.
+
+\input{docs/profile_selector_decision_summary_table.tex}
+
+\input{docs/profile_selector_decision_summary_prose.tex}
+
+Table~\ref{tab:selector-decision-summary} treats \texttt{adaptive} as the current control.
+Under that convention, the only nonzero gap is the image-grid branch: the image hold-out is
+a switch candidate and the larger image stress split is a watch case.  If the same audit is
+rerun with \texttt{adaptive-structured} as the current metric, all ten aggregate validation
+scopes are keep/tie decisions.  This does not yet prove that the structured branch should
+become the public default, because the image-grid evidence is still only two aggregate
+splits, but it does change the interpretation: \texttt{adaptive-structured} is now the main
+selector candidate to validate next, not merely an exploratory diagnostic.
+
+\subsection{Image-grid selector diagnostic}
+
+To make the image-grid question more concrete, we also compare requested
+\texttt{critical-ratio} against the best requested total-work/time metric on each
+validation case, then summarize the margin against the cheap shape descriptors now stored
+in the profile CSVs.
+
+\input{docs/selector_feature_diagnostic_table.tex}
+
+\input{docs/selector_feature_diagnostic_prose.tex}
+
+Thus the image-like branch is a useful diagnostic and a credible promotion candidate, but
+not yet a default API policy.  The next calibration pass should regenerate all validation
+splits with the new descriptor columns and then test whether a stable threshold in scale,
+simplex-to-vertex ratio, or plateau concentration predicts the cases where
+total-work/time scoring is worth using.
+
+\section{Synthetic strategy comparisons}
+
+\subsection{Synthetic scale experiments}
+
+Table~\ref{tab:synthetic-scale} reports representative scale results for size $48$ in
+the synthetic families.  Timing values are averaged over three seeds in the benchmark
+summary, while the ratio column reports the median with $Q_1$--$Q_3$ underneath across
+those seeds.
+The table includes \texttt{f-max} and \texttt{f-min}; earlier drafts of this note only
+showed \texttt{saturated} and \slred in this section, which made the synthetic scale
+comparison lag behind the current strategy portfolio.
+
+\input{docs/synthetic_scale_table.tex}
+
+\input{docs/synthetic_scale_prose.tex}
+
+\subsection{Flooding sequence pilot}
+
+We then added the flooding family to the measured portfolio, including both mixed
+directions.  The current version uses priority queues inside each filtration level:
+maximal queues prefer higher-dimensional cells later in the level order, while minimal
+queues prefer lower-dimensional cells earlier in the level order.  Table~\ref{tab:flooding-pilot}
+reports a focused pilot on the lower-star, plateau, and Rips families with sizes $16$ and
+$24$, two seeds, and three timing repeats.  GUDHI was timed on the same filtered
+complexes.
+
+\begin{table}[ht]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrc}
+\toprule
+Strategy & Cases & Avg. simplices & Critical \% & Morse (\us) & GUDHI/Morse \\
+\midrule
+\texttt{f-max}           & 12 & 171.1 & 34.0 & 46.1 & \ratioiqr{1.17}{0.76}{1.41} \\
+\texttt{f-min}           & 12 & 171.1 & 34.0 & 47.9 & \ratioiqr{1.03}{0.76}{1.30} \\
+\texttt{saturated}       & 12 & 171.1 & 34.0 & 56.0 & \ratioiqr{0.87}{0.61}{1.04} \\
+\slred                   & 12 & 171.1 & 60.3 & 59.2 & \ratioiqr{0.76}{0.64}{0.87} \\
+\texttt{flooding-min}    & 12 & 171.1 & 34.0 & 74.4 & \ratioiqr{0.59}{0.42}{0.63} \\
+\texttt{plateau-greedy}  & 12 & 171.1 & 34.0 & 75.3 & \ratioiqr{0.55}{0.52}{0.67} \\
+\texttt{flooding-max}    & 12 & 171.1 & 34.0 & 76.6 & \ratioiqr{0.53}{0.49}{0.61} \\
+\texttt{flooding-minmax} & 12 & 171.1 & 34.0 & 77.5 & \ratioiqr{0.55}{0.45}{0.60} \\
+\texttt{flooding-maxmin} & 12 & 171.1 & 34.0 & 78.0 & \ratioiqr{0.53}{0.49}{0.57} \\
+\bottomrule
+\end{tabular}
+\caption{Base-family benchmark after adding paper-faithful \texttt{f-max} and
+\texttt{f-min}.  These two strategies produce the same critical-cell ratio as
+\texttt{saturated} and the flooding variants on these examples, but avoid the heavier
+priority-queue overhead of the earlier flooding implementation.  The GUDHI/Morse column is
+the case-level median with $Q_1$--$Q_3$ underneath over the 12 benchmark cases.}
+\label{tab:flooding-pilot}
+\end{table}
+
+The paired comparison between \texttt{flooding-minmax} and
+\texttt{flooding-maxmin} remains diagnostically useful: the distinction is real at the
+sequence level, but the first extremal priority policy did not create a substantially
+different Morse complex on these benchmark families.  The new \texttt{f-max} and
+\texttt{f-min} implementations clarify the situation.  The paper-faithful Max/Min loops
+give the same critical-cell ratio as the flooding variants here, but with much lower
+constructor overhead.
+
+\section{Coreference experiment}
+
+Because CAM is cohomological in spirit, we also implemented a coreference path.  The goal
+was to test whether the natural dual of same-level reduction would behave more like a cohomological
+algorithm.  The result was negative for the current data structure and recurrence.
+
+Table~\ref{tab:coreference-roadmap} compares the two directions for \texttt{same-level-reduction}
+on the Roadmap datasets.  The reference direction uses the usual boundary-based recurrence;
+the coreference direction uses the coboundary-based recurrence.
+
+\begin{table}[ht]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{tabular}{llrrrrr}
+\toprule
+Dataset & Direction & Total (\us) & Std/Morse (point) & Workset & Initial labels & XOR input \\
+\midrule
+Roadmap 50  & reference   & 5,295    & 5.32 & 20,799  & 20,916  & 2,788 \\
+Roadmap 50  & coreference & 44,186   & 0.64 & 20,870  & 25,880  & 764,215 \\
+\midrule
+Roadmap 100 & reference   & 54,043   & 11.46 & 166,610 & 166,822 & 10,786 \\
+Roadmap 100 & coreference & 1,430,049 & 0.43 & 166,747 & 186,169 & 17,732,185 \\
+\midrule
+Roadmap 104 & reference   & 60,462   & 2.39 & 182,092 & 182,267 & 11,117 \\
+Roadmap 104 & coreference & 564,029  & 0.26 & 182,203 & 199,965 & 3,307,174 \\
+\bottomrule
+\end{tabular}
+\caption{Reference versus coreference reduction for the \texttt{same-level-reduction} sequence.
+The coreference path is correct, but its annotation update volume explodes.  Each ratio is
+a single aggregate observation for the corresponding dataset and direction.}
+\label{tab:coreference-roadmap}
+\end{table}
+
+The reason is structural.  Boundaries are small and dimension-bounded: in a two-dimensional
+complex an edge has two boundary vertices and a triangle has three boundary edges.
+Coboundaries are not bounded in this way.  In a dense Rips complex, a vertex or an edge can
+have many cofaces.  Moreover, a simplex that is free among the currently active same-level
+cofaces need not be globally free in the whole filtered complex.  Higher-level cofaces may
+already carry nontrivial annotations in the coreference recurrence.  Thus the dual update
+\[
+  C(\tau)=\bigoplus_{\eta\in \mathrm{cobd}(\sigma),\ \eta\ne\tau} C(\eta)
+\]
+can accumulate very large annotations.  On Roadmap 100, the total XOR input increases from
+$10{,}786$ in the reference direction to $17{,}732{,}185$ in the coreference direction.
+
+This should not be interpreted as evidence against CAM.  CAM is a compressed annotation
+matrix algorithm for persistent cohomology: it processes inserted simplices and computes
+annotations of their boundaries.  It is dual/cohomological, but it is not the same as the
+naive coboundary-based coreference recurrence above.  Our coreference experiment shows that
+this particular dual Morse recurrence is a poor match for dense Rips coboundaries.
+
+\section{Interpretation and next steps}
+
+The experiments point to five conclusions.
+
+\subsection{Critical-cell ratio is not sufficient}
+A sequence with fewer critical cells is not necessarily faster.  The Roadmap experiments
+show that \texttt{same-level-reduction} can be faster despite making almost every simplex
+critical.  The fair multi-metric validation also shows the other side of the same issue:
+\texttt{critical-ratio} is a good cheap selector on the base synthetic families in the
+current split, but it fails on the Roadmap Rips objects.  The useful predictors are
+therefore family-dependent.  On dense Roadmap-style Rips complexes, total profiled work
+and annotation volume are more reliable than the critical-cell count alone.
+
+\subsection{Strategy profiling is a useful selection layer}
+The Python interface now includes both a measured portfolio mode and a cheaper profile
+mode.  The profile mode constructs candidate Morse frames and records cheap shape and
+reducer-work features before full timing.  The current practical control is the
+\texttt{family-aware} candidate gate combined with the experimental \texttt{adaptive}
+profile metric: it uses \texttt{critical-ratio} except on Roadmap Rips, where it uses
+\texttt{profile-total-work}.  Table~\ref{tab:fair-profile-metrics} is now
+generated directly from the validation CSVs, and the accompanying generated paragraph is
+derived from the same rows.  The selector-decision audit then combines the report,
+extended hold-out, plateau-focused hold-out, terrain hold-out, image-grid hold-out, and
+image-grid stress summaries into a single keep/watch/switch table.  This makes the result reproducible and
+prevents the report from drifting away from the benchmark artifacts.  It is still a
+selector experiment, not a final theorem: the image-grid splits currently favor the
+structured adaptive branch, and the alternative audit says that \texttt{adaptive-structured}
+would remove the only current aggregate selector gap.  The right conclusion is therefore
+stronger than in the previous draft but still cautious: keep \texttt{adaptive} as the
+control, and validate \texttt{adaptive-structured} as the next candidate before making it a
+user-facing default.
+
+\subsection{Native GUDHI integration is useful and now partly competitive}
+The direct \texttt{Gudhi::Simplex\_tree} view has changed from a diagnostic prototype into
+a credible integration path.  It avoids the large cost of importing the tree into the
+compact owning complex, and the reducer kernel is faster than GUDHI persistence once the
+Morse input has been built.  In the current Release native benchmark, the direct path is
+faster than GUDHI on the smaller structured grid and essentially tied on the medium grid,
+but GUDHI remains faster on the flag/Rips-like case and on the largest grid.  The
+integration claim should therefore be phrased as ``competitive on structured grids, not
+yet uniformly faster'', rather than as a global speedup claim.  The remaining engineering
+bottleneck is not only the reducer: a large share of the direct native path is still spent
+before reduction, in view construction and Morse-frame construction.
+
+\subsection{Reference reduction is the useful direction for now}
+The native coreference path is correct, but it is much slower on the Rips-style datasets
+because coboundary fan-in causes large annotation diffusion.  The promising path is
+currently to construct good Morse sequences and then use the reference reduction, not the
+naive coboundary-based coreference recurrence.  This does not contradict CAM: CAM is a
+compressed cohomology algorithm that processes inserted simplices through boundary
+annotations, whereas the coreference experiment here is a different dual recurrence.
+
+\subsection{Reproducibility is now part of the experiment}
+The fair profile-selection validation is no longer just a list of shell commands in the
+notebook history.  The fair-validation driver records the validation splits, timing
+parameters, candidate gate, profile metrics, artifact paths, and command recipe in a
+Markdown manifest.  This manifest should be regenerated whenever the validation CSVs are
+regenerated.
+
+\subsection{Limitations}
+
+The present experiments are useful for choosing the next technical direction, but they
+should not yet be read as final performance claims.
+\begin{itemize}
+  \item The Roadmap comparison uses selected truncated Rips objects, not a full
+        reproduction of the Roadmap benchmark study.
+  \item GUDHI is used as a strong external persistence baseline on the same filtered
+        complexes.  It is a CAM-style comparison point, not a direct timing of the
+        original CAM implementation.
+  \item The native GUDHI-view result is encouraging as an integration route but remains
+        below parity end-to-end in the Release benchmark.  The direct view is much faster
+        than compact import, and the reducer-only ratios are favorable, but pre-reducer
+        construction costs dominate.
+  \item Several synthetic timings are in the microsecond range.  At that scale, small
+        changes in machine state can change the measured winner, so selector conclusions
+        must be based on aggregate behavior and hold-out validation.
+  \item The current C++ core is optimized enough to compare strategies, but it is not yet
+        an optimized large-complex construction library.
+  \item The profile selector is still experimental.  The structured image-grid branch is
+        now the leading candidate to validate, but the current evidence does not yet
+        justify promoting it to the default API policy.
+  \item Perseus export is kept as an optional barcode-validation path.  We do not use
+        Perseus timings in the main comparison because command-line/file-I/O timings would
+        not be directly comparable with the in-process benchmark timings.
+\end{itemize}
+
+\subsection{Discussion questions for Gilles Bertrand}
+
+The current results suggest the following discussion questions.
+\begin{enumerate}
+  \item Is annotation volume a more appropriate objective than critical-cell count for the
+        kind of Morse persistence pipeline tested here?
+  \item Can one predict, from local combinatorics of a filtration level, whether a
+        same-level sequence will keep reference annotations small?
+  \item Which Morse sequence construction should be implemented next in the shared
+        strategy interface: another theoretical Max/Min variant, a refined flooding rule,
+        or a more global plateau method?
+  \item What would constitute a fair direct comparison with CAM: a new implementation of
+        CAM, a comparison with an existing cohomology implementation, or a benchmark framed
+        only around compressed annotations?
+  \item Are structured plateau examples, such as terrain and image-grid filtrations,
+        central enough to drive the selector design, or should
+        \texttt{adaptive-structured} remain an explicitly experimental option?
+  \item What additional native GUDHI-view benchmarks would make the integration evidence
+        convincing: more flag/clique examples, larger grid filtrations, Roadmap-style Rips
+        objects constructed directly in a \texttt{Gudhi::Simplex\_tree}, or all of these?
+  \item Which additional benchmark families would best reduce overfitting to the current
+        random, Roadmap, terrain, and image-grid splits?
+\end{enumerate}
+
+\subsection{Current recommendation}
+
+The recommended next technical step is to keep the original adaptive selector with the
+family-aware gate as the experimental control, use the decision-summary artifact as the
+selector audit, and promote \texttt{adaptive-structured} to the next validation candidate
+before changing the default user-facing API.  In parallel, the native GUDHI-view benchmark
+should be broadened because the current Release native run shows partial parity on
+structured grids and also identifies concrete pre-reducer bottlenecks that still prevent a
+uniform performance claim.
+In particular, the experimental pipeline should:
+\begin{enumerate}
+  \item keep \texttt{family-aware} plus \texttt{adaptive} as the practical experimental
+        selector for now, while reporting the effective metric used in every CSV row;
+  \item validate \texttt{adaptive-structured} on fresh image-grid, terrain, plateau, and
+        Rips splits, because the current aggregate audit removes the image-grid gap when
+        that branch is treated as the active metric;
+  \item use \texttt{run\_fair\_profile\_validation.py} as the canonical validation entry
+        point, so the CSVs, summaries, generated LaTeX fragments, and manifest stay
+        synchronized;
+  \item continue expanding hold-out validation before replacing the current default
+        selector, especially on structured grid/image-like filtrations where the current
+        evidence favors a structured branch but with scale-dependent margins;
+  \item keep the plateau-focused validation preset as a diagnostic control; the current
+        run does not justify switching plateau cases to \texttt{profile-total-work};
+  \item treat \texttt{terrain-holdout}, \texttt{image-holdout}, and
+        \texttt{image-stress} as controls for any future structured branch before it
+        becomes an API default;
+  \item use the shape and plateau fields, including level concentration, entropy,
+        largest-level size, and simplex-to-vertex ratio, to learn or tabulate selector
+        rules, but treat tabulated gates as diagnostics until they survive fresh
+        validation;
+  \item keep Perseus export as an optional barcode-validation path rather than a timing
+        baseline at this stage;
+  \item keep GUDHI as the main external baseline for the current simplicial experiments,
+        and extend the native \texttt{Simplex\_tree} validation beyond the current
+        structured-grid and flag validation cases;
+  \item keep the sequence-constructor interface open so future algorithms, including
+        flooding variants and newer Morse-sequence schemes, can be added to the same
+        profile-and-select loop.
+\end{enumerate}
+
+\begin{thebibliography}{9}
+
+\bibitem{cam}
+J.-D. Boissonnat, T. K. Dey, and C. Maria.
+\newblock The Compressed Annotation Matrix: an Efficient Data Structure for Computing
+Persistent Cohomology.
+\newblock arXiv:1304.6813, 2013.
+
+\bibitem{roadmap}
+N. Otter, M. A. Porter, U. Tillmann, P. Grindrod, and H. A. Harrington.
+\newblock A roadmap for the computation of persistent homology.
+\newblock \emph{EPJ Data Science}, 6, 2017.
+
+\end{thebibliography}
+
+\end{document}

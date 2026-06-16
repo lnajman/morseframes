@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use MorseFrames, please cite the repository and the associated paper once available."
+title: "MorseFrames"
+authors:
+  - family-names: "Najman"
+    given-names: "Laurent"
+date-released: 2026-06-16
+version: "0.1.0"
+repository-code: "https://github.com/lnajman/morseframes"
+license: "MIT"
+

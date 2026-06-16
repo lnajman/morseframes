@@ -1,0 +1,57 @@
+#pragma once
+
+/** \file gudhi/Morse_persistence/diagram.h
+ *  \brief Persistence diagram types returned by Morse persistence.
+ */
+
+#include <vector>
+
+#include "morseframes/reference_persistence.hpp"
+
+namespace Gudhi {
+namespace morse_persistence {
+
+/** \brief Contiguous local simplex identifier used by the Morse reducer.
+ *
+ *  \ingroup morse_persistence
+ */
+using Simplex_id = morseframes::SimplexId;
+
+/** \brief Vertex identifier used in canonical simplex vertex tuples.
+ *
+ *  \ingroup morse_persistence
+ */
+using Vertex_id = morseframes::VertexId;
+
+/** \brief Index of a distinct filtration value.
+ *
+ *  \ingroup morse_persistence
+ */
+using Level_id = morseframes::LevelId;
+
+/** \brief Sentinel used when no simplex id is available. */
+constexpr Simplex_id invalid_simplex = morseframes::kInvalidSimplex;
+
+/** \brief Finite persistence interval with birth and death simplex ids. */
+using Persistence_pair = morseframes::PersistencePair;
+
+/** \brief Essential persistence interval with a birth simplex id. */
+using Essential_interval = morseframes::EssentialInterval;
+
+/** \brief Persistence diagram over \f$\mathbb Z_2\f$.
+ *
+ *  \ingroup morse_persistence
+ *
+ *  Finite intervals may include zero-length intervals on plateaus. Use
+ *  `off_diagonal_pairs()` when comparing public persistent features.
+ */
+using Persistence_diagram = morseframes::PersistenceDiagram;
+
+/** \brief Return finite intervals whose birth and death filtration values differ. */
+inline std::vector<Persistence_pair> off_diagonal_pairs(
+    const Persistence_diagram& diagram) {
+  return morseframes::off_diagonal_pairs(diagram);
+}
+
+}  // namespace morse_persistence
+}  // namespace Gudhi

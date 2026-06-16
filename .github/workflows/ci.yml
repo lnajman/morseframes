@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Configure C++
+        run: cmake -S . -B build -DMORSEFRAMES_BUILD_GUDHI_TOOLS=OFF
+
+      - name: Build C++
+        run: cmake --build build --parallel
+
+      - name: Test C++
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Install Python test dependencies
+        run: python -m pip install pytest
+
+      - name: Test Python
+        run: PYTHONPATH=python python -m pytest python/tests
+

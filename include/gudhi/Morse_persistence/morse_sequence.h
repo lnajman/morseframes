@@ -1,0 +1,34 @@
+#pragma once
+
+/** \file gudhi/Morse_persistence/morse_sequence.h
+ *  \brief Morse sequence aliases used by the public GUDHI-shaped API.
+ */
+
+#include "morseframes/morse_sequence.hpp"
+
+namespace Gudhi {
+namespace morse_persistence {
+
+/** \brief Type of one Morse sequence step.
+ *
+ *  \ingroup morse_persistence
+ */
+using Morse_step_type = morseframes::MorseStepType;
+
+/** \brief One step of a same-level Morse sequence.
+ *
+ *  \ingroup morse_persistence
+ *
+ *  A step is either a critical simplex or a same-level regular face/coface
+ *  pair `(sigma, tau)`.
+ */
+using Morse_step = morseframes::MorseStep;
+
+/** \brief Ordered Morse sequence used by the reference-map recurrence.
+ *
+ *  \ingroup morse_persistence
+ */
+using Morse_sequence = morseframes::MorseSequence;
+
+}  // namespace morse_persistence
+}  // namespace Gudhi

@@ -98,6 +98,7 @@ Detailed follow-up notes:
 
 ```text
 docs/gudhi_upstream_file_map.md
+docs/gudhi_maintainer_cover_note.md
 docs/gudhi_maintainer_scope_note.md
 upstream/gudhi/README.md
 upstream/gudhi/MANIFEST.md
@@ -180,6 +181,12 @@ upstream/gudhi/README.md
 upstream/gudhi/MANIFEST.md
 ```
 
-The next mechanical step is to decide whether to generate an actual patch file
-from this clean GUDHI git checkout, or keep this as a copy-ready staging bundle
-until the maintainer-facing scope is agreed.
+The maintainer-facing cover note is now recorded in:
+
+```text
+docs/gudhi_maintainer_cover_note.md
+```
+
+The next mechanical step is to decide whether to open a draft discussion/PR
+from this clean GUDHI-shaped patch, or first polish the C++ public API names and
+result object based on the cover-note questions.

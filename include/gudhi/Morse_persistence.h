@@ -7,18 +7,9 @@
  *  kernels. The main entry point is
  *  `Gudhi::morse_persistence::compute_morse_persistence`.
  *
- *  \defgroup morse_persistence Morse persistence
- *  \brief Same-level Morse sequence, reference-map, and persistence routines.
+ *  \ingroup morse_persistence
  *
- *  The module computes Morse persistence directly on a filtered
- *  `Gudhi::Simplex_tree` without refining plateaus into lower-star filtrations.
- *  Equal filtration values are treated as genuine levels where same-level
- *  face/coface pairings may be selected.
- *
- *  The first public GUDHI-facing API computes ordinary persistence over
- *  \f$\mathbb Z_2\f$. Prime-field kernels are kept in the prototype layer for
- *  experiments and can be promoted later without changing the Simplex-tree view
- *  abstraction.
+ *  Include this header to use the public Morse persistence API.
  */
 
 #include "gudhi/Morse_persistence/complex_view.h"

@@ -18,6 +18,7 @@ The first GUDHI-facing bundle includes:
   `src/Morse_persistence/include/gudhi/Morse_persistence/`;
 - private implementation headers under
   `src/Morse_persistence/include/gudhi/Morse_persistence/internal/`;
+- one Doxygen intro page under `src/Morse_persistence/doc/`;
 - one `Simplex_tree` example;
 - one maintainer-style C++ test matrix.
 
@@ -47,6 +48,8 @@ The copy targets are listed in `MANIFEST.md`. In short:
   `src/Morse_persistence/example/CMakeLists.txt`;
 - copy `upstream/gudhi/src/Morse_persistence/test/` to
   `src/Morse_persistence/test/`;
+- copy `upstream/gudhi/src/Morse_persistence/doc/` to
+  `src/Morse_persistence/doc/`;
 - add `add_gudhi_module(Morse_persistence)` to the top-level GUDHI module list.
 
 ## Clean-Checkout Validation

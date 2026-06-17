@@ -66,6 +66,20 @@ The implementation namespace is:
 Gudhi::morse_persistence::internal
 ```
 
+## Documentation
+
+Copy:
+
+```text
+upstream/gudhi/src/Morse_persistence/doc/Intro_morse_persistence.h
+```
+
+to:
+
+```text
+src/Morse_persistence/doc/Intro_morse_persistence.h
+```
+
 ## Example
 
 Copy:

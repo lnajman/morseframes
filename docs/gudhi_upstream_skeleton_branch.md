@@ -17,6 +17,7 @@ The first GUDHI-facing patch should include:
 - fused Morse sequence and reference-map construction;
 - ordinary persistence over `Z2`;
 - local simplex ids mapped back to `Simplex_tree::Simplex_handle`;
+- a minimal Doxygen intro page;
 - a small example;
 - a maintainer-style C++ test matrix.
 
@@ -79,6 +80,12 @@ In the current GUDHI development layout this is staged at:
 
 ```text
 src/Morse_persistence/example/example_morse_persistence_from_simplex_tree.cpp
+```
+
+The module intro page is staged at:
+
+```text
+upstream/gudhi/src/Morse_persistence/doc/Intro_morse_persistence.h
 ```
 
 The current adapter test matrix is:

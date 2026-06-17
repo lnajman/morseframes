@@ -215,6 +215,27 @@ The wrapper enum now follows this conservative choice. The internal kernel still
 keeps these strategies so the experimental report and benchmarks can continue to
 compare them while the strategy taxonomy is settled.
 
+## Documentation files
+
+Add a Doxygen intro page:
+
+```text
+src/Morse_persistence/doc/Intro_morse_persistence.h
+```
+
+The minimal first page states:
+
+- the module computes ordinary persistence via same-level Morse sequences and
+  reference maps;
+- it works directly on `Gudhi::Simplex_tree`;
+- plateaus are handled directly, without lower-star refinement;
+- the first public coefficient field is `Z2`;
+- simplex handles in the result are valid only while the input Simplex-tree is
+  alive and structurally unchanged.
+
+The first staging patch does not update the generated
+`src/common/doc/examples.h` file manually.
+
 ## Example files
 
 The prototype candidate example is:
@@ -313,31 +334,6 @@ local ids map back to non-null Simplex_tree handles
 For plateau examples, do not make zero-length interval multiplicity part of the
 public test contract. Valid reductions may represent diagonal intervals
 differently.
-
-## Documentation files
-
-Add a Doxygen intro page:
-
-```text
-doc/Morse_persistence/Intro_morse_persistence.h
-```
-
-The minimal first page should state:
-
-- the module computes persistence via same-level Morse sequences and reference
-  maps;
-- it works directly on `Gudhi::Simplex_tree`;
-- plateaus are handled directly, without lower-star refinement;
-- the first public coefficient field is `Z2`;
-- the first target is ordinary persistence, not extended persistence;
-- simplex handles in the result are valid only while the input Simplex-tree is
-  alive and structurally unchanged.
-
-Add the example to:
-
-```text
-doc/common/examples.h
-```
 
 under a new `Morse_persistence` section, unless GUDHI's example-list generator
 is run instead.

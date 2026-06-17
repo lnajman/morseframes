@@ -57,6 +57,20 @@ The copied internal headers are intentionally private implementation details.
 The public surface should stay under `Gudhi::morse_persistence`; the internal
 code lives under `Gudhi::morse_persistence::internal`.
 
+## Documentation
+
+Copy the module intro page:
+
+```text
+upstream/gudhi/src/Morse_persistence/doc/Intro_morse_persistence.h
+```
+
+to:
+
+```text
+src/Morse_persistence/doc/Intro_morse_persistence.h
+```
+
 ## Example
 
 Copy the upstream-shaped example:

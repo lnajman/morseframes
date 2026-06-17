@@ -349,6 +349,7 @@ struct Options {
   bool quick = false;
   bool large = false;
   bool lean = false;
+  bool canonical_order = false;
   std::vector<std::string> strategies = {
       "same-level-reduction",
       "f-max",
@@ -360,10 +361,13 @@ struct Options {
 void print_usage(const char* program) {
   std::cerr
       << "Usage: " << program
-      << " [--quick|--large] [--lean] [--repeats N] [--strategy NAME]\n"
+      << " [--quick|--large] [--lean] [--canonical-order] [--repeats N]"
+      << " [--strategy NAME]\n"
       << "\n"
       << "Prints CSV rows comparing GUDHI persistent cohomology, the direct\n"
-      << "Gudhi::Simplex_tree Morse view, and import into FilteredSimplicialComplex.\n";
+      << "Gudhi::Simplex_tree Morse view, and import into FilteredSimplicialComplex.\n"
+      << "By default the direct view preserves GUDHI order inside each level/dimension;\n"
+      << "--canonical-order restores lexicographic tie ordering.\n";
 }
 
 Options parse_options(int argc, char** argv) {
@@ -392,6 +396,10 @@ Options parse_options(int argc, char** argv) {
     }
     if (argument == "--lean") {
       options.lean = true;
+      continue;
+    }
+    if (argument == "--canonical-order") {
+      options.canonical_order = true;
       continue;
     }
     if (argument == "--repeats") {
@@ -496,10 +504,14 @@ void run_case(const CaseSpec& spec, const Options& options) {
   });
 
   const auto& simplex_tree = generated.value.simplex_tree;
+  const auto order_policy =
+      options.canonical_order
+          ? morseframes::SimplexTreeFiltrationOrder::CanonicalLexicographic
+          : morseframes::SimplexTreeFiltrationOrder::PreserveInputWithinDimension;
 
   for (int repeat = 0; repeat < options.repeats; ++repeat) {
     const auto view = time_value([&]() {
-      return morseframes::SimplexTreeComplexView<GudhiSimplexTree>(simplex_tree);
+      return morseframes::SimplexTreeComplexView<GudhiSimplexTree>(simplex_tree, order_policy);
     });
     const auto compact = time_value([&]() {
       return morseframes::filtered_complex_from_simplex_tree(simplex_tree);

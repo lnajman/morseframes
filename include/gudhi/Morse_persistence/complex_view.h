@@ -20,6 +20,9 @@ namespace morse_persistence {
 template <class SimplexTree>
 using Simplex_tree_view = morseframes::SimplexTreeComplexView<SimplexTree>;
 
+/** \brief Same-level tie order used when adapting a Simplex-tree. */
+using Simplex_tree_filtration_order = morseframes::SimplexTreeFiltrationOrder;
+
 /** \brief Owning filtered complex used for validation and imports.
  *
  *  \ingroup morse_persistence
@@ -28,8 +31,11 @@ using Filtered_simplicial_complex = morseframes::FilteredSimplicialComplex;
 
 /** \brief Build a read-only Morse view over an existing Simplex-tree. */
 template <class SimplexTree>
-Simplex_tree_view<SimplexTree> make_simplex_tree_view(const SimplexTree& simplex_tree) {
-  return Simplex_tree_view<SimplexTree>(simplex_tree);
+Simplex_tree_view<SimplexTree> make_simplex_tree_view(
+    const SimplexTree& simplex_tree,
+    Simplex_tree_filtration_order order_policy =
+        Simplex_tree_filtration_order::PreserveInputWithinDimension) {
+  return Simplex_tree_view<SimplexTree>(simplex_tree, order_policy);
 }
 
 /** \brief Copy a Simplex-tree into an owning filtered complex.

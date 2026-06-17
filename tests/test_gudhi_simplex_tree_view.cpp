@@ -344,9 +344,28 @@ void validate_strategy_on_simplex_tree(const GudhiSimplexTree& simplex_tree,
          sequence_signature(compact, compact_frame.sequence));
 }
 
+void validate_input_order_strategy_on_simplex_tree(
+    const GudhiSimplexTree& simplex_tree,
+    morseframes::MorseSequenceStrategy strategy) {
+  morseframes::SimplexTreeComplexView<GudhiSimplexTree> view(
+      simplex_tree,
+      morseframes::SimplexTreeFiltrationOrder::PreserveInputWithinDimension);
+  const auto compact = morseframes::filtered_complex_from_simplex_tree(simplex_tree);
+  const auto standard = morseframes::compute_standard_z2_persistence(compact);
+
+  const auto direct_frame = morseframes::build_morse_reference_frame(view, strategy);
+  validate_sequence_shape(view, direct_frame.sequence);
+  validate_reference_recurrence(view, direct_frame.sequence, direct_frame.references);
+
+  const auto direct_diagram = compute_diagram_from_frame(view, direct_frame);
+  CHECK(off_diagonal_barcode_key(direct_diagram) == off_diagonal_barcode_key(standard));
+  CHECK(essential_barcode_key(direct_diagram) == essential_barcode_key(standard));
+}
+
 void validate_public_strategies_on_simplex_tree(const GudhiSimplexTree& simplex_tree) {
   for (const auto& strategy : public_maintainer_strategies()) {
     validate_strategy_on_simplex_tree(simplex_tree, strategy);
+    validate_input_order_strategy_on_simplex_tree(simplex_tree, strategy);
   }
 }
 

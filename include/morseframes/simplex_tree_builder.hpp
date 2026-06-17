@@ -177,6 +177,13 @@ using SmallSimplexIdList = SmallIdList<SimplexId, InlineCapacity>;
 template <std::size_t InlineCapacity>
 using SmallVertexIdList = SmallIdList<VertexId, InlineCapacity>;
 
+enum class SimplexTreeFiltrationOrder {
+  /** Sort equal-filtration/equal-dimension simplices lexicographically by vertices. */
+  CanonicalLexicographic,
+  /** Keep the Simplex-tree filtration order inside each dimension bucket. */
+  PreserveInputWithinDimension,
+};
+
 enum class DuplicateFiltrationPolicy {
   Min,
   Strict,
@@ -440,8 +447,11 @@ class SimplexTreeComplexView {
     bool boundary_used_dense_edge_lookup = false;
   };
 
-  explicit SimplexTreeComplexView(const SimplexTree& simplex_tree)
-      : simplex_tree_(&simplex_tree) {
+  explicit SimplexTreeComplexView(
+      const SimplexTree& simplex_tree,
+      SimplexTreeFiltrationOrder order_policy =
+          SimplexTreeFiltrationOrder::CanonicalLexicographic)
+      : simplex_tree_(&simplex_tree), order_policy_(order_policy) {
     build();
   }
 
@@ -1103,6 +1113,11 @@ class SimplexTreeComplexView {
     build_metrics_.order_bucket_nanoseconds =
         elapsed_nanoseconds(after_size, after_bucket);
 
+    auto emit_bucket = [&](auto begin, auto end, LevelId level) {
+      filtration_order_.insert(filtration_order_.end(), begin, end);
+      level_buckets_[level].insert(level_buckets_[level].end(), begin, end);
+    };
+
     auto emit_sorted_bucket = [&](auto begin, auto end, auto&& vertices_less, LevelId level) {
       bool already_sorted = true;
       for (auto it = begin + (begin == end ? 0 : 1); it != end; ++it) {
@@ -1114,8 +1129,7 @@ class SimplexTreeComplexView {
       if (!already_sorted) {
         std::sort(begin, end, vertices_less);
       }
-      filtration_order_.insert(filtration_order_.end(), begin, end);
-      level_buckets_[level].insert(level_buckets_[level].end(), begin, end);
+      emit_bucket(begin, end, level);
     };
 
     for (LevelId level = 0; level < level_values_.size(); ++level) {
@@ -1125,6 +1139,10 @@ class SimplexTreeComplexView {
                      static_cast<std::ptrdiff_t>(bucket_offsets[bucket]);
         auto end = bucketed_simplices.begin() +
                    static_cast<std::ptrdiff_t>(bucket_offsets[bucket + 1]);
+        if (order_policy_ == SimplexTreeFiltrationOrder::PreserveInputWithinDimension) {
+          emit_bucket(begin, end, level);
+          continue;
+        }
         switch (dimension) {
           case 0:
             emit_sorted_bucket(
@@ -1204,6 +1222,8 @@ class SimplexTreeComplexView {
   }
 
   const SimplexTree* simplex_tree_ = nullptr;
+  SimplexTreeFiltrationOrder order_policy_ =
+      SimplexTreeFiltrationOrder::CanonicalLexicographic;
   mutable std::unordered_map<std::vector<VertexId>, SimplexId, VectorHash> simplex_to_id_;
   mutable bool simplex_lookup_built_ = false;
   std::vector<Record> simplices_;

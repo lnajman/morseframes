@@ -4,7 +4,7 @@
  *  \brief Morse sequence aliases used by the public GUDHI-shaped API.
  */
 
-#include "morseframes/morse_sequence.hpp"
+#include "gudhi/Morse_persistence/internal/morse_sequence.h"
 
 namespace Gudhi {
 namespace morse_persistence {

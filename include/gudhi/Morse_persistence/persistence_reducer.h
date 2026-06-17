@@ -10,7 +10,7 @@
 
 #include "gudhi/Morse_persistence/diagram.h"
 #include "gudhi/Morse_persistence/reference_map.h"
-#include "morseframes/simplex_tree_morse.hpp"
+#include "gudhi/Morse_persistence/internal/simplex_tree_morse.h"
 
 namespace Gudhi {
 namespace morse_persistence {

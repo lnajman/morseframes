@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "morseframes/morse_reference_api.hpp"
+#include "gudhi/Morse_persistence/internal/morse_reference_api.h"
 
 namespace Gudhi {
 namespace morse_persistence {

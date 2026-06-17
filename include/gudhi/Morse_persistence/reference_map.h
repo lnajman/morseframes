@@ -12,7 +12,7 @@
 #include "gudhi/Morse_persistence/diagram.h"
 #include "gudhi/Morse_persistence/morse_sequence.h"
 #include "gudhi/Morse_persistence/strategy.h"
-#include "morseframes/reference_persistence.hpp"
+#include "gudhi/Morse_persistence/internal/reference_persistence.h"
 
 namespace Gudhi {
 namespace morse_persistence {

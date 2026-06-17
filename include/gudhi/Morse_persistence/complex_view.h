@@ -4,7 +4,7 @@
  *  \brief Read-only views used to run Morse persistence on existing complexes.
  */
 
-#include "morseframes/simplex_tree_builder.hpp"
+#include "gudhi/Morse_persistence/internal/simplex_tree_builder.h"
 
 namespace Gudhi {
 namespace morse_persistence {

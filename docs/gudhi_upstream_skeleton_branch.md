@@ -56,6 +56,16 @@ include/gudhi/Morse_persistence/reference_map.h
 include/gudhi/Morse_persistence/strategy.h
 ```
 
+The public wrapper now reaches the prototype kernels only through:
+
+```text
+include/gudhi/Morse_persistence/internal/
+```
+
+Those internal files are forwarding headers in this branch. In an upstream GUDHI
+patch, they should be replaced by the copied kernel headers with includes and
+namespaces adjusted to GUDHI conventions.
+
 The upstream-shaped example is:
 
 ```text
@@ -92,14 +102,14 @@ morseframes_benchmark_gudhi_view
 
 ## Next Mechanical Step
 
-The actual upstream patch should mechanically move the current prototype kernel
-headers used by the wrapper into:
+The actual upstream patch should mechanically replace the forwarding headers in:
 
 ```text
 include/gudhi/Morse_persistence/internal/
 ```
 
-and rewrite internal includes from `morseframes/...` to
+with the current prototype kernel headers used by the wrapper, and rewrite their
+internal includes from `morseframes/...` to
 `gudhi/Morse_persistence/internal/...`.
 
 That move should be done after the public API and test matrix are agreed upon,

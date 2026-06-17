@@ -6,7 +6,7 @@
 
 #include <vector>
 
-#include "morseframes/reference_persistence.hpp"
+#include "gudhi/Morse_persistence/internal/reference_persistence.h"
 
 namespace Gudhi {
 namespace morse_persistence {

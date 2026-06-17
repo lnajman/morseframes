@@ -1,5 +1,6 @@
 build/
 build-*/
+work/
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt

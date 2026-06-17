@@ -64,6 +64,12 @@ to:
 example/Morse_persistence/example_morse_persistence_from_simplex_tree.cpp
 ```
 
+The matching copy-ready CMake stub is:
+
+```text
+upstream/gudhi/example/Morse_persistence/CMakeLists.txt
+```
+
 A minimal GUDHI `example/Morse_persistence/CMakeLists.txt` is:
 
 ```cmake

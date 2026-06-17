@@ -22,7 +22,6 @@ class FieldAnnotationStore {
                        std::uint32_t modulus)
       : simplex_to_local_(full_annotations.size(), kInvalidLocal),
         inverse_lists_(num_labels),
-        num_labels_(num_labels),
         modulus_(modulus) {
     validate_prime_field_characteristic(modulus_);
     annotations_.reserve(selected_simplices.size());
@@ -50,7 +49,6 @@ class FieldAnnotationStore {
       : annotations_(std::move(annotations)),
         simplex_to_local_(universe_size, kInvalidLocal),
         inverse_lists_(num_labels),
-        num_labels_(num_labels),
         modulus_(modulus) {
     validate_prime_field_characteristic(modulus_);
     if (annotations_.size() != selected_simplices.size()) {
@@ -319,7 +317,6 @@ class FieldAnnotationStore {
   std::vector<std::vector<std::size_t>> annotation_positions_;
   std::vector<std::size_t> simplex_to_local_;
   std::vector<std::vector<std::size_t>> inverse_lists_;
-  std::size_t num_labels_ = 0;
   std::uint32_t modulus_ = 2;
   InverseAnnotationStoreMetrics metrics_;
 };

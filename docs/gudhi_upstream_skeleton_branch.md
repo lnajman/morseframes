@@ -129,8 +129,23 @@ upstream/gudhi/test/Morse_persistence/test_morse_persistence_simplex_tree.cpp
 
 ## Next Mechanical Step
 
-Dry-run copying the GUDHI module files into a clean checkout and run:
+The dry run on June 17, 2026 used a disposable copy of the local GUDHI 3.12.0
+source tree, with pre-existing Morse_persistence artifacts excluded before
+copying the staging files in.
+
+The following passed:
 
 ```sh
 ctest -R Morse_persistence --output-on-failure
 ```
+
+with both:
+
+```text
+Morse_persistence_example_from_simplex_tree
+Morse_persistence_test_simplex_tree
+```
+
+The next mechanical step is to make a compact patch checklist or patch archive
+from the dry-run tree, so the candidate can be reviewed without rebuilding the
+whole MorseFrames history.

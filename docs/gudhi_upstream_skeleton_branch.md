@@ -65,7 +65,9 @@ include/gudhi/Morse_persistence/internal/
 Those internal files are a copied, GUDHI-namespaced snapshot of the prototype
 headers needed by the wrapper. They live in
 `Gudhi::morse_persistence::internal` and include each other through
-`gudhi/Morse_persistence/internal/...`.
+`gudhi/Morse_persistence/internal/...`. The copied snapshot is trimmed to the
+public strategy set: `SAME_LEVEL_REDUCTION`, `F_MAX`, `F_MIN`, and
+`PLATEAU_GREEDY`.
 
 The upstream-shaped example is:
 
@@ -101,15 +103,21 @@ morseframes_gudhi_style_simplex_tree_example
 morseframes_benchmark_gudhi_view
 ```
 
+## Current Test Shape
+
+The adapter test matrix exercises the public `Gudhi::morse_persistence` API for
+all four public strategies on the maintainer-style examples, then keeps a small
+set of prototype-level checks for invariants that are easier to inspect through
+the lower-level complex view.
+
 ## Next Mechanical Step
 
-The next upstream-preparation step is to reduce this copied internal snapshot to
-the smallest stable surface for a first GUDHI discussion:
+The next upstream-preparation step is to make this branch easy to compare
+against a GUDHI checkout:
 
-- keep the public wrapper and maintainer-style example unchanged;
-- remove unused experimental strategy code from the copied internal headers if
-  it is not needed by `SAME_LEVEL_REDUCTION`, `F_MAX`, `F_MIN`, or
-  `PLATEAU_GREEDY`;
-- make the adapter test matrix exercise the public `Gudhi::morse_persistence`
-  API first, with internal tests limited to invariants that cannot be checked
-  through the facade.
+- draft a small file-placement checklist for copying `include/gudhi` plus the
+  upstream-shaped example/test into GUDHI;
+- decide which tests should remain in MorseFrames only and which should become
+  GUDHI tests;
+- prepare a short maintainer-facing note describing the algorithmic scope,
+  plateau behavior, and current `Z2` limitation.

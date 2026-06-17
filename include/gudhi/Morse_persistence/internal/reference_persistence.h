@@ -418,16 +418,6 @@ class MorseReferenceFrameBuilder {
         collect_frame_timing_(collect_frame_timing),
         release_policy_(release_policy) {}
 
-  MorseReferenceFrame build_saturated() const {
-    std::vector<Annotation> references(complex_.size());
-    Annotation reference_update_scratch;
-    auto sequence = FSequenceBuilder(complex_).build_saturated_with_step_callback(
-        [&](const MorseSequence& sequence, const MorseStep& step) {
-          update_reference_for_step(sequence, step, references, reference_update_scratch);
-        });
-    return MorseReferenceFrame{std::move(sequence), std::move(references)};
-  }
-
   MorseReferenceFrame build_plateau_greedy() const {
     std::vector<Annotation> references(complex_.size());
     Annotation reference_update_scratch;
@@ -436,10 +426,6 @@ class MorseReferenceFrameBuilder {
           update_reference_for_step(sequence, step, references, reference_update_scratch);
         });
     return MorseReferenceFrame{std::move(sequence), std::move(references)};
-  }
-
-  MorseReferenceFrame build_coreduction() const {
-    return build_same_level_reduction();
   }
 
   MorseReferenceFrame build_same_level_reduction() const {
@@ -472,62 +458,11 @@ class MorseReferenceFrameBuilder {
     return MorseReferenceFrame{std::move(sequence), std::move(references)};
   }
 
-  MorseReferenceFrame build_flooding_max() const {
-    std::vector<Annotation> references(complex_.size());
-    Annotation reference_update_scratch;
-    auto sequence = FSequenceBuilder(complex_).build_flooding_max_with_step_callback(
-        [&](const MorseSequence& sequence, const MorseStep& step) {
-          update_reference_for_step(sequence, step, references, reference_update_scratch);
-        });
-    return MorseReferenceFrame{std::move(sequence), std::move(references)};
-  }
-
-  MorseReferenceFrame build_flooding_min() const {
-    std::vector<Annotation> references(complex_.size());
-    Annotation reference_update_scratch;
-    auto sequence = FSequenceBuilder(complex_).build_flooding_min_with_step_callback(
-        [&](const MorseSequence& sequence, const MorseStep& step) {
-          update_reference_for_step(sequence, step, references, reference_update_scratch);
-        });
-    return MorseReferenceFrame{std::move(sequence), std::move(references)};
-  }
-
-  MorseReferenceFrame build_flooding_minmax() const {
-    std::vector<Annotation> references(complex_.size());
-    Annotation reference_update_scratch;
-    auto sequence = FSequenceBuilder(complex_).build_flooding_minmax_with_step_callback(
-        [&](const MorseSequence& sequence, const MorseStep& step) {
-          update_reference_for_step(sequence, step, references, reference_update_scratch);
-        });
-    return MorseReferenceFrame{std::move(sequence), std::move(references)};
-  }
-
-  MorseReferenceFrame build_flooding_maxmin() const {
-    std::vector<Annotation> references(complex_.size());
-    Annotation reference_update_scratch;
-    auto sequence = FSequenceBuilder(complex_).build_flooding_maxmin_with_step_callback(
-        [&](const MorseSequence& sequence, const MorseStep& step) {
-          update_reference_for_step(sequence, step, references, reference_update_scratch);
-        });
-    return MorseReferenceFrame{std::move(sequence), std::move(references)};
-  }
-
-  MorseReferenceReductionInput build_saturated_reduction_input() const {
-    return build_reduction_input_with([&](auto&& step_callback, auto* sequence_metrics) {
-      return FSequenceBuilder(complex_, sequence_metrics).build_saturated_with_step_callback(
-          std::forward<decltype(step_callback)>(step_callback));
-    });
-  }
-
   MorseReferenceReductionInput build_plateau_greedy_reduction_input() const {
     return build_reduction_input_with([&](auto&& step_callback, auto* sequence_metrics) {
       return FSequenceBuilder(complex_, sequence_metrics).build_plateau_greedy_with_step_callback(
           std::forward<decltype(step_callback)>(step_callback));
     });
-  }
-
-  MorseReferenceReductionInput build_coreduction_reduction_input() const {
-    return build_same_level_reduction_reduction_input();
   }
 
   MorseReferenceReductionInput build_same_level_reduction_reduction_input() const {
@@ -548,34 +483,6 @@ class MorseReferenceFrameBuilder {
   MorseReferenceReductionInput build_f_min_reduction_input() const {
     return build_reduction_input_with([&](auto&& step_callback, auto* sequence_metrics) {
       return FSequenceBuilder(complex_, sequence_metrics).build_f_min_with_step_callback(
-          std::forward<decltype(step_callback)>(step_callback));
-    });
-  }
-
-  MorseReferenceReductionInput build_flooding_max_reduction_input() const {
-    return build_reduction_input_with([&](auto&& step_callback, auto* sequence_metrics) {
-      return FSequenceBuilder(complex_, sequence_metrics).build_flooding_max_with_step_callback(
-          std::forward<decltype(step_callback)>(step_callback));
-    });
-  }
-
-  MorseReferenceReductionInput build_flooding_min_reduction_input() const {
-    return build_reduction_input_with([&](auto&& step_callback, auto* sequence_metrics) {
-      return FSequenceBuilder(complex_, sequence_metrics).build_flooding_min_with_step_callback(
-          std::forward<decltype(step_callback)>(step_callback));
-    });
-  }
-
-  MorseReferenceReductionInput build_flooding_minmax_reduction_input() const {
-    return build_reduction_input_with([&](auto&& step_callback, auto* sequence_metrics) {
-      return FSequenceBuilder(complex_, sequence_metrics).build_flooding_minmax_with_step_callback(
-          std::forward<decltype(step_callback)>(step_callback));
-    });
-  }
-
-  MorseReferenceReductionInput build_flooding_maxmin_reduction_input() const {
-    return build_reduction_input_with([&](auto&& step_callback, auto* sequence_metrics) {
-      return FSequenceBuilder(complex_, sequence_metrics).build_flooding_maxmin_with_step_callback(
           std::forward<decltype(step_callback)>(step_callback));
     });
   }
@@ -1471,7 +1378,7 @@ inline PersistenceDiagram compute_fused_morse_reference_persistence(
     const ComplexView& complex) {
   static_assert(is_complex_view_v<ComplexView>,
                 "compute_fused_morse_reference_persistence requires a Morse complex-view type.");
-  auto input = MorseReferenceFrameBuilder(complex).build_saturated_reduction_input();
+  auto input = MorseReferenceFrameBuilder(complex).build_f_max_reduction_input();
   MorseReferencePersistenceReducer reducer(complex,
                                            input.sequence,
                                            std::move(input.reduction_plan),

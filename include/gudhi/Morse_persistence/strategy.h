@@ -59,15 +59,8 @@ inline Morse_sequence_strategy from_kernel_strategy(internal::MorseSequenceStrat
       return Morse_sequence_strategy::F_MIN;
     case internal::MorseSequenceStrategy::PlateauGreedy:
       return Morse_sequence_strategy::PLATEAU_GREEDY;
-    case internal::MorseSequenceStrategy::Saturated:
-    case internal::MorseSequenceStrategy::FloodingMax:
-    case internal::MorseSequenceStrategy::FloodingMin:
-    case internal::MorseSequenceStrategy::FloodingMinMax:
-    case internal::MorseSequenceStrategy::FloodingMaxMin:
-      break;
   }
-  throw std::invalid_argument(
-      "Internal Morse sequence strategy is not part of the public GUDHI API.");
+  throw std::invalid_argument("Unknown Morse sequence strategy.");
 }
 
 /** \brief Return the stable command-line/string spelling of a strategy. */

@@ -28,7 +28,7 @@ struct SimplexTreeMorseReferenceResult {
 template <class SimplexTree>
 SimplexTreeMorseReferenceResult<SimplexTree> compute_simplex_tree_morse_reference_persistence(
     const SimplexTree& simplex_tree,
-    MorseSequenceStrategy strategy = MorseSequenceStrategy::Saturated) {
+    MorseSequenceStrategy strategy = MorseSequenceStrategy::FMax) {
   auto view = make_simplex_tree_complex_view(simplex_tree);
   auto input = build_morse_reference_reduction_input(view, strategy);
   MorseReferencePersistenceReducer reducer(view,

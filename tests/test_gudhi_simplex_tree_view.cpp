@@ -125,16 +125,17 @@ GudhiSimplexTree make_cycle_killed_by_later_triangle() {
   });
 }
 
-template <class ComplexView>
-void validate_sequence_shape(const ComplexView& complex, const morseframes::MorseSequence& sequence) {
+template <class ComplexView, class MorseSequence>
+void validate_sequence_shape(const ComplexView& complex, const MorseSequence& sequence) {
   std::vector<bool> seen(complex.size(), false);
   std::size_t regular_pairs = 0;
 
-  for (const morseframes::MorseStep& step : sequence.steps()) {
+  for (const auto& step : sequence.steps()) {
+    using StepType = std::decay_t<decltype(step.type)>;
     CHECK(step.sigma < complex.size());
     CHECK(!seen[step.sigma]);
 
-    if (step.type == morseframes::MorseStepType::Critical) {
+    if (step.type == StepType::Critical) {
       seen[step.sigma] = true;
       continue;
     }
@@ -288,17 +289,12 @@ const std::vector<morseframes::MorseSequenceStrategy>& public_maintainer_strateg
   return strategies;
 }
 
-const std::vector<morseframes::MorseSequenceStrategy>& all_internal_strategies() {
-  static const std::vector<morseframes::MorseSequenceStrategy> strategies = {
-      morseframes::MorseSequenceStrategy::Saturated,
-      morseframes::MorseSequenceStrategy::SameLevelReduction,
-      morseframes::MorseSequenceStrategy::FMax,
-      morseframes::MorseSequenceStrategy::FMin,
-      morseframes::MorseSequenceStrategy::PlateauGreedy,
-      morseframes::MorseSequenceStrategy::FloodingMax,
-      morseframes::MorseSequenceStrategy::FloodingMin,
-      morseframes::MorseSequenceStrategy::FloodingMinMax,
-      morseframes::MorseSequenceStrategy::FloodingMaxMin,
+const std::vector<mp::Morse_sequence_strategy>& public_gudhi_strategies() {
+  static const std::vector<mp::Morse_sequence_strategy> strategies = {
+      mp::Morse_sequence_strategy::SAME_LEVEL_REDUCTION,
+      mp::Morse_sequence_strategy::F_MAX,
+      mp::Morse_sequence_strategy::F_MIN,
+      mp::Morse_sequence_strategy::PLATEAU_GREEDY,
   };
   return strategies;
 }
@@ -350,8 +346,32 @@ void validate_public_strategies_on_simplex_tree(const GudhiSimplexTree& simplex_
   }
 }
 
+void validate_public_api_on_simplex_tree(const GudhiSimplexTree& simplex_tree) {
+  const auto compact = morseframes::filtered_complex_from_simplex_tree(simplex_tree);
+  const auto standard = morseframes::compute_standard_z2_persistence(compact);
+
+  for (const auto& strategy : public_gudhi_strategies()) {
+    const auto frame = mp::compute_morse_sequence_and_reference_map(simplex_tree, strategy);
+    validate_sequence_shape(frame.view, frame.sequence());
+
+    const auto diagram_from_frame = mp::compute_morse_persistence(simplex_tree, frame);
+    CHECK(off_diagonal_barcode_key(diagram_from_frame) == off_diagonal_barcode_key(standard));
+    CHECK(essential_barcode_key(diagram_from_frame) == essential_barcode_key(standard));
+
+    const auto result = mp::compute_morse_persistence(simplex_tree, strategy);
+    validate_sequence_shape(result.view, result.sequence);
+    assert_handles_are_mappable(result);
+    CHECK(off_diagonal_barcode_key(result.diagram) == off_diagonal_barcode_key(standard));
+    CHECK(essential_barcode_key(result.diagram) == essential_barcode_key(standard));
+    CHECK(off_diagonal_barcode_key(diagram_from_frame) ==
+          off_diagonal_barcode_key(result.diagram));
+    CHECK(essential_barcode_key(diagram_from_frame) == essential_barcode_key(result.diagram));
+  }
+}
+
 void test_maintainer_single_vertex() {
   const auto simplex_tree = make_single_vertex();
+  validate_public_api_on_simplex_tree(simplex_tree);
   validate_public_strategies_on_simplex_tree(simplex_tree);
 
   const auto result = morseframes::compute_simplex_tree_morse_reference_persistence(
@@ -367,6 +387,7 @@ void test_maintainer_single_vertex() {
 
 void test_maintainer_increasing_edge() {
   const auto simplex_tree = make_increasing_edge();
+  validate_public_api_on_simplex_tree(simplex_tree);
   validate_public_strategies_on_simplex_tree(simplex_tree);
 
   CHECK(mp::strategy_from_name("f-max") == mp::Morse_sequence_strategy::f_max);
@@ -402,6 +423,7 @@ void test_maintainer_increasing_edge() {
 
 void test_maintainer_plateau_filled_triangle() {
   const auto simplex_tree = make_plateau_filled_triangle();
+  validate_public_api_on_simplex_tree(simplex_tree);
   validate_public_strategies_on_simplex_tree(simplex_tree);
 
   const auto result = morseframes::compute_simplex_tree_morse_reference_persistence(
@@ -416,6 +438,7 @@ void test_maintainer_plateau_filled_triangle() {
 
 void test_maintainer_triangle_with_tail() {
   const auto simplex_tree = make_filtered_triangle_with_tail();
+  validate_public_api_on_simplex_tree(simplex_tree);
   validate_public_strategies_on_simplex_tree(simplex_tree);
 
   const auto result = morseframes::compute_simplex_tree_morse_reference_persistence(
@@ -431,6 +454,7 @@ void test_maintainer_triangle_with_tail() {
 
 void test_maintainer_two_components_joined_late() {
   const auto simplex_tree = make_two_components_joined_late();
+  validate_public_api_on_simplex_tree(simplex_tree);
   validate_public_strategies_on_simplex_tree(simplex_tree);
 
   const auto result = morseframes::compute_simplex_tree_morse_reference_persistence(
@@ -446,6 +470,7 @@ void test_maintainer_two_components_joined_late() {
 
 void test_maintainer_cycle_killed_by_later_triangle() {
   const auto simplex_tree = make_cycle_killed_by_later_triangle();
+  validate_public_api_on_simplex_tree(simplex_tree);
   validate_public_strategies_on_simplex_tree(simplex_tree);
 
   const auto result = morseframes::compute_simplex_tree_morse_reference_persistence(
@@ -483,14 +508,14 @@ void test_real_gudhi_simplex_tree_view() {
   auto moved_view = std::move(copied_view);
   CHECK(moved_view.vertices(triangle) == std::vector<morseframes::VertexId>({0, 1, 2}));
 
-  const auto sequence = morseframes::FSequenceBuilder(view).build_saturated();
+  const auto sequence = morseframes::FSequenceBuilder(view).build_f_max();
   validate_sequence_shape(view, sequence);
 
   const auto references =
       morseframes::MorseReferenceComputer(view, sequence).compute_full_references();
   validate_reference_recurrence(view, sequence, references);
 
-  const auto frame = morseframes::MorseReferenceFrameBuilder(view).build_saturated();
+  const auto frame = morseframes::MorseReferenceFrameBuilder(view).build_f_max();
   CHECK(frame.sequence.critical_simplices() == sequence.critical_simplices());
   CHECK(frame.references == references);
 
@@ -502,20 +527,12 @@ void test_real_gudhi_simplex_tree_view() {
   CHECK(essential_barcode_key(direct_diagram) == essential_barcode_key(standard));
 
   const auto api_result = morseframes::compute_simplex_tree_morse_reference_persistence(
-      simplex_tree, morseframes::MorseSequenceStrategy::Saturated);
+      simplex_tree, morseframes::MorseSequenceStrategy::FMax);
   CHECK(finite_barcode_key(api_result.diagram) == finite_barcode_key(standard));
   CHECK(essential_barcode_key(api_result.diagram) == essential_barcode_key(standard));
   CHECK(!api_result.sequence.critical_simplices().empty());
   CHECK(api_result.view.handle(api_result.sequence.critical_simplices().front()) !=
          GudhiSimplexTree::null_simplex());
-
-  const auto compact_view = morseframes::filtered_complex_from_simplex_tree(simplex_tree);
-  for (const auto& strategy : all_internal_strategies()) {
-    const auto direct_frame = morseframes::build_morse_reference_frame(view, strategy);
-    const auto compact_frame = morseframes::build_morse_reference_frame(compact_view, strategy);
-    CHECK(sequence_signature(view, direct_frame.sequence) ==
-           sequence_signature(compact_view, compact_frame.sequence));
-  }
 }
 
 void test_real_gudhi_import_to_compact_complex() {
@@ -527,7 +544,7 @@ void test_real_gudhi_import_to_compact_complex() {
   CHECK(triangle != morseframes::kInvalidSimplex);
   CHECK(close(complex.filtration(triangle), 2.0));
 
-  const auto frame = morseframes::MorseReferenceFrameBuilder(complex).build_saturated();
+  const auto frame = morseframes::MorseReferenceFrameBuilder(complex).build_f_max();
   const auto diagram =
       morseframes::MorseReferencePersistenceReducer(complex, frame.sequence, frame.references)
           .compute();

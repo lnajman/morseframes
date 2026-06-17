@@ -86,6 +86,8 @@ Detailed follow-up notes:
 ```text
 docs/gudhi_upstream_file_map.md
 docs/gudhi_maintainer_scope_note.md
+upstream/gudhi/README.md
+upstream/gudhi/MANIFEST.md
 ```
 
 ## Build Check
@@ -146,6 +148,13 @@ Morse_persistence_example_from_simplex_tree
 Morse_persistence_test_simplex_tree
 ```
 
-The next mechanical step is to make a compact patch checklist or patch archive
-from the dry-run tree, so the candidate can be reviewed without rebuilding the
-whole MorseFrames history.
+The compact review bundle is now recorded in:
+
+```text
+upstream/gudhi/README.md
+upstream/gudhi/MANIFEST.md
+```
+
+The next mechanical step is to decide whether to generate an actual patch file
+from a clean GUDHI git checkout, or keep this as a copy-ready staging bundle
+until the maintainer-facing scope is agreed.

@@ -105,6 +105,7 @@ The expected optional targets are:
 
 ```text
 morseframes_gudhi_simplex_tree_view_tests
+morseframes_gudhi_upstream_simplex_tree_tests
 morseframes_gudhi_simplex_tree_example
 morseframes_gudhi_style_simplex_tree_example
 morseframes_benchmark_gudhi_view
@@ -117,13 +118,19 @@ all four public strategies on the maintainer-style examples, then keeps a small
 set of prototype-level checks for invariants that are easier to inspect through
 the lower-level complex view.
 
+## Pure GUDHI Test Candidate
+
+The pure GUDHI test candidate, extracted from the public-API subset of
+`tests/test_gudhi_simplex_tree_view.cpp`, lives at:
+
+```text
+upstream/gudhi/test/Morse_persistence/test_morse_persistence_simplex_tree.cpp
+```
+
 ## Next Mechanical Step
 
-The next upstream-preparation step is to make a pure GUDHI test file from the
-public-API subset of `tests/test_gudhi_simplex_tree_view.cpp`:
+Dry-run copying the GUDHI module files into a clean checkout and run:
 
-- remove all `morseframes/...` includes;
-- keep the public `Gudhi::morse_persistence` strategy loop;
-- use explicit expected barcode checks on small examples;
-- place the resulting candidate at
-  `test/Morse_persistence/test_morse_persistence_simplex_tree.cpp`.
+```sh
+ctest -R Morse_persistence --output-on-failure
+```

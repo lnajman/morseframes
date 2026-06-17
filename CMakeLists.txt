@@ -116,6 +116,15 @@ if(MORSEFRAMES_BUILD_GUDHI_TOOLS
         "${MORSEFRAMES_BOOST_INCLUDE_DIR}"
     )
 
+    add_executable(morseframes_gudhi_upstream_simplex_tree_tests
+        upstream/gudhi/test/Morse_persistence/test_morse_persistence_simplex_tree.cpp
+    )
+    target_link_libraries(morseframes_gudhi_upstream_simplex_tree_tests PRIVATE morseframes)
+    target_include_directories(morseframes_gudhi_upstream_simplex_tree_tests PRIVATE
+        "${MORSEFRAMES_GUDHI_INCLUDE_DIR}"
+        "${MORSEFRAMES_BOOST_INCLUDE_DIR}"
+    )
+
     add_executable(morseframes_benchmark_gudhi_view
         benchmarks/benchmark_gudhi_view.cpp
     )
@@ -185,4 +194,8 @@ endif()
 if(TARGET morseframes_gudhi_simplex_tree_view_tests)
     add_test(NAME morseframes_gudhi_simplex_tree_view_tests
         COMMAND morseframes_gudhi_simplex_tree_view_tests)
+endif()
+if(TARGET morseframes_gudhi_upstream_simplex_tree_tests)
+    add_test(NAME morseframes_gudhi_upstream_simplex_tree_tests
+        COMMAND morseframes_gudhi_upstream_simplex_tree_tests)
 endif()

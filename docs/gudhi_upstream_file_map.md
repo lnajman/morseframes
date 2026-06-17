@@ -79,22 +79,22 @@ add_test(
 
 ## Tests
 
-The current MorseFrames test:
+The copy-ready GUDHI test candidate is:
 
 ```text
-tests/test_gudhi_simplex_tree_view.cpp
+upstream/gudhi/test/Morse_persistence/test_morse_persistence_simplex_tree.cpp
 ```
 
-contains two kinds of checks:
-
-- public API checks through `Gudhi::morse_persistence`;
-- prototype-level oracle checks through `morseframes::...`.
-
-For a GUDHI patch, keep only the public API checks and expected barcode checks,
-then place the result at:
+Place it at:
 
 ```text
 test/Morse_persistence/test_morse_persistence_simplex_tree.cpp
+```
+
+The matching copy-ready CMake stub is:
+
+```text
+upstream/gudhi/test/Morse_persistence/CMakeLists.txt
 ```
 
 A minimal GUDHI `test/Morse_persistence/CMakeLists.txt` is:
@@ -119,7 +119,8 @@ The upstream test should cover at least:
 - two components joined late;
 - a one-cycle killed by a later triangle.
 
-For each case, test all public strategies:
+The candidate file already covers these cases. For each case, it tests all
+public strategies:
 
 ```text
 SAME_LEVEL_REDUCTION
@@ -135,6 +136,15 @@ The expected checks should include:
 - dimensions of finite intervals;
 - ability to map diagram simplex ids back to `Simplex_tree::Simplex_handle`;
 - rejection of non-public strategy names such as `saturated`.
+
+The older MorseFrames integration test remains:
+
+```text
+tests/test_gudhi_simplex_tree_view.cpp
+```
+
+It intentionally keeps additional prototype-level oracle checks through
+`morseframes::...`; those checks should not be copied into GUDHI.
 
 ## Module Registration
 

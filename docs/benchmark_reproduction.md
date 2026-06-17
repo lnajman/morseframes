@@ -14,6 +14,11 @@ The examples below write raw CSV, Markdown summaries, and diagnostic prose to
 `../work/`. The public repository tracks the scripts and selected LaTeX table
 fragments, but not the manuscript prose built from them.
 
+Some rendering commands below intentionally write tracked files under `docs/`.
+Use those commands when you want to refresh the public table fragments. If you
+only want to test the workflow on a local machine, redirect the table outputs to
+`../work/` or restore the tracked table fragments afterward.
+
 ## Output Policy
 
 Tracked public artifacts:

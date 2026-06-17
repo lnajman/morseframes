@@ -153,6 +153,10 @@ class InverseAnnotationStore {
 
  private:
   using LocalId = SimplexId;
+  using PositionId = CriticalId;
+  // Most annotations have one or two labels; inline position storage avoids
+  // one heap allocation per small inverse-position list.
+  using PositionList = SmallAnnotation<2>;
 
   static constexpr LocalId kInvalidLocal = std::numeric_limits<LocalId>::max();
 
@@ -161,6 +165,13 @@ class InverseAnnotationStore {
       throw std::overflow_error("Too many local annotations.");
     }
     return static_cast<LocalId>(local);
+  }
+
+  static PositionId checked_position_id(std::size_t position) {
+    if (position >= std::numeric_limits<PositionId>::max()) {
+      throw std::overflow_error("Too many inverse-list entries.");
+    }
+    return static_cast<PositionId>(position);
   }
 
   void check_label(CriticalId label) const {
@@ -221,7 +232,7 @@ class InverseAnnotationStore {
     positions.reserve(annotation.size());
     for (CriticalId label : annotation) {
       check_label(label);
-      positions.push_back(inverse_lists_[label].size());
+      positions.push_back(checked_position_id(inverse_lists_[label].size()));
       inverse_lists_[label].push_back(checked_local_id(local));
       ++metrics_.initial_inverse_list_entries;
     }
@@ -277,7 +288,7 @@ class InverseAnnotationStore {
     metrics_.xor_changed_labels += changed_labels->size();
 
     const Annotation& old_annotation = annotations_[local];
-    const std::vector<std::size_t>& old_positions = annotation_positions_[local];
+    const PositionList& old_positions = annotation_positions_[local];
     const std::size_t input_size = old_annotation.size() + changed_labels->size();
     metrics_.xor_total_input_size += input_size;
     if (input_size > metrics_.xor_max_input_size) {
@@ -304,7 +315,7 @@ class InverseAnnotationStore {
         const CriticalId label = (*changed_labels)[right];
         check_label(label);
         scratch_annotation_.push_back(label);
-        scratch_positions_.push_back(inverse_lists_[label].size());
+        scratch_positions_.push_back(checked_position_id(inverse_lists_[label].size()));
         inverse_lists_[label].push_back(checked_local_id(local));
         ++metrics_.inverse_list_appends;
         ++metrics_.xor_inserted_labels;
@@ -328,12 +339,12 @@ class InverseAnnotationStore {
   }
 
   std::vector<Annotation> annotations_;
-  std::vector<std::vector<std::size_t>> annotation_positions_;
+  std::vector<PositionList> annotation_positions_;
   std::vector<LocalId> simplex_to_local_;
   std::vector<std::vector<LocalId>> inverse_lists_;
   Annotation scratch_annotation_;
   Annotation scratch_update_;
-  std::vector<std::size_t> scratch_positions_;
+  PositionList scratch_positions_;
   InverseAnnotationStoreMetrics metrics_;
 };
 

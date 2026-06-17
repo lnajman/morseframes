@@ -500,7 +500,23 @@ void print_header() {
       << "direct_frame_total_over_import_frame_total,direct_full_over_compact_full,"
       << "view_criticals,compact_criticals,view_regular_pairs,compact_regular_pairs,"
       << "view_working_set,compact_working_set,finite_pairs,essential_intervals,"
-      << "gudhi_finite_pairs,gudhi_essential_intervals\n";
+      << "gudhi_finite_pairs,gudhi_essential_intervals,"
+      << "direct_reducer_boundary_candidates,"
+      << "direct_reducer_zero_boundary_criticals,"
+      << "direct_reducer_boundary_xors,"
+      << "direct_reducer_boundary_input_size,"
+      << "direct_reducer_boundary_output_size,"
+      << "direct_reducer_pivot_eliminations,"
+      << "direct_inverse_initial_nonempty,"
+      << "direct_inverse_initial_total_size,"
+      << "direct_inverse_remove_scans,"
+      << "direct_inverse_remove_applied,"
+      << "direct_inverse_xor_scans,"
+      << "direct_inverse_xor_applied,"
+      << "direct_inverse_xor_changed_labels,"
+      << "direct_inverse_xor_input_size,"
+      << "direct_inverse_xor_output_size,"
+      << "direct_inverse_appends\n";
 }
 
 void run_case(const CaseSpec& spec, const Options& options) {
@@ -844,7 +860,23 @@ void run_case(const CaseSpec& spec, const Options& options) {
                 << compact_reducer.value.metrics.finite_pairs << ','
                 << compact_reducer.value.metrics.essential_intervals << ','
                 << gudhi_persistence.value.finite_pairs << ','
-                << gudhi_persistence.value.essential_intervals << '\n';
+                << gudhi_persistence.value.essential_intervals << ','
+                << direct_reducer.value.metrics.boundary_annotation_candidate_criticals << ','
+                << direct_reducer.value.metrics.boundary_annotation_zero_skipped_criticals << ','
+                << direct_reducer.value.metrics.boundary_annotation_xors << ','
+                << direct_reducer.value.metrics.boundary_annotation_total_input_size << ','
+                << direct_reducer.value.metrics.boundary_annotation_total_output_size << ','
+                << direct_reducer.value.metrics.pivot_eliminations << ','
+                << direct_reducer.value.metrics.inverse_store.initial_nonempty_annotations << ','
+                << direct_reducer.value.metrics.inverse_store.initial_total_annotation_size << ','
+                << direct_reducer.value.metrics.inverse_store.remove_candidate_scans << ','
+                << direct_reducer.value.metrics.inverse_store.remove_applied << ','
+                << direct_reducer.value.metrics.inverse_store.xor_candidate_scans << ','
+                << direct_reducer.value.metrics.inverse_store.xor_applied << ','
+                << direct_reducer.value.metrics.inverse_store.xor_changed_labels << ','
+                << direct_reducer.value.metrics.inverse_store.xor_total_input_size << ','
+                << direct_reducer.value.metrics.inverse_store.xor_total_output_size << ','
+                << direct_reducer.value.metrics.inverse_store.inverse_list_appends << '\n';
     }
   }
 }

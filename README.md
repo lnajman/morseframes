@@ -106,6 +106,7 @@ MORSEFRAMES_DISABLE_CPP_BACKEND=1 python3 -m unittest discover -s python/tests -
 - `docs/python_prime_field_tutorial.md` explains persistence over `F_p`.
 - `docs/cpp_complex_view_api.md` describes the C++ complex-view interface.
 - `docs/gudhi_contribution_design_note.md` summarizes the experimental GUDHI adapter.
+- `docs/benchmark_reproduction.md` explains how to regenerate benchmark tables.
 - Generated benchmark table fragments live in `docs/*_table.tex`; the scripts
   that regenerate them live in `tools/`.
 

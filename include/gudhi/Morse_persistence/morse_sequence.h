@@ -13,7 +13,7 @@ namespace morse_persistence {
  *
  *  \ingroup morse_persistence
  */
-using Morse_step_type = morseframes::MorseStepType;
+using Morse_step_type = internal::MorseStepType;
 
 /** \brief One step of a same-level Morse sequence.
  *
@@ -22,13 +22,13 @@ using Morse_step_type = morseframes::MorseStepType;
  *  A step is either a critical simplex or a same-level regular face/coface
  *  pair `(sigma, tau)`.
  */
-using Morse_step = morseframes::MorseStep;
+using Morse_step = internal::MorseStep;
 
 /** \brief Ordered Morse sequence used by the reference-map recurrence.
  *
  *  \ingroup morse_persistence
  */
-using Morse_sequence = morseframes::MorseSequence;
+using Morse_sequence = internal::MorseSequence;
 
 }  // namespace morse_persistence
 }  // namespace Gudhi

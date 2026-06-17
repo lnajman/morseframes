@@ -56,15 +56,16 @@ include/gudhi/Morse_persistence/reference_map.h
 include/gudhi/Morse_persistence/strategy.h
 ```
 
-The public wrapper now reaches the prototype kernels only through:
+The public wrapper now reaches the kernel only through:
 
 ```text
 include/gudhi/Morse_persistence/internal/
 ```
 
-Those internal files are forwarding headers in this branch. In an upstream GUDHI
-patch, they should be replaced by the copied kernel headers with includes and
-namespaces adjusted to GUDHI conventions.
+Those internal files are a copied, GUDHI-namespaced snapshot of the prototype
+headers needed by the wrapper. They live in
+`Gudhi::morse_persistence::internal` and include each other through
+`gudhi/Morse_persistence/internal/...`.
 
 The upstream-shaped example is:
 
@@ -102,15 +103,13 @@ morseframes_benchmark_gudhi_view
 
 ## Next Mechanical Step
 
-The actual upstream patch should mechanically replace the forwarding headers in:
+The next upstream-preparation step is to reduce this copied internal snapshot to
+the smallest stable surface for a first GUDHI discussion:
 
-```text
-include/gudhi/Morse_persistence/internal/
-```
-
-with the current prototype kernel headers used by the wrapper, and rewrite their
-internal includes from `morseframes/...` to
-`gudhi/Morse_persistence/internal/...`.
-
-That move should be done after the public API and test matrix are agreed upon,
-because it is mostly namespace/include churn rather than algorithmic work.
+- keep the public wrapper and maintainer-style example unchanged;
+- remove unused experimental strategy code from the copied internal headers if
+  it is not needed by `SAME_LEVEL_REDUCTION`, `F_MAX`, `F_MIN`, or
+  `PLATEAU_GREEDY`;
+- make the adapter test matrix exercise the public `Gudhi::morse_persistence`
+  API first, with internal tests limited to invariants that cannot be checked
+  through the facade.

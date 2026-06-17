@@ -18,13 +18,13 @@ namespace morse_persistence {
  *  Simplex-tree must outlive the view.
  */
 template <class SimplexTree>
-using Simplex_tree_view = morseframes::SimplexTreeComplexView<SimplexTree>;
+using Simplex_tree_view = internal::SimplexTreeComplexView<SimplexTree>;
 
 /** \brief Owning filtered complex used for validation and imports.
  *
  *  \ingroup morse_persistence
  */
-using Filtered_simplicial_complex = morseframes::FilteredSimplicialComplex;
+using Filtered_simplicial_complex = internal::FilteredSimplicialComplex;
 
 /** \brief Build a read-only Morse view over an existing Simplex-tree. */
 template <class SimplexTree>
@@ -40,7 +40,7 @@ Simplex_tree_view<SimplexTree> make_simplex_tree_view(const SimplexTree& simplex
 template <class SimplexTree>
 Filtered_simplicial_complex filtered_complex_from_simplex_tree(
     const SimplexTree& simplex_tree) {
-  return morseframes::filtered_complex_from_simplex_tree(simplex_tree);
+  return internal::filtered_complex_from_simplex_tree(simplex_tree);
 }
 
 }  // namespace morse_persistence

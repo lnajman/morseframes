@@ -34,36 +34,36 @@ enum class Morse_sequence_strategy : std::uint8_t {
 };
 
 /** \brief Convert a GUDHI-style strategy to the internal kernel strategy. */
-inline morseframes::MorseSequenceStrategy to_kernel_strategy(Morse_sequence_strategy strategy) {
+inline internal::MorseSequenceStrategy to_kernel_strategy(Morse_sequence_strategy strategy) {
   switch (strategy) {
     case Morse_sequence_strategy::SAME_LEVEL_REDUCTION:
-      return morseframes::MorseSequenceStrategy::SameLevelReduction;
+      return internal::MorseSequenceStrategy::SameLevelReduction;
     case Morse_sequence_strategy::F_MAX:
-      return morseframes::MorseSequenceStrategy::FMax;
+      return internal::MorseSequenceStrategy::FMax;
     case Morse_sequence_strategy::F_MIN:
-      return morseframes::MorseSequenceStrategy::FMin;
+      return internal::MorseSequenceStrategy::FMin;
     case Morse_sequence_strategy::PLATEAU_GREEDY:
-      return morseframes::MorseSequenceStrategy::PlateauGreedy;
+      return internal::MorseSequenceStrategy::PlateauGreedy;
   }
   throw std::invalid_argument("Unknown Morse sequence strategy.");
 }
 
 /** \brief Convert an internal kernel strategy to the GUDHI-style strategy. */
-inline Morse_sequence_strategy from_kernel_strategy(morseframes::MorseSequenceStrategy strategy) {
+inline Morse_sequence_strategy from_kernel_strategy(internal::MorseSequenceStrategy strategy) {
   switch (strategy) {
-    case morseframes::MorseSequenceStrategy::SameLevelReduction:
+    case internal::MorseSequenceStrategy::SameLevelReduction:
       return Morse_sequence_strategy::SAME_LEVEL_REDUCTION;
-    case morseframes::MorseSequenceStrategy::FMax:
+    case internal::MorseSequenceStrategy::FMax:
       return Morse_sequence_strategy::F_MAX;
-    case morseframes::MorseSequenceStrategy::FMin:
+    case internal::MorseSequenceStrategy::FMin:
       return Morse_sequence_strategy::F_MIN;
-    case morseframes::MorseSequenceStrategy::PlateauGreedy:
+    case internal::MorseSequenceStrategy::PlateauGreedy:
       return Morse_sequence_strategy::PLATEAU_GREEDY;
-    case morseframes::MorseSequenceStrategy::Saturated:
-    case morseframes::MorseSequenceStrategy::FloodingMax:
-    case morseframes::MorseSequenceStrategy::FloodingMin:
-    case morseframes::MorseSequenceStrategy::FloodingMinMax:
-    case morseframes::MorseSequenceStrategy::FloodingMaxMin:
+    case internal::MorseSequenceStrategy::Saturated:
+    case internal::MorseSequenceStrategy::FloodingMax:
+    case internal::MorseSequenceStrategy::FloodingMin:
+    case internal::MorseSequenceStrategy::FloodingMinMax:
+    case internal::MorseSequenceStrategy::FloodingMaxMin:
       break;
   }
   throw std::invalid_argument(
@@ -72,7 +72,7 @@ inline Morse_sequence_strategy from_kernel_strategy(morseframes::MorseSequenceSt
 
 /** \brief Return the stable command-line/string spelling of a strategy. */
 inline const char* strategy_name(Morse_sequence_strategy strategy) {
-  return morseframes::morse_sequence_strategy_name(to_kernel_strategy(strategy));
+  return internal::morse_sequence_strategy_name(to_kernel_strategy(strategy));
 }
 
 /** \brief Parse a strategy name.

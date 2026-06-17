@@ -21,25 +21,25 @@ namespace morse_persistence {
  *
  *  \ingroup morse_persistence
  */
-using Annotation = morseframes::Annotation;
+using Annotation = internal::Annotation;
 
 /** \brief Morse sequence together with the full reference map.
  *
  *  \ingroup morse_persistence
  */
-using Morse_reference_frame = morseframes::MorseReferenceFrame;
+using Morse_reference_frame = internal::MorseReferenceFrame;
 
 /** \brief Metrics collected while constructing a Morse reference frame.
  *
  *  \ingroup morse_persistence
  */
-using Morse_reference_frame_metrics = morseframes::MorseReferenceFrameMetrics;
+using Morse_reference_frame_metrics = internal::MorseReferenceFrameMetrics;
 
 /** \brief Compact reducer input built while computing a Morse sequence.
  *
  *  \ingroup morse_persistence
  */
-using Morse_reference_reduction_input = morseframes::MorseReferenceReductionInput;
+using Morse_reference_reduction_input = internal::MorseReferenceReductionInput;
 
 /** \brief Frame result for a Simplex-tree input.
  *
@@ -76,11 +76,11 @@ struct Simplex_tree_morse_frame {
  *  \return The computed Morse sequence and full reference map.
  */
 template <class ComplexView,
-          typename std::enable_if<morseframes::is_complex_view_v<ComplexView>, int>::type = 0>
+          typename std::enable_if<internal::is_complex_view_v<ComplexView>, int>::type = 0>
 Morse_reference_frame compute_morse_sequence_and_reference_map(
     const ComplexView& complex,
     Morse_sequence_strategy strategy = Morse_sequence_strategy::F_MAX) {
-  return morseframes::build_morse_reference_frame(complex, to_kernel_strategy(strategy));
+  return internal::build_morse_reference_frame(complex, to_kernel_strategy(strategy));
 }
 
 /** \brief Compute a compact reduction input on a complex view.
@@ -96,11 +96,11 @@ Morse_reference_frame compute_morse_sequence_and_reference_map(
  *  and live annotations required by the reducer.
  */
 template <class ComplexView,
-          typename std::enable_if<morseframes::is_complex_view_v<ComplexView>, int>::type = 0>
+          typename std::enable_if<internal::is_complex_view_v<ComplexView>, int>::type = 0>
 Morse_reference_reduction_input compute_morse_reference_reduction_input(
     const ComplexView& complex,
     Morse_sequence_strategy strategy = Morse_sequence_strategy::F_MAX) {
-  return morseframes::build_morse_reference_reduction_input(complex, to_kernel_strategy(strategy));
+  return internal::build_morse_reference_reduction_input(complex, to_kernel_strategy(strategy));
 }
 
 /** \brief Compute a Morse sequence and reference map directly from a Simplex-tree.
@@ -112,7 +112,7 @@ Morse_reference_reduction_input compute_morse_reference_reduction_input(
  *  \return A result owning the temporary view and the computed frame.
  */
 template <class SimplexTree,
-          typename std::enable_if<!morseframes::is_complex_view_v<SimplexTree>, int>::type = 0>
+          typename std::enable_if<!internal::is_complex_view_v<SimplexTree>, int>::type = 0>
 Simplex_tree_morse_frame<SimplexTree> compute_morse_sequence_and_reference_map(
     const SimplexTree& simplex_tree,
     Morse_sequence_strategy strategy = Morse_sequence_strategy::F_MAX) {

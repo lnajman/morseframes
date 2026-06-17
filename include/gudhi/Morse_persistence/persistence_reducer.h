@@ -19,13 +19,13 @@ namespace morse_persistence {
  *
  *  \ingroup morse_persistence
  */
-using Morse_reference_reduction_metrics = morseframes::MorseReferenceReductionMetrics;
+using Morse_reference_reduction_metrics = internal::MorseReferenceReductionMetrics;
 
 /** \brief Persistence result with reducer metrics.
  *
  *  \ingroup morse_persistence
  */
-using Morse_reference_reduction_result = morseframes::MorseReferenceReductionResult;
+using Morse_reference_reduction_result = internal::MorseReferenceReductionResult;
 
 /** \brief Full result for direct Simplex-tree Morse persistence.
  *
@@ -74,11 +74,11 @@ struct Simplex_tree_morse_result {
  *  \return Persistence diagram over \f$\mathbb Z_2\f$.
  */
 template <class ComplexView,
-          typename std::enable_if<morseframes::is_complex_view_v<ComplexView>, int>::type = 0>
+          typename std::enable_if<internal::is_complex_view_v<ComplexView>, int>::type = 0>
 Persistence_diagram compute_morse_persistence(
     const ComplexView& complex,
     Morse_sequence_strategy strategy = Morse_sequence_strategy::F_MAX) {
-  return morseframes::compute_morse_reference_persistence(complex, to_kernel_strategy(strategy));
+  return internal::compute_morse_reference_persistence(complex, to_kernel_strategy(strategy));
 }
 
 /** \brief Compute Morse persistence with reducer metrics on a complex view.
@@ -90,11 +90,11 @@ Persistence_diagram compute_morse_persistence(
  *  \return Persistence diagram over \f$\mathbb Z_2\f$ and reducer metrics.
  */
 template <class ComplexView,
-          typename std::enable_if<morseframes::is_complex_view_v<ComplexView>, int>::type = 0>
+          typename std::enable_if<internal::is_complex_view_v<ComplexView>, int>::type = 0>
 Morse_reference_reduction_result compute_morse_persistence_with_metrics(
     const ComplexView& complex,
     Morse_sequence_strategy strategy = Morse_sequence_strategy::F_MAX) {
-  return morseframes::compute_morse_reference_persistence_with_metrics(
+  return internal::compute_morse_reference_persistence_with_metrics(
       complex,
       to_kernel_strategy(strategy));
 }
@@ -108,11 +108,11 @@ Morse_reference_reduction_result compute_morse_persistence_with_metrics(
  *  \return Persistence diagram over \f$\mathbb Z_2\f$.
  */
 template <class ComplexView,
-          typename std::enable_if<morseframes::is_complex_view_v<ComplexView>, int>::type = 0>
+          typename std::enable_if<internal::is_complex_view_v<ComplexView>, int>::type = 0>
 Persistence_diagram compute_morse_persistence(
     const ComplexView& complex,
     const Morse_reference_frame& frame) {
-  morseframes::MorseReferencePersistenceReducer reducer(
+  internal::MorseReferencePersistenceReducer reducer(
       complex,
       frame.sequence,
       frame.references);
@@ -155,11 +155,11 @@ Persistence_diagram compute_morse_persistence(
  *          diagram, and metrics.
  */
 template <class SimplexTree,
-          typename std::enable_if<!morseframes::is_complex_view_v<SimplexTree>, int>::type = 0>
+          typename std::enable_if<!internal::is_complex_view_v<SimplexTree>, int>::type = 0>
 Simplex_tree_morse_result<SimplexTree> compute_morse_persistence(
     const SimplexTree& simplex_tree,
     Morse_sequence_strategy strategy = Morse_sequence_strategy::F_MAX) {
-  auto internal = morseframes::compute_simplex_tree_morse_reference_persistence(
+  auto internal = internal::compute_simplex_tree_morse_reference_persistence(
       simplex_tree,
       to_kernel_strategy(strategy));
   return Simplex_tree_morse_result<SimplexTree>{

@@ -162,7 +162,8 @@ Simplex_tree_morse_result<SimplexTree> compute_morse_persistence(
   auto internal = morseframes::compute_simplex_tree_morse_reference_persistence(
       simplex_tree,
       to_kernel_strategy(strategy),
-      Simplex_tree_filtration_order::PreserveInputWithinDimension);
+      Simplex_tree_filtration_order::PreserveInputWithinDimension,
+      morseframes::ReferenceFrameReleasePolicy::Deferred);
   return Simplex_tree_morse_result<SimplexTree>{
       std::move(internal.view),
       std::move(internal.sequence),

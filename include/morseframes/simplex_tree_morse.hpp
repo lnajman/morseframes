@@ -32,9 +32,14 @@ SimplexTreeMorseReferenceResult<SimplexTree> compute_simplex_tree_morse_referenc
     const SimplexTree& simplex_tree,
     MorseSequenceStrategy strategy = MorseSequenceStrategy::Saturated,
     SimplexTreeFiltrationOrder order_policy =
-        SimplexTreeFiltrationOrder::CanonicalLexicographic) {
+        SimplexTreeFiltrationOrder::CanonicalLexicographic,
+    ReferenceFrameReleasePolicy release_policy = ReferenceFrameReleasePolicy::Eager) {
   auto view = make_simplex_tree_complex_view(simplex_tree, order_policy);
-  auto input = build_morse_reference_reduction_input(view, strategy);
+  auto input = build_morse_reference_reduction_input(
+      view,
+      strategy,
+      false,
+      release_policy);
   MorseReferencePersistenceReducer reducer(view,
                                            input.sequence,
                                            std::move(input.reduction_plan),

@@ -350,6 +350,7 @@ struct Options {
   bool large = false;
   bool lean = false;
   bool canonical_order = false;
+  bool deferred_release = true;
   std::vector<std::string> strategies = {
       "same-level-reduction",
       "f-max",
@@ -361,13 +362,15 @@ struct Options {
 void print_usage(const char* program) {
   std::cerr
       << "Usage: " << program
-      << " [--quick|--large] [--lean] [--canonical-order] [--repeats N]"
-      << " [--strategy NAME]\n"
+      << " [--quick|--large] [--lean] [--canonical-order]"
+      << " [--deferred-release|--eager-release] [--repeats N] [--strategy NAME]\n"
       << "\n"
       << "Prints CSV rows comparing GUDHI persistent cohomology, the direct\n"
       << "Gudhi::Simplex_tree Morse view, and import into FilteredSimplicialComplex.\n"
       << "By default the direct view preserves GUDHI order inside each level/dimension;\n"
-      << "--canonical-order restores lexicographic tie ordering.\n";
+      << "--canonical-order restores lexicographic tie ordering. Reduction input uses\n"
+      << "deferred annotation release by default; --eager-release restores the\n"
+      << "lower-live-memory eager policy.\n";
 }
 
 Options parse_options(int argc, char** argv) {
@@ -400,6 +403,14 @@ Options parse_options(int argc, char** argv) {
     }
     if (argument == "--canonical-order") {
       options.canonical_order = true;
+      continue;
+    }
+    if (argument == "--deferred-release") {
+      options.deferred_release = true;
+      continue;
+    }
+    if (argument == "--eager-release") {
+      options.deferred_release = false;
       continue;
     }
     if (argument == "--repeats") {
@@ -508,6 +519,10 @@ void run_case(const CaseSpec& spec, const Options& options) {
       options.canonical_order
           ? morseframes::SimplexTreeFiltrationOrder::CanonicalLexicographic
           : morseframes::SimplexTreeFiltrationOrder::PreserveInputWithinDimension;
+  const auto release_policy =
+      options.deferred_release
+          ? morseframes::ReferenceFrameReleasePolicy::Deferred
+          : morseframes::ReferenceFrameReleasePolicy::Eager;
 
   for (int repeat = 0; repeat < options.repeats; ++repeat) {
     const auto view = time_value([&]() {
@@ -531,10 +546,10 @@ void run_case(const CaseSpec& spec, const Options& options) {
     for (const std::string& strategy : options.strategies) {
       const auto& view_build_metrics = view.value.build_metrics();
       auto view_input = time_value([&]() {
-        return build_reduction_input(view.value, strategy);
+        return build_reduction_input(view.value, strategy, false, release_policy);
       });
       auto compact_input = time_value([&]() {
-        return build_reduction_input(compact.value, strategy);
+        return build_reduction_input(compact.value, strategy, false, release_policy);
       });
       const std::size_t view_criticals =
           view_input.value.sequence.critical_simplices().size();
@@ -566,8 +581,10 @@ void run_case(const CaseSpec& spec, const Options& options) {
         auto compact_sequence = time_value([&]() {
           return build_sequence(compact.value, strategy);
         });
-        auto view_frame_profile = build_reduction_input(view.value, strategy, true);
-        auto compact_frame_profile = build_reduction_input(compact.value, strategy, true);
+        auto view_frame_profile =
+            build_reduction_input(view.value, strategy, true, release_policy);
+        auto compact_frame_profile =
+            build_reduction_input(compact.value, strategy, true, release_policy);
         auto view_deferred_frame_profile =
             build_reduction_input(view.value,
                                   strategy,
@@ -633,7 +650,8 @@ void run_case(const CaseSpec& spec, const Options& options) {
           return persistence_reducer.compute_with_metrics();
         });
       } else {
-        auto direct_reducer_input = build_reduction_input(view.value, strategy);
+        auto direct_reducer_input =
+            build_reduction_input(view.value, strategy, false, release_policy);
         direct_reducer = time_value([&]() {
           morseframes::MorseReferencePersistenceReducer persistence_reducer(
               view.value,
@@ -643,7 +661,8 @@ void run_case(const CaseSpec& spec, const Options& options) {
           return persistence_reducer.compute_with_metrics();
         });
 
-        auto compact_reducer_input = build_reduction_input(compact.value, strategy);
+        auto compact_reducer_input =
+            build_reduction_input(compact.value, strategy, false, release_policy);
         compact_reducer = time_value([&]() {
           morseframes::MorseReferencePersistenceReducer persistence_reducer(
               compact.value,

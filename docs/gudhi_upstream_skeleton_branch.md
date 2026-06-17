@@ -81,6 +81,13 @@ The current adapter test matrix is:
 tests/test_gudhi_simplex_tree_view.cpp
 ```
 
+Detailed follow-up notes:
+
+```text
+docs/gudhi_upstream_file_map.md
+docs/gudhi_maintainer_scope_note.md
+```
+
 ## Build Check
 
 From the repository root, with GUDHI and Boost headers available:
@@ -112,12 +119,11 @@ the lower-level complex view.
 
 ## Next Mechanical Step
 
-The next upstream-preparation step is to make this branch easy to compare
-against a GUDHI checkout:
+The next upstream-preparation step is to make a pure GUDHI test file from the
+public-API subset of `tests/test_gudhi_simplex_tree_view.cpp`:
 
-- draft a small file-placement checklist for copying `include/gudhi` plus the
-  upstream-shaped example/test into GUDHI;
-- decide which tests should remain in MorseFrames only and which should become
-  GUDHI tests;
-- prepare a short maintainer-facing note describing the algorithmic scope,
-  plateau behavior, and current `Z2` limitation.
+- remove all `morseframes/...` includes;
+- keep the public `Gudhi::morse_persistence` strategy loop;
+- use explicit expected barcode checks on small examples;
+- place the resulting candidate at
+  `test/Morse_persistence/test_morse_persistence_simplex_tree.cpp`.

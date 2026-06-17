@@ -84,22 +84,22 @@ include/gudhi/Morse_persistence/strategy.h
 The implementation currently depends on prototype kernel headers under:
 
 ```text
-morseframes/include/morse/annotation.hpp
-morseframes/include/morse/complex_view.hpp
-morseframes/include/morse/debug_checks.hpp
-morseframes/include/morse/filtered_complex.hpp
-morseframes/include/morse/instrumentation.hpp
-morseframes/include/morse/inverse_annotation_store.hpp
-morseframes/include/morse/morse_reference_api.hpp
-morseframes/include/morse/morse_sequence.hpp
-morseframes/include/morse/reference_persistence.hpp
-morseframes/include/morse/simplex_tree_builder.hpp
-morseframes/include/morse/simplex_tree_morse.hpp
-morseframes/include/morse/working_sets.hpp
+morseframes/include/morseframes/annotation.hpp
+morseframes/include/morseframes/complex_view.hpp
+morseframes/include/morseframes/debug_checks.hpp
+morseframes/include/morseframes/filtered_complex.hpp
+morseframes/include/morseframes/instrumentation.hpp
+morseframes/include/morseframes/inverse_annotation_store.hpp
+morseframes/include/morseframes/morse_reference_api.hpp
+morseframes/include/morseframes/morse_sequence.hpp
+morseframes/include/morseframes/reference_persistence.hpp
+morseframes/include/morseframes/simplex_tree_builder.hpp
+morseframes/include/morseframes/simplex_tree_morse.hpp
+morseframes/include/morseframes/working_sets.hpp
 ```
 
-For the first GUDHI branch, these should not remain under a `morse/` include
-root. A clean layout would be:
+For the first GUDHI branch, these should not remain under the local
+`morseframes/` prototype include root. A clean layout would be:
 
 ```text
 include/gudhi/Morse_persistence/internal/annotation.h
@@ -143,7 +143,7 @@ Recommended upstream structure:
 
 ```cpp
 namespace Gudhi {
-namespace morseframes {
+namespace morse_persistence {
   // Public API.
 
 namespace internal {
@@ -154,8 +154,8 @@ namespace internal {
 }
 ```
 
-This avoids leaking a new top-level `morse` namespace into GUDHI and makes it
-clear which types are stable API.
+This keeps the public namespace consistent with the wrapper already used in the
+prototype and makes it clear which types are stable API.
 
 ## Public API to keep in the first patch
 

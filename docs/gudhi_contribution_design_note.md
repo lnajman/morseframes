@@ -1,8 +1,8 @@
 # GUDHI contribution design note
 
 This note sketches how the current Morse persistence prototype could be shaped
-into a small GUDHI-compatible C++ contribution. It is intentionally narrower
-than the research report: the goal is to describe the API surface, the internal
+into a small GUDHI-compatible C++ contribution. It is intentionally focused on
+the software interface: the goal is to describe the API surface, the internal
 adapter, the assumptions on `Gudhi::Simplex_tree`, and the tests that should be
 in place before discussing integration upstream.
 
@@ -50,8 +50,8 @@ include/gudhi/Morse_persistence/diagram.h
 These public wrapper headers are currently backed by the prototype kernel files:
 
 ```text
-include/morse/morse_reference_api.hpp
-include/morse/simplex_tree_morse.hpp
+include/morseframes/morse_reference_api.hpp
+include/morseframes/simplex_tree_morse.hpp
 include/morseframes/simplex_tree_builder.hpp
 include/morseframes/morse_sequence.hpp
 include/morseframes/reference_persistence.hpp

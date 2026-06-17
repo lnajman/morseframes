@@ -1,6 +1,7 @@
 # Phase 0 Conventions
 
-This prototype follows these conventions while implementing the first `Z2` reference pipeline.
+This prototype follows these conventions for the current MorseFrames reference
+and coreference pipelines.
 
 ## Input
 

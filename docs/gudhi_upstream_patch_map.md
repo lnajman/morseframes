@@ -4,10 +4,11 @@ This document maps the current Morse persistence prototype to a small first
 GUDHI patch. It is not a patch itself; it is the checklist we can use before
 copying code into a GUDHI branch.
 
-The local GUDHI source inspected for this map is:
+The GUDHI source inspected for the current clean-checkout map is:
 
 ```text
-/Users/laurentnajman/Documents/A trier au propre/PortableDisqueE/src/gudhi.3.12.0
+https://github.com/GUDHI/gudhi-devel.git
+HEAD 3a7d79c
 ```
 
 ## First patch objective
@@ -41,19 +42,17 @@ near the existing module list in:
 CMakeLists.txt
 ```
 
-The GUDHI module machinery then looks for optional subdirectories such as:
+The GUDHI development module machinery then looks for optional subdirectories
+inside `src/<module>/`, such as:
 
 ```text
-example/Morse_persistence/CMakeLists.txt
-test/Morse_persistence/CMakeLists.txt
-utilities/Morse_persistence/CMakeLists.txt
+src/Morse_persistence/example/CMakeLists.txt
+src/Morse_persistence/test/CMakeLists.txt
+src/Morse_persistence/utilities/CMakeLists.txt
 ```
 
-The local 3.12.0 source tree does not contain a top-level C++ `test/`
-directory, but `cmake/modules/GUDHI_modules.cmake` supports a `test/<module>`
-subdirectory when `WITH_GUDHI_TEST` and `Boost::unit_test_framework` are
-available. The test path should therefore be prepared in the patch, even if the
-local source archive we inspected does not include other C++ test directories.
+The `test` subdirectory is included when `WITH_GUDHI_TEST` and
+`Boost::unit_test_framework` are available.
 
 ## Header files to move
 
@@ -72,13 +71,13 @@ morseframes/include/gudhi/Morse_persistence/strategy.h
 In a GUDHI branch, these should become:
 
 ```text
-include/gudhi/Morse_persistence.h
-include/gudhi/Morse_persistence/complex_view.h
-include/gudhi/Morse_persistence/diagram.h
-include/gudhi/Morse_persistence/morse_sequence.h
-include/gudhi/Morse_persistence/persistence_reducer.h
-include/gudhi/Morse_persistence/reference_map.h
-include/gudhi/Morse_persistence/strategy.h
+src/Morse_persistence/include/gudhi/Morse_persistence.h
+src/Morse_persistence/include/gudhi/Morse_persistence/complex_view.h
+src/Morse_persistence/include/gudhi/Morse_persistence/diagram.h
+src/Morse_persistence/include/gudhi/Morse_persistence/morse_sequence.h
+src/Morse_persistence/include/gudhi/Morse_persistence/persistence_reducer.h
+src/Morse_persistence/include/gudhi/Morse_persistence/reference_map.h
+src/Morse_persistence/include/gudhi/Morse_persistence/strategy.h
 ```
 
 The implementation currently depends on prototype kernel headers under:
@@ -102,18 +101,18 @@ For the first GUDHI branch, these should not remain under the local
 `morseframes/` prototype include root. A clean layout would be:
 
 ```text
-include/gudhi/Morse_persistence/internal/annotation.h
-include/gudhi/Morse_persistence/internal/complex_view_concept.h
-include/gudhi/Morse_persistence/internal/debug_checks.h
-include/gudhi/Morse_persistence/internal/filtered_complex.h
-include/gudhi/Morse_persistence/internal/instrumentation.h
-include/gudhi/Morse_persistence/internal/inverse_annotation_store.h
-include/gudhi/Morse_persistence/internal/morse_reference_api.h
-include/gudhi/Morse_persistence/internal/morse_sequence.h
-include/gudhi/Morse_persistence/internal/reference_persistence.h
-include/gudhi/Morse_persistence/internal/simplex_tree_builder.h
-include/gudhi/Morse_persistence/internal/simplex_tree_morse.h
-include/gudhi/Morse_persistence/internal/working_sets.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/annotation.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/complex_view.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/field_annotation_store.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/field_arithmetic.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/filtered_complex.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/inverse_annotation_store.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/morse_reference_api.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/morse_sequence.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/reference_persistence.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/simplex_tree_builder.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/simplex_tree_morse.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/working_sets.h
 ```
 
 The public wrappers should include only public GUDHI paths. Internal headers
@@ -227,13 +226,13 @@ morseframes/examples/example_morse_persistence_from_simplex_tree.cpp
 In GUDHI it should move to:
 
 ```text
-example/Morse_persistence/example_morse_persistence_from_simplex_tree.cpp
+src/Morse_persistence/example/example_morse_persistence_from_simplex_tree.cpp
 ```
 
 Add a module example CMake file:
 
 ```text
-example/Morse_persistence/CMakeLists.txt
+src/Morse_persistence/example/CMakeLists.txt
 ```
 
 with:
@@ -264,8 +263,8 @@ morseframes/tests/test_gudhi_simplex_tree_view.cpp
 For a GUDHI branch, split or rename it as:
 
 ```text
-test/Morse_persistence/test_morse_persistence_simplex_tree.cpp
-test/Morse_persistence/CMakeLists.txt
+src/Morse_persistence/test/test_morse_persistence_simplex_tree.cpp
+src/Morse_persistence/test/CMakeLists.txt
 ```
 
 The current skeleton test uses a small runtime `CHECK(...)` helper rather than
@@ -360,13 +359,13 @@ add_gudhi_module(Morse_persistence)
 Example file:
 
 ```text
-example/Morse_persistence/CMakeLists.txt
+src/Morse_persistence/example/CMakeLists.txt
 ```
 
 Test file:
 
 ```text
-test/Morse_persistence/CMakeLists.txt
+src/Morse_persistence/test/CMakeLists.txt
 ```
 
 No utility executable is needed in the first patch. Benchmarks should stay out

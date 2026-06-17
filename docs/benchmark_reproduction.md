@@ -135,7 +135,9 @@ The native GUDHI benchmark compares three in-process paths on the same
 - `GUDHI`: GUDHI persistent cohomology on the original `Simplex_tree`.
 
 This benchmark is optional because it needs GUDHI and Boost headers. Configure
-them explicitly when CMake cannot find them:
+them explicitly when CMake cannot find them. For a GUDHI release tree, use the
+top-level `include` directory; for a GUDHI development checkout, use the
+module include directory such as `src/Simplex_tree/include`.
 
 ```sh
 cmake -S . -B build-gudhi \

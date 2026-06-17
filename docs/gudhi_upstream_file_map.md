@@ -1,8 +1,8 @@
 # GUDHI Upstream File Map
 
 This note records the mechanical placement of the current GUDHI-facing
-MorseFrames branch in a GUDHI checkout. It is a staging checklist, not yet a
-claim that the patch is ready for submission.
+MorseFrames branch in a GUDHI development checkout. It is a staging checklist,
+not yet a pull request.
 
 The current branch is:
 
@@ -10,40 +10,47 @@ The current branch is:
 gudhi-upstream-skeleton
 ```
 
+The clean checkout used for validation was:
+
+```text
+https://github.com/GUDHI/gudhi-devel.git
+HEAD 3a7d79c
+```
+
 ## Header Files
 
 Copy the public umbrella header to:
 
 ```text
-include/gudhi/Morse_persistence.h
+src/Morse_persistence/include/gudhi/Morse_persistence.h
 ```
 
 Copy the public module headers to:
 
 ```text
-include/gudhi/Morse_persistence/complex_view.h
-include/gudhi/Morse_persistence/diagram.h
-include/gudhi/Morse_persistence/morse_sequence.h
-include/gudhi/Morse_persistence/persistence_reducer.h
-include/gudhi/Morse_persistence/reference_map.h
-include/gudhi/Morse_persistence/strategy.h
+src/Morse_persistence/include/gudhi/Morse_persistence/complex_view.h
+src/Morse_persistence/include/gudhi/Morse_persistence/diagram.h
+src/Morse_persistence/include/gudhi/Morse_persistence/morse_sequence.h
+src/Morse_persistence/include/gudhi/Morse_persistence/persistence_reducer.h
+src/Morse_persistence/include/gudhi/Morse_persistence/reference_map.h
+src/Morse_persistence/include/gudhi/Morse_persistence/strategy.h
 ```
 
 Copy the trimmed internal implementation snapshot to:
 
 ```text
-include/gudhi/Morse_persistence/internal/annotation.h
-include/gudhi/Morse_persistence/internal/complex_view.h
-include/gudhi/Morse_persistence/internal/field_annotation_store.h
-include/gudhi/Morse_persistence/internal/field_arithmetic.h
-include/gudhi/Morse_persistence/internal/filtered_complex.h
-include/gudhi/Morse_persistence/internal/inverse_annotation_store.h
-include/gudhi/Morse_persistence/internal/morse_reference_api.h
-include/gudhi/Morse_persistence/internal/morse_sequence.h
-include/gudhi/Morse_persistence/internal/reference_persistence.h
-include/gudhi/Morse_persistence/internal/simplex_tree_builder.h
-include/gudhi/Morse_persistence/internal/simplex_tree_morse.h
-include/gudhi/Morse_persistence/internal/working_sets.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/annotation.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/complex_view.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/field_annotation_store.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/field_arithmetic.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/filtered_complex.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/inverse_annotation_store.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/morse_reference_api.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/morse_sequence.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/reference_persistence.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/simplex_tree_builder.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/simplex_tree_morse.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/working_sets.h
 ```
 
 The copied internal headers are intentionally private implementation details.
@@ -61,26 +68,19 @@ examples/example_morse_persistence_from_simplex_tree.cpp
 to:
 
 ```text
-example/Morse_persistence/example_morse_persistence_from_simplex_tree.cpp
+src/Morse_persistence/example/example_morse_persistence_from_simplex_tree.cpp
 ```
 
 The matching copy-ready CMake stub is:
 
 ```text
-upstream/gudhi/example/Morse_persistence/CMakeLists.txt
+upstream/gudhi/src/Morse_persistence/example/CMakeLists.txt
 ```
 
-A minimal GUDHI `example/Morse_persistence/CMakeLists.txt` is:
+Place it at:
 
-```cmake
-add_executable_with_targets(
-  Morse_persistence_example_from_simplex_tree
-  example_morse_persistence_from_simplex_tree.cpp
-  TBB::tbb)
-
-add_test(
-  NAME Morse_persistence_example_from_simplex_tree
-  COMMAND $<TARGET_FILE:Morse_persistence_example_from_simplex_tree>)
+```text
+src/Morse_persistence/example/CMakeLists.txt
 ```
 
 ## Tests
@@ -88,35 +88,28 @@ add_test(
 The copy-ready GUDHI test candidate is:
 
 ```text
-upstream/gudhi/test/Morse_persistence/test_morse_persistence_simplex_tree.cpp
+upstream/gudhi/src/Morse_persistence/test/test_morse_persistence_simplex_tree.cpp
 ```
 
 Place it at:
 
 ```text
-test/Morse_persistence/test_morse_persistence_simplex_tree.cpp
+src/Morse_persistence/test/test_morse_persistence_simplex_tree.cpp
 ```
 
 The matching copy-ready CMake stub is:
 
 ```text
-upstream/gudhi/test/Morse_persistence/CMakeLists.txt
+upstream/gudhi/src/Morse_persistence/test/CMakeLists.txt
 ```
 
-A minimal GUDHI `test/Morse_persistence/CMakeLists.txt` is:
+Place it at:
 
-```cmake
-add_executable_with_targets(
-  Morse_persistence_test_simplex_tree
-  test_morse_persistence_simplex_tree.cpp
-  TBB::tbb)
-
-add_test(
-  NAME Morse_persistence_test_simplex_tree
-  COMMAND $<TARGET_FILE:Morse_persistence_test_simplex_tree>)
+```text
+src/Morse_persistence/test/CMakeLists.txt
 ```
 
-The upstream test should cover at least:
+The candidate file covers:
 
 - one vertex;
 - one increasing edge;
@@ -125,8 +118,7 @@ The upstream test should cover at least:
 - two components joined late;
 - a one-cycle killed by a later triangle.
 
-The candidate file already covers these cases. For each case, it tests all
-public strategies:
+For each case, it tests all public strategies:
 
 ```text
 SAME_LEVEL_REDUCTION
@@ -135,7 +127,7 @@ F_MIN
 PLATEAU_GREEDY
 ```
 
-The expected checks should include:
+The expected checks include:
 
 - finite off-diagonal intervals;
 - essential intervals;
@@ -163,10 +155,6 @@ add_gudhi_module(Morse_persistence)
 to the module list in the top-level `CMakeLists.txt`, near the other
 header-only topology modules.
 
-The local GUDHI checkout used during MorseFrames development already contains a
-`Morse_persistence` module entry and matching `example/` and `test/`
-directories. A clean checkout should not assume those are present.
-
 ## Local Build Check
 
 From a GUDHI build directory, the intended smoke check is:
@@ -181,7 +169,7 @@ For the MorseFrames staging branch itself, use:
 
 ```sh
 cmake -S . -B build-gudhi-skeleton \
-  -DMORSEFRAMES_GUDHI_INCLUDE_DIR=/path/to/gudhi/include \
+  -DMORSEFRAMES_GUDHI_INCLUDE_DIR=/path/to/gudhi/src/Simplex_tree/include \
   -DMORSEFRAMES_BOOST_INCLUDE_DIR=/path/to/boost/include
 
 cmake --build build-gudhi-skeleton

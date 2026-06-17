@@ -75,6 +75,12 @@ The upstream-shaped example is:
 examples/example_morse_persistence_from_simplex_tree.cpp
 ```
 
+In the current GUDHI development layout this is staged at:
+
+```text
+src/Morse_persistence/example/example_morse_persistence_from_simplex_tree.cpp
+```
+
 The current adapter test matrix is:
 
 ```text
@@ -96,7 +102,7 @@ From the repository root, with GUDHI and Boost headers available:
 
 ```sh
 cmake -S . -B build-gudhi-skeleton \
-  -DMORSEFRAMES_GUDHI_INCLUDE_DIR=/path/to/gudhi/include \
+  -DMORSEFRAMES_GUDHI_INCLUDE_DIR=/path/to/gudhi/src/Simplex_tree/include \
   -DMORSEFRAMES_BOOST_INCLUDE_DIR=/path/to/boost/include
 
 cmake --build build-gudhi-skeleton
@@ -126,18 +132,30 @@ The pure GUDHI test candidate, extracted from the public-API subset of
 `tests/test_gudhi_simplex_tree_view.cpp`, lives at:
 
 ```text
-upstream/gudhi/test/Morse_persistence/test_morse_persistence_simplex_tree.cpp
+upstream/gudhi/src/Morse_persistence/test/test_morse_persistence_simplex_tree.cpp
 ```
 
 ## Next Mechanical Step
 
-The dry run on June 17, 2026 used a disposable copy of the local GUDHI 3.12.0
-source tree, with pre-existing Morse_persistence artifacts excluded before
-copying the staging files in.
+The clean-checkout run on June 17, 2026 used a shallow clone of the public
+GUDHI development repository:
+
+```text
+https://github.com/GUDHI/gudhi-devel.git
+HEAD 3a7d79c
+```
+
+The staged files were copied to the current upstream module layout under:
+
+```text
+src/Morse_persistence/
+```
 
 The following passed:
 
 ```sh
+cmake --build <build> --target Morse_persistence_example_from_simplex_tree
+cmake --build <build> --target Morse_persistence_test_simplex_tree
 ctest -R Morse_persistence --output-on-failure
 ```
 
@@ -156,5 +174,5 @@ upstream/gudhi/MANIFEST.md
 ```
 
 The next mechanical step is to decide whether to generate an actual patch file
-from a clean GUDHI git checkout, or keep this as a copy-ready staging bundle
+from this clean GUDHI git checkout, or keep this as a copy-ready staging bundle
 until the maintainer-facing scope is agreed.

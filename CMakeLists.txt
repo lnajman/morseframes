@@ -117,7 +117,7 @@ if(MORSEFRAMES_BUILD_GUDHI_TOOLS
     )
 
     add_executable(morseframes_gudhi_upstream_simplex_tree_tests
-        upstream/gudhi/test/Morse_persistence/test_morse_persistence_simplex_tree.cpp
+        upstream/gudhi/src/Morse_persistence/test/test_morse_persistence_simplex_tree.cpp
     )
     target_link_libraries(morseframes_gudhi_upstream_simplex_tree_tests PRIVATE morseframes)
     target_include_directories(morseframes_gudhi_upstream_simplex_tree_tests PRIVATE

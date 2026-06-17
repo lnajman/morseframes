@@ -2,7 +2,7 @@
 
 This manifest lists the files that belong to the first upstream-style
 `Morse_persistence` bundle and their intended destinations in a clean GUDHI
-checkout.
+development checkout.
 
 ## Headers
 
@@ -30,7 +30,29 @@ include/gudhi/Morse_persistence/internal/simplex_tree_morse.h
 include/gudhi/Morse_persistence/internal/working_sets.h
 ```
 
-to the same paths in the GUDHI checkout.
+to:
+
+```text
+src/Morse_persistence/include/gudhi/Morse_persistence.h
+src/Morse_persistence/include/gudhi/Morse_persistence/complex_view.h
+src/Morse_persistence/include/gudhi/Morse_persistence/diagram.h
+src/Morse_persistence/include/gudhi/Morse_persistence/morse_sequence.h
+src/Morse_persistence/include/gudhi/Morse_persistence/persistence_reducer.h
+src/Morse_persistence/include/gudhi/Morse_persistence/reference_map.h
+src/Morse_persistence/include/gudhi/Morse_persistence/strategy.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/annotation.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/complex_view.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/field_annotation_store.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/field_arithmetic.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/filtered_complex.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/inverse_annotation_store.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/morse_reference_api.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/morse_sequence.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/reference_persistence.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/simplex_tree_builder.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/simplex_tree_morse.h
+src/Morse_persistence/include/gudhi/Morse_persistence/internal/working_sets.h
+```
 
 The public namespace is:
 
@@ -55,19 +77,19 @@ examples/example_morse_persistence_from_simplex_tree.cpp
 to:
 
 ```text
-example/Morse_persistence/example_morse_persistence_from_simplex_tree.cpp
+src/Morse_persistence/example/example_morse_persistence_from_simplex_tree.cpp
 ```
 
 Copy:
 
 ```text
-upstream/gudhi/example/Morse_persistence/CMakeLists.txt
+upstream/gudhi/src/Morse_persistence/example/CMakeLists.txt
 ```
 
 to:
 
 ```text
-example/Morse_persistence/CMakeLists.txt
+src/Morse_persistence/example/CMakeLists.txt
 ```
 
 ## Test
@@ -75,15 +97,15 @@ example/Morse_persistence/CMakeLists.txt
 Copy:
 
 ```text
-upstream/gudhi/test/Morse_persistence/CMakeLists.txt
-upstream/gudhi/test/Morse_persistence/test_morse_persistence_simplex_tree.cpp
+upstream/gudhi/src/Morse_persistence/test/CMakeLists.txt
+upstream/gudhi/src/Morse_persistence/test/test_morse_persistence_simplex_tree.cpp
 ```
 
 to:
 
 ```text
-test/Morse_persistence/CMakeLists.txt
-test/Morse_persistence/test_morse_persistence_simplex_tree.cpp
+src/Morse_persistence/test/CMakeLists.txt
+src/Morse_persistence/test/test_morse_persistence_simplex_tree.cpp
 ```
 
 The test is intentionally pure GUDHI-facing: it includes only GUDHI headers and
@@ -101,7 +123,7 @@ This should be placed near the other header-only topology modules.
 
 ## Smoke Commands
 
-From a GUDHI build directory configured with examples enabled:
+From a GUDHI build directory configured with examples and tests enabled:
 
 ```sh
 cmake --build . --target Morse_persistence_test_simplex_tree
@@ -113,7 +135,7 @@ The corresponding MorseFrames staging check is:
 
 ```sh
 cmake -S . -B build-gudhi-skeleton \
-  -DMORSEFRAMES_GUDHI_INCLUDE_DIR=/path/to/gudhi/include \
+  -DMORSEFRAMES_GUDHI_INCLUDE_DIR=/path/to/gudhi/src/Simplex_tree/include \
   -DMORSEFRAMES_BOOST_INCLUDE_DIR=/path/to/boost/include
 cmake --build build-gudhi-skeleton
 ctest --test-dir build-gudhi-skeleton --output-on-failure

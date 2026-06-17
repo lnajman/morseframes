@@ -246,8 +246,8 @@ good for deciding whether the adapter is worth integrating.
 
 The prototype already has the key ingredients:
 
-- generic `ComplexView` templates in `morse/morse_reference_api.hpp`;
-- a direct `Gudhi::Simplex_tree<>` adapter in `morse/simplex_tree_morse.hpp`;
+- generic `ComplexView` templates in `morseframes/morse_reference_api.hpp`;
+- a direct `Gudhi::Simplex_tree<>` adapter in `morseframes/simplex_tree_morse.hpp`;
 - GUDHI-shaped wrapper headers under `include/gudhi/Morse_persistence`;
 - deterministic strategy signatures across direct view and compact import;
 - a minimal example in `examples/gudhi_simplex_tree_morse.cpp`;

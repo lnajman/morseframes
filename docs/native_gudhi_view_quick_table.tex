@@ -9,15 +9,15 @@
 \toprule
 Case & Strategy & Simp. & Direct (ms) & Import (ms) & GUDHI (ms) & GUDHI/Direct & GUDHI/Reducer \\
 \midrule
-\texttt{flag-90-r018} & \texttt{f-max} & 952 & 0.32 & 1.03 & 0.23 & \ratioiqr{0.72}{0.70}{0.72} & \ratioiqr{2.37}{2.36}{2.40} \\
-\texttt{flag-90-r018} & \texttt{f-min} & 952 & 0.31 & 1.06 & 0.23 & \ratioiqr{0.74}{0.71}{0.74} & \ratioiqr{2.37}{2.36}{2.46} \\
-\texttt{flag-90-r018} & \texttt{plateau-greedy} & 952 & 0.41 & 1.16 & 0.23 & \ratioiqr{0.56}{0.54}{0.56} & \ratioiqr{2.35}{2.26}{2.36} \\
-\texttt{flag-90-r018} & \slred & 952 & 0.34 & 1.05 & 0.23 & \ratioiqr{0.65}{0.65}{0.67} & \ratioiqr{1.57}{1.55}{1.61} \\
+\texttt{flag-90-r018} & \texttt{f-max} & 952 & 0.28 & 1.48 & 0.32 & \ratioiqr{1.10}{1.09}{1.12} & \ratioiqr{3.97}{3.67}{4.14} \\
+\texttt{flag-90-r018} & \texttt{f-min} & 952 & 0.28 & 1.47 & 0.32 & \ratioiqr{1.14}{1.09}{1.20} & \ratioiqr{4.03}{3.72}{4.17} \\
+\texttt{flag-90-r018} & \texttt{plateau-greedy} & 952 & 0.40 & 1.61 & 0.32 & \ratioiqr{0.79}{0.76}{0.82} & \ratioiqr{3.84}{3.70}{4.01} \\
+\texttt{flag-90-r018} & \slred & 952 & 0.27 & 1.47 & 0.32 & \ratioiqr{1.18}{1.15}{1.21} & \ratioiqr{3.73}{3.62}{3.77} \\
 \midrule
-\texttt{grid-24x24-plateau} & \texttt{f-max} & 3,267 & 0.80 & 2.80 & 0.70 & \ratioiqr{0.95}{0.85}{0.96} & \ratioiqr{5.26}{5.11}{5.48} \\
-\texttt{grid-24x24-plateau} & \texttt{f-min} & 3,267 & 0.83 & 2.81 & 0.70 & \ratioiqr{0.91}{0.58}{0.91} & \ratioiqr{4.97}{4.83}{4.97} \\
-\texttt{grid-24x24-plateau} & \texttt{plateau-greedy} & 3,267 & 1.18 & 3.46 & 0.70 & \ratioiqr{0.60}{0.41}{0.60} & \ratioiqr{4.08}{3.69}{4.68} \\
-\texttt{grid-24x24-plateau} & \slred & 3,267 & 1.10 & 3.28 & 0.70 & \ratioiqr{0.67}{0.56}{0.67} & \ratioiqr{1.78}{1.77}{1.89} \\
+\texttt{grid-24x24-plateau} & \texttt{f-max} & 3,267 & 0.69 & 4.34 & 1.10 & \ratioiqr{1.78}{1.64}{1.81} & \ratioiqr{6.97}{6.84}{7.47} \\
+\texttt{grid-24x24-plateau} & \texttt{f-min} & 3,267 & 0.69 & 4.33 & 1.10 & \ratioiqr{1.72}{1.65}{1.75} & \ratioiqr{6.70}{6.54}{6.96} \\
+\texttt{grid-24x24-plateau} & \texttt{plateau-greedy} & 3,267 & 1.15 & 4.78 & 1.10 & \ratioiqr{0.99}{0.94}{1.05} & \ratioiqr{6.55}{6.42}{6.88} \\
+\texttt{grid-24x24-plateau} & \slred & 3,267 & 1.01 & 4.71 & 1.10 & \ratioiqr{1.25}{1.11}{1.28} & \ratioiqr{3.22}{2.95}{3.30} \\
 \bottomrule
 \end{tabular}
 \caption{Native \texttt{Gudhi::Simplex\_tree} quick benchmark.  \texttt{Direct} uses the read-only \texttt{Simplex\_tree} view and our Morse reducer; \texttt{Import} first copies the complex into the compact owning structure.  \texttt{GUDHI} is GUDHI's in-process persistent cohomology on the same \texttt{Simplex\_tree}.  \texttt{GUDHI/Direct}$<1$ means GUDHI is faster end-to-end; \texttt{GUDHI/Reducer}$>1$ means our reducer alone is faster than GUDHI persistence, excluding view construction and Morse input construction.  Ratio columns show the median with $Q_1$--$Q_3$ underneath when repeat-level rows are available.}

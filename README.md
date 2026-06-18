@@ -18,7 +18,12 @@ The current codebase contains:
 - tests, examples, and reproducible benchmark drivers.
 
 The GUDHI adapter is included to make future upstream integration easier. It
-should be considered experimental.
+should be considered experimental, but the current native benchmark signal is
+encouraging: the optimized direct `Simplex_tree` path is near parity with
+GUDHI persistent cohomology on the tested flag complexes, and faster on the
+tested grid plateau complexes for the F-Min, F-Max, and same-level strategies.
+The generated tables in `docs/native_gudhi_*_table.tex` record the current
+numbers and the reproduction commands live in `docs/benchmark_reproduction.md`.
 
 ## Build the C++ Tests
 

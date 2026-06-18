@@ -143,9 +143,14 @@ The view builds the pieces needed by the Morse algorithms:
 
 - contiguous local simplex ids in `[0, size())`;
 - maps from local ids to `Simplex_tree::Simplex_handle`;
-- sorted vertex tuples for deterministic tie-breaking;
+- sorted vertex tuples, used for canonical same-level tie-breaking when
+  requested;
 - boundary and coboundary lists in local ids;
-- filtration values, level ids, and simplices grouped by level.
+- filtration values, level ids, and simplices grouped by level and dimension;
+- a configurable same-level order policy. The GUDHI-facing default preserves
+  the `Simplex_tree` filtration order inside each level/dimension bucket for
+  speed and compatibility with GUDHI's own traversal. A canonical
+  lexicographic policy remains available for exact tie reproducibility.
 
 This is the useful middle ground. The algorithm gets dense ids and direct
 boundary/coboundary access, while the user keeps the original `Simplex_tree`.
@@ -174,9 +179,9 @@ The first version should document these assumptions explicitly:
 - The first implementation targets ordinary persistence, not extended
   persistence.
 - Equal filtration values are allowed and are treated as genuine plateaus.
-
-For deterministic behavior, tie-breaking should use filtration level,
-dimension, and vertex tuple, not internal Simplex-tree handle order.
+- The default same-level order preserves `Simplex_tree` filtration order inside
+  each dimension bucket. A canonical vertex-tuple order is available when tests
+  or papers need tie-independent reproducibility.
 
 ## Strategy set for the first version
 
@@ -210,7 +215,7 @@ The first upstream-style test set should be small and precise:
 | triangle plus tail with several levels | comparison against standard persistence |
 | disconnected components with one late edge | multiple `H0` births and one merge |
 | one 1-cycle killed by a later 2-simplex | finite `H1` interval |
-| direct Simplex-tree view vs compact import | identical barcode and identical strategy signature |
+| direct Simplex-tree view vs compact import | same off-diagonal barcode and essential intervals |
 | all public strategies on the same complex | valid sequence, valid references, same persistence barcode |
 
 For each strategy, tests should check:
@@ -227,6 +232,11 @@ contract. Different valid reductions may represent diagonal intervals
 differently, while the off-diagonal intervals and essential classes should be
 stable.
 
+When the canonical same-level order is selected, the direct view and compact
+import tests may additionally check identical strategy signatures. Under the
+optimized default order, the stronger signature equality is not the right
+contract because both paths can choose different valid same-level pairs.
+
 ## Benchmark shape
 
 The benchmark should not try to prove absolute superiority in a first PR. It
@@ -242,20 +252,61 @@ The current native benchmark already separates direct view construction,
 compact import, sequence/reference construction, and reducer time. That shape is
 good for deciding whether the adapter is worth integrating.
 
+## Current benchmark signal
+
+The optimized native benchmark compares three paths on the same
+`Gudhi::Simplex_tree` input:
+
+- `Direct`: read-only `Simplex_tree` view, Morse sequence/reference
+  construction, and Morse reducer;
+- `Import`: copy into the compact owning MorseFrames complex, then run the same
+  Morse pipeline;
+- `GUDHI`: GUDHI's in-process persistent cohomology on the original
+  `Simplex_tree`.
+
+The public table fragments report median ratios, with interquartile ranges when
+repeat-level rows are available. In those tables, `GUDHI/Direct > 1` means the
+direct MorseFrames path is faster end-to-end, while `GUDHI/Reducer > 1` means
+the Morse reducer kernel alone is faster than GUDHI persistence after the
+Morse input has already been constructed.
+
+The current default-size table (`docs/native_gudhi_view_default_r30_table.tex`)
+has `GUDHI/Direct` ratios from `0.73` to `2.07`. F-Max and F-Min are near
+parity on the two flag complexes (`0.98` to `1.05`) and faster on the two grid
+plateau complexes (`1.68` to `2.07`). Same-level reduction is close to parity
+on flags and faster on grids. Plateau-greedy is intentionally more expensive:
+it is slower on flags and only competitive or faster on the grid plateau cases.
+
+The larger lean table (`docs/native_gudhi_large_lean_r30_table.tex`) has
+`GUDHI/Direct` ratios from `0.72` to `1.91`. The same pattern remains: F-Max
+and F-Min are near parity on the larger flag case and faster on large grid
+plateaus, while plateau-greedy pays for its scoring rule.
+
+Across these runs, `GUDHI/Reducer` is above `1` for all reported rows, often by
+a large margin on plateau grids. The remaining gap is therefore mainly in
+pre-reducer work: building the view, constructing the Morse sequence, and
+building the reference/reduction input. This is the next engineering target if
+we want the direct GUDHI path to beat GUDHI more consistently end-to-end.
+
 ## Current prototype status
 
 The prototype already has the key ingredients:
 
-- generic `ComplexView` templates in `morse/morse_reference_api.hpp`;
-- a direct `Gudhi::Simplex_tree<>` adapter in `morse/simplex_tree_morse.hpp`;
+- generic `ComplexView` templates in `include/morseframes/morse_reference_api.hpp`;
+- a direct `Gudhi::Simplex_tree<>` adapter in
+  `include/morseframes/simplex_tree_morse.hpp`;
 - GUDHI-shaped wrapper headers under `include/gudhi/Morse_persistence`;
-- deterministic strategy signatures across direct view and compact import;
+- an optimized GUDHI-facing same-level order that preserves
+  `Simplex_tree` filtration order inside dimension buckets, plus a canonical
+  lexicographic order for reproducibility tests;
 - a minimal example in `examples/gudhi_simplex_tree_morse.cpp`;
 - a candidate upstream-style example in
   `examples/example_morse_persistence_from_simplex_tree.cpp`;
 - C++ tests in `tests/test_gudhi_simplex_tree_view.cpp`, including the small
   maintainer matrix above;
 - a native benchmark in `benchmarks/benchmark_gudhi_view.cpp`;
+- generated benchmark tables in `docs/native_gudhi_view_default_r30_table.tex`
+  and `docs/native_gudhi_large_lean_r30_table.tex`;
 - prototype prime-field support and coefficient-overhead benchmarks, kept out
   of the first GUDHI-facing API.
 

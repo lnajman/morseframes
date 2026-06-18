@@ -271,22 +271,22 @@ the Morse reducer kernel alone is faster than GUDHI persistence after the
 Morse input has already been constructed.
 
 The current default-size table (`docs/native_gudhi_view_default_r30_table.tex`)
-has `GUDHI/Direct` ratios from `0.82` to `2.16`. F-Max and F-Min are faster
-end-to-end on both flag complexes (`1.15` to `1.26`) and on both grid plateau
-complexes (`1.83` to `2.16`). Same-level reduction is also faster on all four
-default rows (`1.29` to `2.04`). Plateau-greedy is intentionally more
-expensive: it remains slower on the flag complexes, but is competitive or
-faster on the grid plateau cases.
+has `GUDHI/Direct` ratios from `0.84` to `2.22`. F-Max and F-Min are faster
+end-to-end on both flag complexes (`1.18` to `1.30`) and on both grid plateau
+complexes (`1.87` to `2.22`). Same-level reduction is also faster on all four
+default rows (`1.31` to `2.20`). Plateau-greedy is intentionally more
+expensive: it remains slower on the flag complexes, but is faster on the grid
+plateau cases.
 
 The larger lean table (`docs/native_gudhi_large_lean_r30_table.tex`) has
-`GUDHI/Direct` ratios from `0.83` to `2.03`. The same pattern remains: F-Max
-and F-Min are faster on the larger flag case (`1.20` to `1.30`) and on large
-grid plateaus (`1.57` to `2.03`), same-level reduction is faster on every
-reported large row (`1.29` to `1.96`), and plateau-greedy pays for its scoring
-rule while staying near parity on the larger grid plateaus.
+`GUDHI/Direct` ratios from `0.83` to `2.16`. The same pattern remains: F-Max
+and F-Min are faster on the larger flag case (`1.19` to `1.27`) and on large
+grid plateaus (`1.65` to `2.16`), same-level reduction is faster on every
+reported large row (`1.34` to `2.15`), and plateau-greedy pays for its scoring
+rule while staying near parity or faster on the larger grid plateaus.
 
 Across these runs, `GUDHI/Reducer` is above `1` for all reported rows, with a
-minimum around `3.15` and much larger margins on several plateau grids. The
+minimum around `3.26` and much larger margins on several plateau grids. The
 inline inverse-list storage substantially reduced reducer time, so the
 remaining cost is now more balanced across pre-reducer work and the reducer:
 view extraction, boundary/coboundary construction, Morse sequence

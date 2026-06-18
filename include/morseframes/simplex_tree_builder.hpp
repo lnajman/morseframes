@@ -892,7 +892,7 @@ class SimplexTreeComplexView {
         elapsed_nanoseconds(after_scan, after_lookup_setup);
 
     for (SimplexId simplex_id : vertex_simplex_ids) {
-      const auto& vertices = record(simplex_id).vertices;
+      const auto& vertices = simplices_[simplex_id].vertices;
       if (use_dense_vertex_lookup) {
         SimplexId& stored_id = dense_vertex_to_id[vertices[0]];
         if (stored_id != kInvalidSimplex) {
@@ -909,7 +909,7 @@ class SimplexTreeComplexView {
       }
     }
     for (SimplexId simplex_id : edge_simplex_ids) {
-      const auto& vertices = record(simplex_id).vertices;
+      const auto& vertices = simplices_[simplex_id].vertices;
       if (use_dense_edge_lookup) {
         VertexId lhs = vertices[0];
         VertexId rhs = vertices[1];
@@ -976,7 +976,7 @@ class SimplexTreeComplexView {
 
     std::vector<VertexId> face_vertices;
     for (SimplexId simplex_id = 0; simplex_id < simplices_.size(); ++simplex_id) {
-      auto& simplex = record(simplex_id);
+      auto& simplex = simplices_[simplex_id];
       simplex.boundary.clear();
       const auto& vertices = simplex.vertices;
       if (vertices.size() == 1) {
@@ -985,7 +985,7 @@ class SimplexTreeComplexView {
 
       simplex.boundary.reserve(vertices.size());
       auto append_face = [&](SimplexId face_id) {
-        if (record(face_id).filtration > simplex.filtration + 1e-12) {
+        if (simplices_[face_id].filtration > simplex.filtration + 1e-12) {
           throw std::invalid_argument("Simplex tree view filtration is not monotone on faces.");
         }
         simplex.boundary.push_back(face_id);
@@ -1053,7 +1053,7 @@ class SimplexTreeComplexView {
 
     for (SimplexId simplex_id = 0; simplex_id < simplices_.size(); ++simplex_id) {
       for (SimplexId face : simplices_[simplex_id].boundary) {
-        record(face).coboundary.push_back(simplex_id);
+        simplices_[face].coboundary.push_back(simplex_id);
       }
     }
     const auto after_fill = Clock::now();

@@ -739,6 +739,7 @@ class MorseReferenceFrameBuilder {
     MorseSequenceBuildMetrics sequence_build_metrics;
     reserve_reduction_plan_storage(plan);
     const bool eager_release = release_policy_ == ReferenceFrameReleasePolicy::Eager;
+    const bool track_live_reference_metrics = collect_frame_timing_ || eager_release;
     auto* sequence_metrics = collect_frame_timing_ ? &sequence_build_metrics : nullptr;
 
     const auto remaining_start =
@@ -756,6 +757,11 @@ class MorseReferenceFrameBuilder {
     }
 
     auto replace_reference = [&](SimplexId simplex, Annotation annotation) {
+      if (!track_live_reference_metrics) {
+        references[simplex] = std::move(annotation);
+        return;
+      }
+
       if (!references[simplex].empty()) {
         --frame_metrics.final_live_nonempty_annotations;
         frame_metrics.final_live_total_annotation_size -= references[simplex].size();
@@ -783,7 +789,7 @@ class MorseReferenceFrameBuilder {
 
     auto move_reference = [&](SimplexId simplex) {
       Annotation annotation = std::move(references[simplex]);
-      if (!annotation.empty()) {
+      if (track_live_reference_metrics && !annotation.empty()) {
         --frame_metrics.final_live_nonempty_annotations;
         frame_metrics.final_live_total_annotation_size -= annotation.size();
       }

@@ -826,6 +826,17 @@ class MorseReferenceFrameBuilder {
 
     auto sequence = [&]() {
       if (!collect_frame_timing_) {
+        if (!eager_release) {
+          return build_sequence([&](const MorseSequence& sequence, const MorseStep& step) {
+            update_reference_for_step(sequence, step, references, reference_update_scratch);
+            update_reduction_plan_for_step(sequence,
+                                           step,
+                                           references,
+                                           mark_present,
+                                           plan);
+          }, sequence_metrics);
+        }
+
         return build_sequence([&](const MorseSequence& sequence, const MorseStep& step) {
           update_reference_for_step(
               sequence, step, references, reference_update_scratch, replace_reference);

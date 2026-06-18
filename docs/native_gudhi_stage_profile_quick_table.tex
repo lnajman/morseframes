@@ -8,15 +8,15 @@
 \toprule
 Case & Strategy & Extract & Bound. & Cobd. & Order & Seq. & Frame & Reducer & Direct & Largest \\
 \midrule
-\texttt{flag-90-r018} & \texttt{f-max} & 0.03 & 0.03 & 0.04 & 0.01 & 0.05 & 0.04 & 0.08 & 0.29 & \texttt{sequence} \\
-\texttt{flag-90-r018} & \texttt{f-min} & 0.03 & 0.03 & 0.04 & 0.01 & 0.05 & 0.04 & 0.08 & 0.28 & \texttt{sequence} \\
-\texttt{flag-90-r018} & \texttt{plateau-greedy} & 0.03 & 0.03 & 0.04 & 0.01 & 0.16 & 0.05 & 0.08 & 0.41 & \texttt{sequence} \\
-\texttt{flag-90-r018} & \texttt{same-level} & 0.03 & 0.03 & 0.04 & 0.01 & 0.04 & 0.04 & 0.09 & 0.27 & \texttt{frame-extra} \\
+\texttt{flag-90-r018} & \texttt{f-max} & 0.03 & 0.02 & 0.04 & 0.01 & 0.05 & 0.05 & 0.08 & 0.28 & \texttt{sequence} \\
+\texttt{flag-90-r018} & \texttt{f-min} & 0.03 & 0.02 & 0.04 & 0.01 & 0.05 & 0.04 & 0.08 & 0.27 & \texttt{sequence} \\
+\texttt{flag-90-r018} & \texttt{plateau-greedy} & 0.03 & 0.02 & 0.04 & 0.01 & 0.18 & 0.04 & 0.09 & 0.40 & \texttt{sequence} \\
+\texttt{flag-90-r018} & \texttt{same-level} & 0.03 & 0.02 & 0.04 & 0.01 & 0.04 & 0.04 & 0.08 & 0.27 & \texttt{frame-extra} \\
 \midrule
-\texttt{grid-24x24-plateau} & \texttt{f-max} & 0.10 & 0.08 & 0.07 & 0.03 & 0.15 & 0.07 & 0.16 & 0.64 & \texttt{sequence} \\
-\texttt{grid-24x24-plateau} & \texttt{f-min} & 0.10 & 0.08 & 0.07 & 0.03 & 0.11 & 0.11 & 0.16 & 0.66 & \texttt{sequence} \\
-\texttt{grid-24x24-plateau} & \texttt{plateau-greedy} & 0.10 & 0.08 & 0.07 & 0.03 & 0.53 & 0.09 & 0.17 & 1.07 & \texttt{sequence} \\
-\texttt{grid-24x24-plateau} & \texttt{same-level} & 0.10 & 0.08 & 0.07 & 0.03 & 0.11 & 0.14 & 0.34 & 0.88 & \texttt{frame-extra} \\
+\texttt{grid-24x24-plateau} & \texttt{f-max} & 0.10 & 0.09 & 0.07 & 0.03 & 0.11 & 0.06 & 0.16 & 0.61 & \texttt{sequence} \\
+\texttt{grid-24x24-plateau} & \texttt{f-min} & 0.10 & 0.09 & 0.07 & 0.03 & 0.12 & 0.06 & 0.16 & 0.62 & \texttt{sequence} \\
+\texttt{grid-24x24-plateau} & \texttt{plateau-greedy} & 0.10 & 0.09 & 0.07 & 0.03 & 0.65 & 0.11 & 0.17 & 1.10 & \texttt{sequence} \\
+\texttt{grid-24x24-plateau} & \texttt{same-level} & 0.10 & 0.09 & 0.07 & 0.03 & 0.15 & 0.23 & 0.53 & 1.16 & \texttt{frame-extra} \\
 \bottomrule
 \end{tabular}
 \caption{Native GUDHI plugin stage profile in milliseconds.  The first four timing columns split construction of the read-only \texttt{Simplex\_tree} view into simplex extraction, boundary lookup, coboundary construction, and filtration ordering.  \texttt{Seq.} times sequence construction alone.  \texttt{Frame extra} is the fused reduction-input time minus sequence-only time, so it estimates reference/reduction-input overhead.}

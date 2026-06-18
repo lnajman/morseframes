@@ -8,16 +8,16 @@
 \toprule
 Source & Split & Cases & Best metric(s) & Cur./best pen. \% & Gap pp & Decision \\
 \midrule
-Report & Base & 27 & Adapt/Adapt-S/CR & 2.22/2.22 & 0.00 & keep \\
-Report & CAM & 9 & Adapt/Adapt-S/CR/PTW & 0.66/0.66 & 0.00 & keep \\
-Report & Roadmap & 3 & Adapt/Adapt-S/PTW & 2.31/2.31 & 0.00 & keep \\
-Extended & Base hold-out & 60 & Adapt/Adapt-S/CR & 3.68/3.68 & 0.00 & keep \\
-Extended & CAM hold-out & 9 & Adapt/Adapt-S/CR/PTW & 2.17/2.17 & 0.00 & keep \\
-Extended & Roadmap hold-out & 3 & Adapt/Adapt-S/PTW & 0.99/0.99 & 0.00 & keep \\
-Plateau & Plateau hold-out & 100 & Adapt/Adapt-S/CR/ERW & 5.05/5.05 & 0.00 & keep \\
-Terrain & Terrain hold-out & 20 & Adapt/Adapt-S/CR/ERW & 1.74/1.74 & 0.00 & keep \\
-Image & Image hold-out & 20 & Adapt-S/Psec/PTW & 2.86/1.70 & 1.16 & switch candidate \\
-Image+ & Image stress & 20 & Adapt-S/Psec/PTW & 0.49/0.42 & 0.07 & watch best \\
+Report & Base & 27 & PTW & 4.42/4.37 & 0.06 & watch best \\
+Report & CAM & 9 & Adapt/Adapt-S/CR/PTW & 1.29/1.29 & 0.00 & keep \\
+Report & Roadmap & 3 & Adapt/Adapt-S/PTW & 0.00/0.00 & 0.00 & keep \\
+Extended & Base hold-out & 60 & PTW & 7.33/1.99 & 5.33 & switch candidate \\
+Extended & CAM hold-out & 9 & Adapt/Adapt-S/CR/PTW & 0.67/0.67 & 0.00 & keep \\
+Extended & Roadmap hold-out & 3 & Adapt/Adapt-S/PTW & 0.00/0.00 & 0.00 & keep \\
+Plateau & Plateau hold-out & 100 & Psec/PTW & 4.21/1.25 & 2.96 & switch candidate \\
+Terrain & Terrain hold-out & 20 & Psec/PTW & 6.64/6.53 & 0.11 & watch best \\
+Image & Image hold-out & 20 & Adapt/CR/ERW & 1.36/1.36 & 0.00 & keep \\
+Image+ & Image stress & 20 & Adapt-S/Psec/PTW & 4.57/4.11 & 0.46 & watch best \\
 \bottomrule
 \end{tabular}
 \caption{Selector-decision audit over the aggregate rows of the fair

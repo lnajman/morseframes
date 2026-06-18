@@ -36,7 +36,7 @@ class FieldAnnotationStore {
         throw std::invalid_argument("Working set contains a duplicate simplex id.");
       }
       const std::size_t local = annotations_.size();
-      simplex_to_local_[simplex] = local;
+      simplex_to_local_[simplex] = checked_local_id(local);
       annotations_.push_back(full_annotations[simplex]);
       initialize_inverse_entries(local, annotations_.back());
     }
@@ -67,7 +67,7 @@ class FieldAnnotationStore {
       if (simplex_to_local_[simplex] != kInvalidLocal) {
         throw std::invalid_argument("Working set contains a duplicate simplex id.");
       }
-      simplex_to_local_[simplex] = local;
+      simplex_to_local_[simplex] = checked_local_id(local);
       initialize_inverse_entries(local, annotations_[local]);
     }
   }
@@ -88,7 +88,7 @@ class FieldAnnotationStore {
     check_label(label);
     auto& candidates = inverse_lists_[label];
     while (!candidates.empty()) {
-      const std::size_t local = candidates.back();
+      const std::size_t local = static_cast<std::size_t>(candidates.back());
       ++metrics_.remove_candidate_scans;
       remove_label_from_annotation(local, label);
       ++metrics_.remove_applied;
@@ -112,7 +112,7 @@ class FieldAnnotationStore {
     const std::uint32_t inverse_pivot = modp_inverse(pivot_coefficient, modulus_);
     auto& candidates = inverse_lists_[pivot];
     while (!candidates.empty()) {
-      const std::size_t local = candidates.back();
+      const std::size_t local = static_cast<std::size_t>(candidates.back());
       const std::uint32_t coefficient =
           field_annotation_coefficient(annotations_.at(local), pivot);
       if (coefficient == 0) {
@@ -127,7 +127,26 @@ class FieldAnnotationStore {
   }
 
  private:
-  static constexpr std::size_t kInvalidLocal = std::numeric_limits<std::size_t>::max();
+  using LocalId = SimplexId;
+  using PositionId = CriticalId;
+  using PositionList = SmallAnnotation<2>;
+  using InverseList = SmallAnnotation<2>;
+
+  static constexpr LocalId kInvalidLocal = std::numeric_limits<LocalId>::max();
+
+  static LocalId checked_local_id(std::size_t local) {
+    if (local >= std::numeric_limits<LocalId>::max()) {
+      throw std::overflow_error("Too many local field annotations.");
+    }
+    return static_cast<LocalId>(local);
+  }
+
+  static PositionId checked_position_id(std::size_t position) {
+    if (position >= std::numeric_limits<PositionId>::max()) {
+      throw std::overflow_error("Too many field inverse-list entries.");
+    }
+    return static_cast<PositionId>(position);
+  }
 
   void check_label(CriticalId label) const {
     if (label >= inverse_lists_.size()) {
@@ -139,7 +158,7 @@ class FieldAnnotationStore {
     if (simplex >= simplex_to_local_.size() || simplex_to_local_[simplex] == kInvalidLocal) {
       throw std::out_of_range("Simplex annotation is outside the stored working set.");
     }
-    return simplex_to_local_[simplex];
+    return static_cast<std::size_t>(simplex_to_local_[simplex]);
   }
 
   void validate_field_annotation(const FieldAnnotation& annotation) const {
@@ -174,8 +193,8 @@ class FieldAnnotationStore {
     positions.reserve(annotation.size());
     for (const auto& entry : annotation) {
       const CriticalId label = entry.label;
-      positions.push_back(inverse_lists_[label].size());
-      inverse_lists_[label].push_back(local);
+      positions.push_back(checked_position_id(inverse_lists_[label].size()));
+      inverse_lists_[label].push_back(checked_local_id(local));
       ++metrics_.initial_inverse_list_entries;
     }
   }
@@ -197,22 +216,24 @@ class FieldAnnotationStore {
       metrics_.remove_max_annotation_size = annotation.size();
     }
     const std::size_t label_index = static_cast<std::size_t>(it - annotation.begin());
-    remove_inverse_entry(label, local, annotation_positions_.at(local).at(label_index));
+    remove_inverse_entry(label, local, annotation_positions_[local][label_index]);
     annotation.erase(it);
     annotation_positions_[local].erase(annotation_positions_[local].begin() + label_index);
   }
 
   void remove_inverse_entry(CriticalId label, std::size_t local, std::size_t position) {
     auto& inverse = inverse_lists_.at(label);
-    if (position >= inverse.size() || inverse[position] != local) {
+    const LocalId local_id = checked_local_id(local);
+    if (position >= inverse.size() || inverse[position] != local_id) {
       throw std::logic_error("Field inverse annotation position is inconsistent.");
     }
 
-    const std::size_t moved_local = inverse.back();
-    inverse[position] = moved_local;
+    const LocalId moved_local_id = inverse.back();
+    inverse[position] = moved_local_id;
     inverse.pop_back();
 
     if (position < inverse.size()) {
+      const std::size_t moved_local = static_cast<std::size_t>(moved_local_id);
       auto& moved_annotation = annotations_.at(moved_local);
       auto it = std::lower_bound(
           moved_annotation.begin(),
@@ -226,7 +247,8 @@ class FieldAnnotationStore {
       }
       const std::size_t moved_label_index =
           static_cast<std::size_t>(it - moved_annotation.begin());
-      annotation_positions_.at(moved_local).at(moved_label_index) = position;
+      annotation_positions_[moved_local][moved_label_index] =
+          checked_position_id(position);
     }
   }
 
@@ -248,7 +270,7 @@ class FieldAnnotationStore {
     metrics_.xor_changed_labels += changed_labels->size();
 
     FieldAnnotation old_annotation = std::move(annotations_.at(local));
-    std::vector<std::size_t> old_positions = std::move(annotation_positions_.at(local));
+    PositionList old_positions = std::move(annotation_positions_.at(local));
     const std::size_t input_size = old_annotation.size() + changed_labels->size();
     metrics_.xor_total_input_size += input_size;
     if (input_size > metrics_.xor_max_input_size) {
@@ -256,7 +278,7 @@ class FieldAnnotationStore {
     }
 
     FieldAnnotation new_annotation;
-    std::vector<std::size_t> new_positions;
+    PositionList new_positions;
     new_annotation.reserve(old_annotation.size() + changed_labels->size());
     new_positions.reserve(old_annotation.size() + changed_labels->size());
 
@@ -280,8 +302,8 @@ class FieldAnnotationStore {
             modp_multiply(scale, (*changed_labels)[right].coefficient, modulus_);
         if (coefficient != 0) {
           new_annotation.push_back(FieldAnnotationEntry{label, coefficient});
-          new_positions.push_back(inverse_lists_[label].size());
-          inverse_lists_[label].push_back(local);
+          new_positions.push_back(checked_position_id(inverse_lists_[label].size()));
+          inverse_lists_[label].push_back(checked_local_id(local));
           ++metrics_.inverse_list_appends;
           ++metrics_.xor_inserted_labels;
         }
@@ -316,9 +338,9 @@ class FieldAnnotationStore {
   }
 
   std::vector<FieldAnnotation> annotations_;
-  std::vector<std::vector<std::size_t>> annotation_positions_;
-  std::vector<std::size_t> simplex_to_local_;
-  std::vector<std::vector<std::size_t>> inverse_lists_;
+  std::vector<PositionList> annotation_positions_;
+  std::vector<LocalId> simplex_to_local_;
+  std::vector<InverseList> inverse_lists_;
   std::size_t num_labels_ = 0;
   std::uint32_t modulus_ = 2;
   InverseAnnotationStoreMetrics metrics_;

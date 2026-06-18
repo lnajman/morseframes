@@ -157,6 +157,9 @@ class InverseAnnotationStore {
   // Most annotations have one or two labels; inline position storage avoids
   // one heap allocation per small inverse-position list.
   using PositionList = SmallAnnotation<2>;
+  // Most labels occur in only a few annotations; inline inverse-list storage
+  // avoids one heap allocation per small label list.
+  using InverseList = SmallAnnotation<2>;
 
   static constexpr LocalId kInvalidLocal = std::numeric_limits<LocalId>::max();
 
@@ -341,7 +344,7 @@ class InverseAnnotationStore {
   std::vector<Annotation> annotations_;
   std::vector<PositionList> annotation_positions_;
   std::vector<LocalId> simplex_to_local_;
-  std::vector<std::vector<LocalId>> inverse_lists_;
+  std::vector<InverseList> inverse_lists_;
   Annotation scratch_annotation_;
   Annotation scratch_update_;
   PositionList scratch_positions_;

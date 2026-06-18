@@ -75,6 +75,10 @@ class SmallAnnotation {
     data()[size_++] = label;
   }
 
+  void pop_back() {
+    --size_;
+  }
+
   iterator insert(const_iterator position, CriticalId label) {
     const std::size_t index = static_cast<std::size_t>(position - begin());
     if (size_ == capacity_) {

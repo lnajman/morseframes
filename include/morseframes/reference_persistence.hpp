@@ -657,7 +657,9 @@ class MorseReferenceFrameBuilder {
       return;
     }
 
-    replace_reference(step.tau, Annotation{});
+    if (!references[step.tau].empty()) {
+      replace_reference(step.tau, Annotation{});
+    }
     Annotation lower_reference;
     for (SimplexId face : complex_.boundary(step.tau)) {
       if (face != step.sigma && !references[face].empty()) {

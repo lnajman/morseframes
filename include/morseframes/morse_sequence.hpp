@@ -57,9 +57,7 @@ struct MorseSequenceBuildMetrics {
 class MorseSequence {
  public:
   explicit MorseSequence(std::size_t num_simplices)
-      : critical_index_of_simplex_(num_simplices, -1),
-        entry_time_of_simplex_(num_simplices, kInvalidEntry),
-        paired_with_(num_simplices, kInvalidSimplex) {
+      : critical_index_of_simplex_(num_simplices, -1) {
     steps_.reserve(num_simplices);
     critical_simplices_.reserve(num_simplices);
   }
@@ -72,9 +70,8 @@ class MorseSequence {
     steps_.push_back(step);
 
     const auto critical_id = static_cast<std::int32_t>(critical_simplices_.size());
-    critical_index_of_simplex_.at(sigma) = critical_id;
+    critical_index_of_simplex_[sigma] = critical_id;
     critical_simplices_.push_back(sigma);
-    entry_time_of_simplex_.at(sigma) = static_cast<std::uint32_t>(steps_.size() - 1);
   }
 
   void add_regular_pair(SimplexId sigma, SimplexId tau, LevelId level) {
@@ -84,12 +81,6 @@ class MorseSequence {
     step.tau = tau;
     step.level = level;
     steps_.push_back(step);
-
-    paired_with_.at(sigma) = tau;
-    paired_with_.at(tau) = sigma;
-    const auto entry_time = static_cast<std::uint32_t>(steps_.size() - 1);
-    entry_time_of_simplex_.at(sigma) = entry_time;
-    entry_time_of_simplex_.at(tau) = entry_time;
   }
 
   const std::vector<MorseStep>& steps() const { return steps_; }
@@ -99,19 +90,15 @@ class MorseSequence {
   }
 
   std::int32_t critical_index(SimplexId simplex) const {
-    return critical_index_of_simplex_.at(simplex);
+    return critical_index_of_simplex_[simplex];
   }
 
   bool is_critical(SimplexId simplex) const { return critical_index(simplex) >= 0; }
 
  private:
-  static constexpr std::uint32_t kInvalidEntry = std::numeric_limits<std::uint32_t>::max();
-
   std::vector<MorseStep> steps_;
   std::vector<SimplexId> critical_simplices_;
   std::vector<std::int32_t> critical_index_of_simplex_;
-  std::vector<std::uint32_t> entry_time_of_simplex_;
-  std::vector<SimplexId> paired_with_;
 };
 
 template <class ComplexView = FilteredSimplicialComplex>

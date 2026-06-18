@@ -166,6 +166,21 @@ PYTHONPATH=python python3 tools/render_native_gudhi_stage_profile.py \
   --summary
 ```
 
+Default-size repeat run:
+
+```sh
+./build-gudhi/morseframes_benchmark_gudhi_view \
+  --repeats 30 \
+  > ../work/native_gudhi_view_default_r30.csv
+
+PYTHONPATH=python python3 tools/render_native_gudhi_view_table.py \
+  --input ../work/native_gudhi_view_default_r30.csv \
+  --output docs/native_gudhi_view_default_r30_table.tex \
+  --caption-title "Native \\texttt{Gudhi::Simplex\\_tree} default benchmark." \
+  --label tab:native-gudhi-view-default-r30 \
+  --summary
+```
+
 Larger lean run:
 
 ```sh

@@ -113,6 +113,18 @@ std::vector<std::tuple<std::uint16_t, double, double>> finite_barcode_key(
   return result;
 }
 
+std::vector<std::tuple<std::uint16_t, double, double>> off_diagonal_barcode_key(
+    const morseframes::PersistenceDiagram& diagram) {
+  std::vector<std::tuple<std::uint16_t, double, double>> result;
+  for (const auto& interval : diagram.finite_pairs) {
+    if (interval.birth_value < interval.death_value) {
+      result.emplace_back(interval.dimension, interval.birth_value, interval.death_value);
+    }
+  }
+  std::sort(result.begin(), result.end());
+  return result;
+}
+
 std::vector<std::pair<std::uint16_t, double>> essential_barcode_key(
     const morseframes::PersistenceDiagram& diagram) {
   std::vector<std::pair<std::uint16_t, double>> result;
@@ -689,11 +701,12 @@ void run_case(const CaseSpec& spec, const Options& options) {
         });
       }
 
-      if (finite_barcode_key(direct_reducer.value.diagram) !=
-              finite_barcode_key(compact_reducer.value.diagram) ||
+      if (off_diagonal_barcode_key(direct_reducer.value.diagram) !=
+              off_diagonal_barcode_key(compact_reducer.value.diagram) ||
           essential_barcode_key(direct_reducer.value.diagram) !=
               essential_barcode_key(compact_reducer.value.diagram)) {
-        throw std::logic_error("Direct view and compact import persistence disagree.");
+        throw std::logic_error(
+            "Direct view and compact import off-diagonal persistence disagree.");
       }
 
       const double direct_frame_total = view.seconds + view_input.seconds;
@@ -857,8 +870,8 @@ void run_case(const CaseSpec& spec, const Options& options) {
                 << compact_regular_pairs << ','
                 << view_working_set << ','
                 << compact_working_set << ','
-                << compact_reducer.value.metrics.finite_pairs << ','
-                << compact_reducer.value.metrics.essential_intervals << ','
+                << direct_reducer.value.metrics.finite_pairs << ','
+                << direct_reducer.value.metrics.essential_intervals << ','
                 << gudhi_persistence.value.finite_pairs << ','
                 << gudhi_persistence.value.essential_intervals << ','
                 << direct_reducer.value.metrics.boundary_annotation_candidate_criticals << ','

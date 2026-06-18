@@ -745,7 +745,10 @@ class MorseReferenceFrameBuilder {
                                       std::vector<std::uint8_t>& present,
                                       ReferenceReductionPlan& plan) const {
     auto mark_present = [&](SimplexId simplex) {
-      present[simplex] = 1;
+      if (!present[simplex]) {
+        present[simplex] = 1;
+        plan.working_set.push_back(simplex);
+      }
     };
     update_reduction_plan_for_step(sequence, step, references, mark_present, plan);
   }
@@ -843,7 +846,10 @@ class MorseReferenceFrameBuilder {
     };
 
     auto mark_present = [&](SimplexId simplex) {
-      present[simplex] = 1;
+      if (!present[simplex]) {
+        present[simplex] = 1;
+        plan.working_set.push_back(simplex);
+      }
     };
 
     auto sequence = [&]() {
@@ -958,11 +964,6 @@ class MorseReferenceFrameBuilder {
     const auto pack_start =
         collect_frame_timing_ ? Clock::now() : Clock::time_point{};
     std::vector<Annotation> annotations;
-    for (SimplexId simplex = 0; simplex < present.size(); ++simplex) {
-      if (present[simplex]) {
-        plan.working_set.push_back(simplex);
-      }
-    }
     annotations.reserve(plan.working_set.size());
     for (SimplexId simplex : plan.working_set) {
       annotations.push_back(move_reference(simplex));

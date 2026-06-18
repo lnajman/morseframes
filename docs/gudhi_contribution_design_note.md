@@ -271,14 +271,14 @@ the Morse reducer kernel alone is faster than GUDHI persistence after the
 Morse input has already been constructed.
 
 The current default-size table (`docs/native_gudhi_view_default_r30_table.tex`)
-has `GUDHI/Direct` ratios from `0.73` to `2.07`. F-Max and F-Min are near
-parity on the two flag complexes (`0.98` to `1.05`) and faster on the two grid
-plateau complexes (`1.68` to `2.07`). Same-level reduction is close to parity
+has `GUDHI/Direct` ratios from `0.74` to `2.00`. F-Max and F-Min are near
+parity on the two flag complexes (`0.99` to `1.08`) and faster on the two grid
+plateau complexes (`1.70` to `2.00`). Same-level reduction is close to parity
 on flags and faster on grids. Plateau-greedy is intentionally more expensive:
 it is slower on flags and only competitive or faster on the grid plateau cases.
 
 The larger lean table (`docs/native_gudhi_large_lean_r30_table.tex`) has
-`GUDHI/Direct` ratios from `0.72` to `1.91`. The same pattern remains: F-Max
+`GUDHI/Direct` ratios from `0.72` to `1.94`. The same pattern remains: F-Max
 and F-Min are near parity on the larger flag case and faster on large grid
 plateaus, while plateau-greedy pays for its scoring rule.
 

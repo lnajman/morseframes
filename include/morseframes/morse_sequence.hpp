@@ -57,7 +57,7 @@ struct MorseSequenceBuildMetrics {
 class MorseSequence {
  public:
   explicit MorseSequence(std::size_t num_simplices)
-      : critical_index_of_simplex_(num_simplices, -1) {
+      : num_simplices_(num_simplices) {
     steps_.reserve(num_simplices);
     critical_simplices_.reserve(num_simplices);
   }
@@ -70,8 +70,10 @@ class MorseSequence {
     steps_.push_back(step);
 
     const auto critical_id = static_cast<std::int32_t>(critical_simplices_.size());
-    critical_index_of_simplex_[sigma] = critical_id;
     critical_simplices_.push_back(sigma);
+    if (!critical_index_of_simplex_.empty()) {
+      critical_index_of_simplex_[sigma] = critical_id;
+    }
   }
 
   void add_regular_pair(SimplexId sigma, SimplexId tau, LevelId level) {
@@ -86,19 +88,33 @@ class MorseSequence {
   const std::vector<MorseStep>& steps() const { return steps_; }
   const std::vector<SimplexId>& critical_simplices() const { return critical_simplices_; }
   const std::vector<std::int32_t>& critical_index_of_simplex() const {
+    ensure_critical_index_map();
     return critical_index_of_simplex_;
   }
 
   std::int32_t critical_index(SimplexId simplex) const {
+    ensure_critical_index_map();
     return critical_index_of_simplex_[simplex];
   }
 
   bool is_critical(SimplexId simplex) const { return critical_index(simplex) >= 0; }
 
  private:
+  void ensure_critical_index_map() const {
+    if (critical_index_of_simplex_.size() == num_simplices_) {
+      return;
+    }
+    critical_index_of_simplex_.assign(num_simplices_, -1);
+    for (std::size_t index = 0; index < critical_simplices_.size(); ++index) {
+      critical_index_of_simplex_[critical_simplices_[index]] =
+          static_cast<std::int32_t>(index);
+    }
+  }
+
+  std::size_t num_simplices_ = 0;
   std::vector<MorseStep> steps_;
   std::vector<SimplexId> critical_simplices_;
-  std::vector<std::int32_t> critical_index_of_simplex_;
+  mutable std::vector<std::int32_t> critical_index_of_simplex_;
 };
 
 template <class ComplexView = FilteredSimplicialComplex>

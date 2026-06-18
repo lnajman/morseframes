@@ -634,7 +634,9 @@ class MorseReferenceFrameBuilder {
   void update_reference_for_critical(CriticalId critical_id,
                                      SimplexId simplex,
                                      std::vector<Annotation>& references) const {
-    references[simplex] = Annotation{critical_id};
+    Annotation& reference = references[simplex];
+    reference.clear();
+    reference.push_back(critical_id);
   }
 
   void update_reference_for_regular_pair(SimplexId sigma,
@@ -642,13 +644,13 @@ class MorseReferenceFrameBuilder {
                                          std::vector<Annotation>& references,
                                          Annotation& scratch) const {
     references[tau].clear();
-    Annotation lower_reference;
+    Annotation& lower_reference = references[sigma];
+    lower_reference.clear();
     for (SimplexId face : complex_.boundary(tau)) {
       if (face != sigma && !references[face].empty()) {
         xor_annotations_in_place(lower_reference, references[face], scratch);
       }
     }
-    references[sigma] = std::move(lower_reference);
   }
 
   void update_reference_for_step(const MorseSequence& sequence,

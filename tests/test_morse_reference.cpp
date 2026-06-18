@@ -14,6 +14,7 @@
 #include "morseframes/filtered_complex.hpp"
 #include "morseframes/instrumentation.hpp"
 #include "morseframes/inverse_annotation_store.hpp"
+#include "morseframes/morse_reference_api.hpp"
 #include "morseframes/morse_sequence.hpp"
 #include "morseframes/reference_persistence.hpp"
 #include "morseframes/simplex_tree_builder.hpp"
@@ -110,6 +111,14 @@ PersistenceDiagram run_reference(FilteredSimplicialComplex& complex) {
   morseframes::validate_reference_invariants(complex, sequence, references);
   auto morse_diagram =
       morseframes::MorseReferencePersistenceReducer(complex, sequence, references).compute();
+  auto morse_metrics_result =
+      morseframes::MorseReferencePersistenceReducer(complex, sequence, references)
+          .compute_with_metrics();
+  auto public_morse_diagram =
+      morseframes::compute_morse_reference_persistence(
+          complex, morseframes::MorseSequenceStrategy::Saturated);
+  assert_same_barcode(morse_diagram, morse_metrics_result.diagram);
+  assert_same_barcode(morse_diagram, public_morse_diagram);
 
   auto frame = morseframes::MorseReferenceFrameBuilder(complex).build_saturated();
   morseframes::validate_morse_sequence(complex, frame.sequence);

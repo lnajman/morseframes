@@ -1105,7 +1105,69 @@ class MorseReferencePersistenceReducer {
                      sequence.critical_simplices().size()) {}
 
   PersistenceDiagram compute() {
-    return compute_with_metrics().diagram;
+    const auto& critical_simplices = sequence_.critical_simplices();
+    std::vector<std::uint8_t> active(critical_simplices.size(), 0);
+    std::vector<std::uint8_t> killed(critical_simplices.size(), 0);
+    PersistenceDiagram diagram;
+    diagram.finite_pairs.reserve(reduction_plan_.boundary_candidates.size());
+    diagram.essential.reserve(critical_simplices.size());
+
+    for (CriticalId critical_id : reduction_plan_.zero_boundary_critical_ids) {
+      active[critical_id] = 1;
+    }
+
+    Annotation boundary_annotation;
+    for (const auto& candidate : reduction_plan_.boundary_candidates) {
+      const CriticalId sigma_critical_id = candidate.critical_id;
+      const SimplexId sigma = candidate.simplex;
+      boundary_annotation.clear();
+      const std::size_t last_boundary_face =
+          candidate.first_boundary_face + candidate.boundary_face_count;
+      for (std::size_t face_index = candidate.first_boundary_face;
+           face_index < last_boundary_face;
+           ++face_index) {
+        const auto& face =
+            reduction_plan_.boundary_annotation_faces[face_index];
+        const auto& face_annotation =
+            annotations_.annotation_by_local_unchecked(face.local_index);
+        if (!face_annotation.empty()) {
+          xor_annotations_in_place(boundary_annotation, face_annotation);
+        }
+      }
+
+      if (boundary_annotation.empty()) {
+        active[sigma_critical_id] = 1;
+        continue;
+      }
+
+      const CriticalId pivot = boundary_annotation.back();
+      const SimplexId birth = critical_simplices[pivot];
+      diagram.finite_pairs.push_back(PersistencePair{
+          birth,
+          sigma,
+          complex_.dimension(birth),
+          complex_.filtration(birth),
+          complex_.filtration(sigma),
+      });
+
+      killed[pivot] = 1;
+      remove_negative_label(sigma_critical_id);
+      eliminate_pivot(pivot, boundary_annotation);
+    }
+
+    for (CriticalId id = 0; id < critical_simplices.size(); ++id) {
+      if (!active[id] || killed[id]) {
+        continue;
+      }
+      const SimplexId birth = critical_simplices[id];
+      diagram.essential.push_back(EssentialInterval{
+          birth,
+          complex_.dimension(birth),
+          complex_.filtration(birth),
+      });
+    }
+
+    return diagram;
   }
 
   MorseReferenceReductionResult compute_with_metrics() {

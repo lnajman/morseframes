@@ -160,7 +160,12 @@ template <class ComplexView>
 PersistenceDiagram compute_morse_reference_persistence(
     const ComplexView& complex,
     MorseSequenceStrategy strategy) {
-  return compute_morse_reference_persistence_with_metrics(complex, strategy).diagram;
+  auto input = build_morse_reference_reduction_input(complex, strategy);
+  MorseReferencePersistenceReducer reducer(complex,
+                                           input.sequence,
+                                           std::move(input.reduction_plan),
+                                           std::move(input.annotations));
+  return reducer.compute();
 }
 
 }  // namespace morseframes

@@ -623,19 +623,32 @@ class MorseReferenceFrameBuilder {
                                  std::vector<Annotation>& references,
                                  Annotation& scratch) const {
     if (step.type == MorseStepType::Critical) {
-      references[step.sigma] =
-          Annotation{current_callback_critical_id(sequence)};
+      update_reference_for_critical(
+          current_callback_critical_id(sequence), step.sigma, references);
       return;
     }
 
-    references[step.tau].clear();
+    update_reference_for_regular_pair(step.sigma, step.tau, references, scratch);
+  }
+
+  void update_reference_for_critical(CriticalId critical_id,
+                                     SimplexId simplex,
+                                     std::vector<Annotation>& references) const {
+    references[simplex] = Annotation{critical_id};
+  }
+
+  void update_reference_for_regular_pair(SimplexId sigma,
+                                         SimplexId tau,
+                                         std::vector<Annotation>& references,
+                                         Annotation& scratch) const {
+    references[tau].clear();
     Annotation lower_reference;
-    for (SimplexId face : complex_.boundary(step.tau)) {
-      if (face != step.sigma && !references[face].empty()) {
+    for (SimplexId face : complex_.boundary(tau)) {
+      if (face != sigma && !references[face].empty()) {
         xor_annotations_in_place(lower_reference, references[face], scratch);
       }
     }
-    references[step.sigma] = std::move(lower_reference);
+    references[sigma] = std::move(lower_reference);
   }
 
   void update_reference_for_step(const MorseSequence& sequence,
@@ -689,10 +702,19 @@ class MorseReferenceFrameBuilder {
     }
 
     const CriticalId critical_id = current_callback_critical_id(sequence);
-    mark_present(step.sigma);
+    update_reduction_plan_for_critical(
+        critical_id, step.sigma, references, std::forward<MarkPresent>(mark_present), plan);
+  }
 
+  template <typename MarkPresent>
+  void update_reduction_plan_for_critical(CriticalId critical_id,
+                                          SimplexId critical,
+                                          const std::vector<Annotation>& references,
+                                          MarkPresent&& mark_present,
+                                          ReferenceReductionPlan& plan) const {
+    mark_present(critical);
     bool may_have_nonzero_boundary = false;
-    const auto& boundary = complex_.boundary(step.sigma);
+    const auto& boundary = complex_.boundary(critical);
     plan.boundary_face_scans += boundary.size();
     const std::size_t first_boundary_face = plan.boundary_annotation_faces.size();
     for (std::size_t boundary_index = 0; boundary_index < boundary.size(); ++boundary_index) {
@@ -708,7 +730,7 @@ class MorseReferenceFrameBuilder {
     if (may_have_nonzero_boundary) {
       plan.boundary_candidates.push_back(ReferenceReductionCandidate{
           critical_id,
-          step.sigma,
+          critical,
           first_boundary_face,
           plan.boundary_annotation_faces.size() - first_boundary_face});
     } else {
@@ -828,12 +850,15 @@ class MorseReferenceFrameBuilder {
       if (!collect_frame_timing_) {
         if (!eager_release) {
           return build_sequence([&](const MorseSequence& sequence, const MorseStep& step) {
-            update_reference_for_step(sequence, step, references, reference_update_scratch);
-            update_reduction_plan_for_step(sequence,
-                                           step,
-                                           references,
-                                           mark_present,
-                                           plan);
+            if (step.type == MorseStepType::Critical) {
+              const CriticalId critical_id = current_callback_critical_id(sequence);
+              update_reference_for_critical(critical_id, step.sigma, references);
+              update_reduction_plan_for_critical(
+                  critical_id, step.sigma, references, mark_present, plan);
+              return;
+            }
+            update_reference_for_regular_pair(
+                step.sigma, step.tau, references, reference_update_scratch);
           }, sequence_metrics);
         }
 

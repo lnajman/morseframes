@@ -130,8 +130,10 @@ sphinx-build -b html docs docs/_build/html
 ```
 
 - `docs/python_api.md` summarizes the public Python API.
-- `docs/overview.rst` explains the main objects and computation model.
+- `docs/project_overview.rst` explains the main objects and computation model.
 - `docs/minimal_examples.rst` gives small copy-paste examples.
+- `docs/inspecting_morse_data.rst` shows how to inspect sequences, maps,
+  Morse complexes, and barcodes.
 - `docs/strategies.md` explains the Morse sequence strategies and terminology.
 - `docs/python_prime_field_tutorial.md` explains persistence over `F_p`.
 - `docs/cpp_complex_view_api.md` describes the C++ complex-view interface.

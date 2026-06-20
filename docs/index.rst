@@ -16,6 +16,7 @@ the benchmark tables.
    project_overview
    quickstart
    minimal_examples
+   inspecting_morse_data
    python_api
    python_prime_field_tutorial
    strategies

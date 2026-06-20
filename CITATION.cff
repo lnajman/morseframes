@@ -1,11 +1,21 @@
 cff-version: 1.2.0
-message: "If you use MorseFrames, please cite the repository and the associated paper once available."
+message: "If you use MorseFrames in academic work, please cite it using this metadata."
+type: software
 title: "MorseFrames"
 authors:
-  - family-names: "Najman"
-    given-names: "Laurent"
-date-released: 2026-06-16
-version: "0.1.0"
+  - family-names: Najman
+    given-names: Laurent
+abstract: >-
+  Experimental C++ and Python software for Morse sequences, reference and
+  coreference maps, Morse complexes, and Morse-based persistent homology.
+version: "0.1.0-alpha.1"
+date-released: "2026-06-20"
+license: MIT
 repository-code: "https://github.com/lnajman/morseframes"
-license: "MIT"
-
+url: "https://morseframes.readthedocs.io/"
+keywords:
+  - persistent homology
+  - discrete Morse theory
+  - Morse sequence
+  - computational topology
+  - simplicial complex

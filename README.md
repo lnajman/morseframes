@@ -16,6 +16,8 @@ with the
 [quick start](https://morseframes.readthedocs.io/en/latest/quickstart.html),
 and
 [minimal examples](https://morseframes.readthedocs.io/en/latest/minimal_examples.html).
+Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development instructions and
+[CITATION.cff](CITATION.cff) for citation metadata.
 
 The current codebase contains:
 
@@ -141,6 +143,16 @@ sphinx-build -b html docs docs/_build/html
 - `docs/benchmark_reproduction.md` explains how to regenerate benchmark tables.
 - Generated benchmark table fragments live in `docs/*_table.tex`; the scripts
   that regenerate them live in `tools/`.
+
+## Citation
+
+If you use MorseFrames in academic work, please cite it using the metadata in
+`CITATION.cff`.
+
+## Contributing
+
+Development and testing instructions are collected in `CONTRIBUTING.md`.
+Release notes are collected in `CHANGELOG.md`.
 
 ## Status
 

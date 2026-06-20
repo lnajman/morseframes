@@ -106,6 +106,17 @@ MORSEFRAMES_DISABLE_CPP_BACKEND=1 python3 -m unittest discover -s python/tests -
 
 ## Documentation
 
+Read the Docs is configured through `.readthedocs.yaml`. After importing the
+GitHub project with the `morseframes` slug, the public documentation will be
+available at <https://morseframes.readthedocs.io/>.
+
+The documentation can also be built locally:
+
+```sh
+python3 -m pip install -r docs/requirements.txt
+sphinx-build -b html docs docs/_build/html
+```
+
 - `docs/python_api.md` summarizes the public Python API.
 - `docs/strategies.md` explains the Morse sequence strategies and terminology.
 - `docs/python_prime_field_tutorial.md` explains persistence over `F_p`.

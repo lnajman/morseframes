@@ -29,5 +29,6 @@ dist/
 *.toc
 docs/*_prose.tex
 docs/experiments_morse_persistence*.pdf
+docs/_build/
 
 .DS_Store

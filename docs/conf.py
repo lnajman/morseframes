@@ -20,7 +20,7 @@ try:
 
     release = morseframes.__version__
 except Exception:
-    release = "0.1.0"
+    release = "0.1.0a1"
 
 version = release
 

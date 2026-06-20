@@ -8,7 +8,7 @@ authors:
 abstract: >-
   Experimental C++ and Python software for Morse sequences, reference and
   coreference maps, Morse complexes, and Morse-based persistent homology.
-version: "0.1.0-alpha.1"
+version: "0.1.0a1"
 date-released: "2026-06-20"
 license: MIT
 repository-code: "https://github.com/lnajman/morseframes"

@@ -2,7 +2,7 @@
 
 All notable changes to MorseFrames are recorded here.
 
-## 0.1.0-alpha.1 - 2026-06-20
+## 0.1.0a1 - 2026-06-20
 
 Initial public alpha release.
 

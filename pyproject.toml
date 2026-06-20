@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "morseframes"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "Morse sequences, reference maps, Morse complexes, and Morse-based persistent homology"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,8 +18,18 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Programming Language :: C++",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Topic :: Scientific/Engineering :: Mathematics",
 ]
+
+[project.urls]
+Homepage = "https://github.com/lnajman/morseframes"
+Documentation = "https://morseframes.readthedocs.io/"
+Source = "https://github.com/lnajman/morseframes"
+Changelog = "https://github.com/lnajman/morseframes/blob/main/CHANGELOG.md"
+Issues = "https://github.com/lnajman/morseframes/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=7,<9"]
@@ -35,6 +45,7 @@ cmake.args = [
   "-DMORSEFRAMES_BUILD_GUDHI_TOOLS=OFF",
 ]
 wheel.packages = ["python/morseframes"]
+wheel.exclude = ["morseframes/_core_bindings.cpp"]
 
 [tool.scikit-build.editable]
 mode = "inplace"

@@ -17,7 +17,7 @@ from math import inf, isclose
 from time import perf_counter
 from typing import Callable, Iterable, Iterator, Mapping, Sequence
 
-__version__ = "0.1.0"
+__version__ = "0.1.0a1"
 
 if os.environ.get("MORSEFRAMES_DISABLE_CPP_BACKEND"):
     _morse_core = None

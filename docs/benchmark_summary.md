@@ -71,6 +71,49 @@ starts: read-only view construction plus Morse frame construction. That is why
 the next optimization work should focus on the view, sequence construction, and
 reference-input construction rather than only the annotation reducer.
 
+## Compact Tables
+
+The tables below are short, rendered summaries of the current public benchmark
+fragments. The full LaTeX fragments remain the source for paper-style tables.
+
+### Synthetic Scale
+
+| Family | Strategy | Critical % | Morse time | Std/Morse |
+| --- | ---: | ---: | ---: | ---: |
+| lower-star | `f-max` | 18.8 | 59.3 us | 1.97 (1.91-1.99) |
+| lower-star | `f-min` | 18.8 | 86.7 us | 1.34 (1.29-1.35) |
+| lower-star | `saturated` | 18.8 | 112.9 us | 1.08 (1.03-1.09) |
+| lower-star | same-level | 36.2 | 86.7 us | 1.32 (1.26-1.37) |
+| plateau | `f-max` | 22.1 | 66.0 us | 1.82 (1.62-1.88) |
+| plateau | `f-min` | 22.1 | 99.8 us | 1.15 (1.09-1.18) |
+| plateau | `saturated` | 22.1 | 99.7 us | 1.16 (1.11-1.21) |
+| plateau | same-level | 38.5 | 87.2 us | 1.30 (1.26-1.34) |
+| Rips | `f-max` | 67.3 | 970.3 us | 4.13 (3.97-4.61) |
+| Rips | `f-min` | 67.3 | 1,146.1 us | 3.65 (3.41-3.86) |
+| Rips | `saturated` | 67.3 | 1,361.1 us | 2.91 (2.84-3.20) |
+| Rips | same-level | 94.2 | 820.0 us | 5.32 (4.69-5.64) |
+
+### Native GUDHI View
+
+This compact table reports the best `GUDHI/Direct` strategy for each default
+30-repeat native case.
+
+| Case | Simplices | Best direct strategy | Direct | GUDHI | GUDHI/Direct | GUDHI/Reducer |
+| --- | ---: | --- | ---: | ---: | ---: | ---: |
+| `flag-120-r018` | 2,081 | same-level | 0.65 ms | 0.88 ms | 1.32 (1.31-1.36) | 4.40 (4.26-4.49) |
+| `flag-160-r016` | 2,957 | same-level | 0.99 ms | 1.35 ms | 1.36 (1.33-1.44) | 4.33 (4.22-4.65) |
+| `grid-32x32-plateau` | 5,891 | `f-max` | 1.35 ms | 2.68 ms | 1.91 (1.84-1.99) | 7.41 (7.24-7.59) |
+| `grid-48x48-plateau` | 13,443 | `f-max` | 2.31 ms | 5.07 ms | 2.28 (2.13-2.34) | 116.89 (110.65-120.28) |
+
+### Direct-Path Stage Split
+
+| Stage group | Share | Interpretation |
+| --- | ---: | --- |
+| Read-only view construction | 38.2% | Simplex extraction, boundary lookup, coboundary construction, and filtration order arrays. |
+| Morse frame construction | 37.9% | Morse sequence plus reference/reduction-input construction. |
+| Reducer kernel | 24.3% | Annotation reduction after the Morse input has been built. |
+| All pre-reducer work | 75.7% | Current native-adapter bottleneck before reduction starts. |
+
 ## Public Artifacts
 
 The main table fragments are tracked in the repository:

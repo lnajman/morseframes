@@ -12,7 +12,7 @@ Morse-based persistent homology.
 Documentation is available at
 <https://morseframes.readthedocs.io/en/latest/>. New readers may want to start
 with the
-[overview](https://morseframes.readthedocs.io/en/latest/overview.html),
+[overview](https://morseframes.readthedocs.io/en/latest/project_overview.html),
 [quick start](https://morseframes.readthedocs.io/en/latest/quickstart.html),
 and
 [minimal examples](https://morseframes.readthedocs.io/en/latest/minimal_examples.html).

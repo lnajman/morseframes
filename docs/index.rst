@@ -13,7 +13,7 @@ the benchmark tables.
    :maxdepth: 2
    :caption: User guide
 
-   overview
+   project_overview
    quickstart
    minimal_examples
    python_api

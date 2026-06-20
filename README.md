@@ -1,5 +1,10 @@
 # MorseFrames
 
+[![CI](https://github.com/lnajman/morseframes/actions/workflows/ci.yml/badge.svg)](https://github.com/lnajman/morseframes/actions/workflows/ci.yml)
+[![Documentation Status](https://readthedocs.org/projects/morseframes/badge/?version=latest)](https://morseframes.readthedocs.io/en/latest/?badge=latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+
 MorseFrames is an experimental C++ and Python library for working with
 Morse sequences, reference and coreference maps, Morse complexes, and
 Morse-based persistent homology.

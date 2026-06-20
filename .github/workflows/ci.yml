@@ -9,7 +9,9 @@ env:
 
 jobs:
   test:
+    name: C++ and Python (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -23,6 +25,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
       - name: Configure C++
         run: cmake -S . -B build -DMORSEFRAMES_BUILD_GUDHI_TOOLS=OFF
 
@@ -30,16 +35,34 @@ jobs:
         run: cmake --build build --parallel
 
       - name: Test C++
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --timeout 120
 
       - name: Install Python package
         run: python -m pip install -e .
 
-      - name: Smoke-test Python package
+      - name: Smoke-test native Python package
         run: python -c "import morseframes as mf; print(mf.__version__, mf.cpp_backend_available()); assert mf.cpp_backend_available()"
 
-      - name: Test Python
+      - name: Test pure-Python fallback
         run: MORSEFRAMES_DISABLE_CPP_BACKEND=1 python -m unittest discover -s python/tests -p "test_*.py"
 
       - name: Run Python quickstart
         run: python python/examples/quickstart.py
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install documentation dependencies
+        run: python -m pip install -r docs/requirements.txt
+
+      - name: Build documentation
+        run: MORSEFRAMES_DISABLE_CPP_BACKEND=1 python -m sphinx -W --keep-going -b html docs docs/_build/html

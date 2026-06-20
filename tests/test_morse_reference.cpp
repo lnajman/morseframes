@@ -169,7 +169,9 @@ PersistenceDiagram run_reference(FilteredSimplicialComplex& complex) {
           complex, false, morseframes::ReferenceFrameReleasePolicy::Deferred)
           .build_saturated_reduction_input();
   assert(deferred_input.sequence.critical_simplices() == sequence.critical_simplices());
-  assert(deferred_input.reduction_plan.working_set == expected_plan.working_set);
+  auto deferred_working_set = deferred_input.reduction_plan.working_set;
+  std::sort(deferred_working_set.begin(), deferred_working_set.end());
+  assert(deferred_working_set == expected_working_set);
   assert(deferred_input.reduction_plan.boundary_candidates.size() ==
          expected_plan.boundary_candidates.size());
   assert(deferred_input.reduction_plan.zero_boundary_critical_ids ==

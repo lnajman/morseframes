@@ -49,7 +49,7 @@ The sequence and reference map can also be computed in one pass:
    diagram = mf.compute_morse_persistence(
        complex_,
        frame.sequence,
-       frame.reference_map,
+       frame.references,
    )
 
 Prime-field coefficients are available by passing a prime modulus:

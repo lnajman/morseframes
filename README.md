@@ -9,6 +9,14 @@ MorseFrames is an experimental C++ and Python library for working with
 Morse sequences, reference and coreference maps, Morse complexes, and
 Morse-based persistent homology.
 
+Documentation is available at
+<https://morseframes.readthedocs.io/en/latest/>. New readers may want to start
+with the
+[overview](https://morseframes.readthedocs.io/en/latest/overview.html),
+[quick start](https://morseframes.readthedocs.io/en/latest/quickstart.html),
+and
+[minimal examples](https://morseframes.readthedocs.io/en/latest/minimal_examples.html).
+
 The current codebase contains:
 
 - a header-only C++ core for filtered simplicial complexes;
@@ -111,9 +119,8 @@ MORSEFRAMES_DISABLE_CPP_BACKEND=1 python3 -m unittest discover -s python/tests -
 
 ## Documentation
 
-Read the Docs is configured through `.readthedocs.yaml`. After importing the
-GitHub project with the `morseframes` slug, the public documentation will be
-available at <https://morseframes.readthedocs.io/>.
+Read the Docs is configured through `.readthedocs.yaml`. The public
+documentation is available at <https://morseframes.readthedocs.io/>.
 
 The documentation can also be built locally:
 
@@ -123,6 +130,8 @@ sphinx-build -b html docs docs/_build/html
 ```
 
 - `docs/python_api.md` summarizes the public Python API.
+- `docs/overview.rst` explains the main objects and computation model.
+- `docs/minimal_examples.rst` gives small copy-paste examples.
 - `docs/strategies.md` explains the Morse sequence strategies and terminology.
 - `docs/python_prime_field_tutorial.md` explains persistence over `F_p`.
 - `docs/cpp_complex_view_api.md` describes the C++ complex-view interface.

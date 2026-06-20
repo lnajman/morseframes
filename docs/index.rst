@@ -13,7 +13,9 @@ the benchmark tables.
    :maxdepth: 2
    :caption: User guide
 
+   overview
    quickstart
+   minimal_examples
    python_api
    python_prime_field_tutorial
    strategies

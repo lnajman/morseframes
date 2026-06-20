@@ -2,8 +2,8 @@ Minimal Examples
 ================
 
 The examples below are intentionally small and can be pasted into a Python
-session after installing the package, or from the repository root with
-``PYTHONPATH=python``.
+session after installing ``morseframes`` from PyPI, or from the repository root
+with ``PYTHONPATH=python``.
 
 One Edge
 --------

@@ -290,6 +290,5 @@ fig.show()
 Plotly is optional and can be installed with:
 
 ```sh
-python3 -m pip install -e ".[plotting]"
+python3 -m pip install "morseframes[plotting]==0.1.0a1"
 ```
-

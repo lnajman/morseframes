@@ -9,6 +9,12 @@ The documentation is split between user-facing Python material, implementation
 notes for the C++ core and GUDHI adapter, and reproducibility instructions for
 the benchmark tables.
 
+The current public alpha can be installed from PyPI:
+
+.. code-block:: sh
+
+   python3 -m pip install "morseframes==0.1.0a1"
+
 .. toctree::
    :maxdepth: 2
    :caption: User guide

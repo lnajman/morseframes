@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/lnajman/morseframes/actions/workflows/ci.yml/badge.svg)](https://github.com/lnajman/morseframes/actions/workflows/ci.yml)
 [![Documentation Status](https://readthedocs.org/projects/morseframes/badge/?version=latest)](https://morseframes.readthedocs.io/en/latest/?badge=latest)
+[![PyPI](https://img.shields.io/pypi/v/morseframes.svg)](https://pypi.org/project/morseframes/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 
@@ -65,15 +66,16 @@ cmake -S . -B build -DMORSEFRAMES_BUILD_GUDHI_TOOLS=OFF
 
 ## Python Quick Start
 
-The Python package is installable in editable mode. This uses
-`scikit-build-core` and `nanobind` to build the optional native backend:
+The current public alpha is available on PyPI:
 
 ```sh
-python3 -m pip install -e .
+python3 -m pip install "morseframes==0.1.0a1"
 python3 -c "import morseframes as mf; print(mf.__version__, mf.cpp_backend_available())"
 ```
 
-For development, install the test dependency as well:
+For development from a source checkout, install in editable mode with the test
+dependency as well. This uses `scikit-build-core` and `nanobind` to build the
+optional native backend:
 
 ```sh
 python3 -m pip install -e ".[dev]"

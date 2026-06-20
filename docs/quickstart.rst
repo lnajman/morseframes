@@ -1,11 +1,17 @@
 Quick Start
 ===========
 
-The Python package can be installed in editable mode from the repository root:
+The current public alpha can be installed from PyPI:
 
 .. code-block:: sh
 
-   python3 -m pip install -e .
+   python3 -m pip install "morseframes==0.1.0a1"
+
+For development from a source checkout, install in editable mode:
+
+.. code-block:: sh
+
+   python3 -m pip install -e ".[dev]"
 
 For documentation-only or pure-Python experiments, the optional C++ backend can
 be disabled:

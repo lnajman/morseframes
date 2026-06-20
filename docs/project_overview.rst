@@ -14,6 +14,25 @@ MorseFrames computes reference and coreference annotations and reduces those
 annotations. This keeps the main reduction indexed by critical simplexes and by
 the working sets actually needed for their boundaries or coboundaries.
 
+What Is a Morse Sequence?
+-------------------------
+
+Informally, a Morse sequence is an ordered way of simplifying a filtered
+complex while remembering enough information to recover its homology. At each
+step, the algorithm either declares a simplex to be critical, or pairs a
+simplex with one of its cofaces. A pair represents a local cancellation: the
+two simplexes are treated as regular and do not become generators of the Morse
+complex. A critical simplex is one that survives this cancellation process and
+acts as a generator in the reduced description.
+
+The word "sequence" is important. The order of the decisions records how the
+simplification respects the filtration, including levels where many simplexes
+have the same value. Different strategies may choose different regular pairs
+and therefore produce different numbers of critical simplexes, but a valid
+sequence preserves the persistence information. MorseFrames keeps this sequence
+as a first-class object because it is useful on its own, not only as an
+intermediate step before persistence.
+
 Core Objects
 ------------
 

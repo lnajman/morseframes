@@ -289,6 +289,21 @@ PYTHONPATH=python python3 tools/analyze_selector_features.py \
   --prose-output ../work/selector_feature_diagnostic_prose.tex
 ```
 
+## Benchmark Summary Page
+
+The visible compact tables in `docs/benchmark_summary.md` are generated from the
+tracked LaTeX table fragments:
+
+```sh
+python3 tools/render_benchmark_summary.py
+```
+
+CI checks that this generated block is up to date:
+
+```sh
+python3 tools/render_benchmark_summary.py --check
+```
+
 ## Before Committing Regenerated Results
 
 Before committing regenerated table fragments, run:
@@ -296,6 +311,7 @@ Before committing regenerated table fragments, run:
 ```sh
 git diff -- docs tools benchmarks
 git diff --check
+python3 tools/render_benchmark_summary.py --check
 MORSEFRAMES_DISABLE_CPP_BACKEND=1 \
   python3 -m unittest discover -s python/tests -p "test_*.py"
 ```

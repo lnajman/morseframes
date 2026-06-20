@@ -9,25 +9,25 @@
 \toprule
 Case & Strategy & Simp. & Direct (ms) & Import (ms) & GUDHI (ms) & GUDHI/Direct & GUDHI/Reducer \\
 \midrule
-\texttt{flag-240-r014} & \texttt{f-max} & 7,010 & 2.07 & 12.76 & 2.52 & \ratioiqr{1.20}{1.09}{1.30} & \ratioiqr{4.57}{3.99}{4.77} \\
-\texttt{flag-240-r014} & \texttt{f-min} & 7,010 & 1.93 & 12.45 & 2.52 & \ratioiqr{1.28}{1.16}{1.34} & \ratioiqr{4.33}{4.06}{4.64} \\
-\texttt{flag-240-r014} & \texttt{plateau-greedy} & 7,010 & 2.91 & 13.68 & 2.52 & \ratioiqr{0.84}{0.79}{0.91} & \ratioiqr{4.38}{3.94}{4.90} \\
-\texttt{flag-240-r014} & \slred & 7,010 & 1.62 & 12.22 & 2.52 & \ratioiqr{1.50}{1.45}{1.64} & \ratioiqr{5.43}{5.16}{6.01} \\
+\texttt{flag-240-r014} & \texttt{f-max} & 7,010 & 2.49 & 15.64 & 3.12 & \ratioiqr{1.22}{1.15}{1.31} & \ratioiqr{4.77}{4.46}{5.05} \\
+\texttt{flag-240-r014} & \texttt{f-min} & 7,010 & 2.35 & 15.43 & 3.12 & \ratioiqr{1.30}{1.24}{1.38} & \ratioiqr{4.36}{4.26}{4.52} \\
+\texttt{flag-240-r014} & \texttt{plateau-greedy} & 7,010 & 3.66 & 16.82 & 3.12 & \ratioiqr{0.84}{0.79}{0.90} & \ratioiqr{4.53}{4.36}{4.83} \\
+\texttt{flag-240-r014} & \slred & 7,010 & 2.01 & 15.14 & 3.12 & \ratioiqr{1.53}{1.45}{1.62} & \ratioiqr{5.55}{5.19}{5.80} \\
 \midrule
-\texttt{grid-128x128-plateau} & \texttt{f-max} & 97,283 & 26.30 & 154.48 & 39.25 & \ratioiqr{1.52}{1.42}{1.56} & \ratioiqr{6.29}{5.86}{6.55} \\
-\texttt{grid-128x128-plateau} & \texttt{f-min} & 97,283 & 26.27 & 155.80 & 39.25 & \ratioiqr{1.50}{1.45}{1.55} & \ratioiqr{5.65}{5.46}{5.82} \\
-\texttt{grid-128x128-plateau} & \texttt{plateau-greedy} & 97,283 & 40.48 & 176.06 & 39.25 & \ratioiqr{0.98}{0.94}{1.00} & \ratioiqr{5.97}{5.62}{6.20} \\
-\texttt{grid-128x128-plateau} & \slred & 97,283 & 30.71 & 163.32 & 39.25 & \ratioiqr{1.26}{1.23}{1.33} & \ratioiqr{3.49}{3.27}{3.67} \\
+\texttt{grid-128x128-plateau} & \texttt{f-max} & 97,283 & 27.39 & 179.39 & 47.41 & \ratioiqr{1.73}{1.70}{1.77} & \ratioiqr{6.25}{6.05}{6.61} \\
+\texttt{grid-128x128-plateau} & \texttt{f-min} & 97,283 & 27.70 & 179.86 & 47.41 & \ratioiqr{1.72}{1.70}{1.77} & \ratioiqr{5.92}{5.73}{6.09} \\
+\texttt{grid-128x128-plateau} & \texttt{plateau-greedy} & 97,283 & 45.15 & 202.62 & 47.41 & \ratioiqr{1.06}{1.04}{1.07} & \ratioiqr{6.26}{6.00}{6.39} \\
+\texttt{grid-128x128-plateau} & \slred & 97,283 & 33.53 & 188.96 & 47.41 & \ratioiqr{1.43}{1.40}{1.46} & \ratioiqr{3.67}{3.58}{3.73} \\
 \midrule
-\texttt{grid-64x64-plateau} & \texttt{f-max} & 24,067 & 3.48 & 31.73 & 7.13 & \ratioiqr{2.15}{1.92}{2.24} & \ratioiqr{155.29}{143.70}{169.30} \\
-\texttt{grid-64x64-plateau} & \texttt{f-min} & 24,067 & 3.59 & 32.13 & 7.13 & \ratioiqr{2.09}{1.89}{2.16} & \ratioiqr{157.86}{147.15}{163.98} \\
-\texttt{grid-64x64-plateau} & \texttt{plateau-greedy} & 24,067 & 5.59 & 34.18 & 7.13 & \ratioiqr{1.30}{1.22}{1.37} & \ratioiqr{117.49}{100.64}{125.49} \\
-\texttt{grid-64x64-plateau} & \slred & 24,067 & 3.53 & 31.70 & 7.13 & \ratioiqr{2.12}{1.98}{2.26} & \ratioiqr{115.30}{97.47}{128.13} \\
+\texttt{grid-64x64-plateau} & \texttt{f-max} & 24,067 & 4.32 & 40.15 & 9.09 & \ratioiqr{2.19}{1.91}{2.30} & \ratioiqr{153.38}{136.04}{167.22} \\
+\texttt{grid-64x64-plateau} & \texttt{f-min} & 24,067 & 4.50 & 40.34 & 9.09 & \ratioiqr{2.10}{1.92}{2.21} & \ratioiqr{163.78}{140.72}{174.91} \\
+\texttt{grid-64x64-plateau} & \texttt{plateau-greedy} & 24,067 & 6.89 & 43.00 & 9.09 & \ratioiqr{1.36}{1.25}{1.40} & \ratioiqr{126.81}{118.87}{134.19} \\
+\texttt{grid-64x64-plateau} & \slred & 24,067 & 4.37 & 39.98 & 9.09 & \ratioiqr{2.20}{1.97}{2.30} & \ratioiqr{122.74}{106.26}{130.98} \\
 \midrule
-\texttt{grid-96x96-plateau} & \texttt{f-max} & 54,531 & 12.12 & 79.64 & 20.45 & \ratioiqr{1.76}{1.62}{1.87} & \ratioiqr{7.55}{6.85}{7.68} \\
-\texttt{grid-96x96-plateau} & \texttt{f-min} & 54,531 & 11.70 & 79.59 & 20.45 & \ratioiqr{1.79}{1.64}{1.92} & \ratioiqr{7.46}{6.94}{7.67} \\
-\texttt{grid-96x96-plateau} & \texttt{plateau-greedy} & 54,531 & 20.14 & 90.30 & 20.45 & \ratioiqr{1.02}{0.97}{1.05} & \ratioiqr{6.89}{6.62}{7.29} \\
-\texttt{grid-96x96-plateau} & \slred & 54,531 & 16.32 & 85.63 & 20.45 & \ratioiqr{1.27}{1.21}{1.34} & \ratioiqr{3.27}{3.21}{3.41} \\
+\texttt{grid-96x96-plateau} & \texttt{f-max} & 54,531 & 13.47 & 96.83 & 25.46 & \ratioiqr{1.89}{1.80}{2.02} & \ratioiqr{7.37}{7.16}{7.91} \\
+\texttt{grid-96x96-plateau} & \texttt{f-min} & 54,531 & 13.62 & 97.01 & 25.46 & \ratioiqr{1.88}{1.79}{2.02} & \ratioiqr{7.64}{7.36}{7.78} \\
+\texttt{grid-96x96-plateau} & \texttt{plateau-greedy} & 54,531 & 23.86 & 109.78 & 25.46 & \ratioiqr{1.06}{1.04}{1.09} & \ratioiqr{6.99}{6.75}{7.33} \\
+\texttt{grid-96x96-plateau} & \slred & 54,531 & 18.96 & 103.02 & 25.46 & \ratioiqr{1.35}{1.31}{1.40} & \ratioiqr{3.38}{3.25}{3.48} \\
 \bottomrule
 \end{tabular}
 \caption{Native \texttt{Gudhi::Simplex\_tree} larger lean benchmark.  \texttt{Direct} uses the read-only \texttt{Simplex\_tree} view and our Morse reducer; \texttt{Import} first copies the complex into the compact owning structure.  \texttt{GUDHI} is GUDHI's in-process persistent cohomology on the same \texttt{Simplex\_tree}.  \texttt{GUDHI/Direct}$<1$ means GUDHI is faster end-to-end; \texttt{GUDHI/Reducer}$>1$ means our reducer alone is faster than GUDHI persistence, excluding view construction and Morse input construction.  Ratio columns show the median with $Q_1$--$Q_3$ underneath when repeat-level rows are available.}

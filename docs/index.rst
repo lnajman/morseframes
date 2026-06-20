@@ -34,6 +34,7 @@ the benchmark tables.
    :maxdepth: 2
    :caption: Experiments and reproducibility
 
+   benchmark_summary
    benchmark_reproduction
    phase0_conventions
 

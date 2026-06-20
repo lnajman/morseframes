@@ -6,11 +6,11 @@
 \toprule
 Direct-view stage group & Share & Interpretation \\
 \midrule
-Read-only view construction & 34.7\% & Simplex extraction, boundary lookup, coboundaries, and order arrays. \\
-Morse frame construction & 38.8\% & Morse sequence plus reference/reduction-input construction. \\
-Reducer kernel & 27.9\% & Annotation reduction after the Morse input has been built. \\
+Read-only view construction & 38.2\% & Simplex extraction, boundary lookup, coboundaries, and order arrays. \\
+Morse frame construction & 37.9\% & Morse sequence plus reference/reduction-input construction. \\
+Reducer kernel & 24.3\% & Annotation reduction after the Morse input has been built. \\
 \midrule
-All pre-reducer work & 72.1\% & Current native-plugin bottleneck before the reducer starts. \\
+All pre-reducer work & 75.7\% & Current native-adapter bottleneck before the reducer starts. \\
 \bottomrule
 \end{tabular}
 \caption{Compact decomposition of the direct native \texttt{Simplex\_tree} view path,

@@ -84,12 +84,15 @@ Regenerate the public synthetic scale table:
 
 ```sh
 mkdir -p ../work
+PYTHONPATH=python python3 -c "import morseframes as mf; print(mf.cpp_backend_available())"
+
 PYTHONPATH=python python3 tools/benchmark_persistence.py \
   --families lower-star plateau rips \
   --sizes 48 \
   --seeds 0 1 2 \
   --repeats 3 \
   --sequence-algorithm portfolio \
+  --validation-mode core \
   --format csv \
   --output ../work/synthetic_scale_size48_portfolio.csv
 
@@ -101,6 +104,11 @@ PYTHONPATH=python python3 tools/render_synthetic_scale_table.py \
 
 The table reports `Std/Morse`, so values above `1` mean the Morse pipeline is
 faster than ordinary full-complex persistence for that row.
+
+The tracked synthetic table is a native-backed core-mode benchmark. Before
+replacing it, make sure the backend check above prints `True`; otherwise the CSV
+will contain `cpp_backend=False` rows and the timing will describe the
+pure-Python fallback instead of the optimized C++ backend.
 
 ## Roadmap and External Data
 

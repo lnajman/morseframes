@@ -63,6 +63,46 @@ PYTHONPATH=python python3 python/examples/cubical_grid_tutorial.py \
 If the optional `gudhi` Python package is installed, the cubical tutorial also
 checks and times `gudhi.CubicalComplex` on the same vertex-valued grid.
 
+## Cubical Grid Benchmark
+
+The experimental cubical branch has its own benchmark runner because the
+external baseline is GUDHI's `CubicalComplex`, not the simplex-tree persistent
+cohomology path used in the native GUDHI-view benchmark.
+
+Quick summary run:
+
+```sh
+PYTHONPATH=python python3 tools/benchmark_cubical_grids.py \
+  --families sinusoidal plateau random \
+  --sizes 16 32 \
+  --seeds 0 \
+  --algorithms f-max f-min same-level-reduction \
+  --modulus 3 \
+  --repeats 3
+```
+
+CSV run for later table generation:
+
+```sh
+mkdir -p ../work
+PYTHONPATH=python python3 tools/benchmark_cubical_grids.py \
+  --families sinusoidal noisy-sinusoidal plateau random \
+  --sizes 16 32 64 \
+  --seeds 0 1 2 \
+  --algorithms f-max f-min saturated same-level-reduction \
+  --modulus 3 \
+  --repeats 5 \
+  --format csv \
+  --output ../work/cubical_grid_benchmark.csv
+```
+
+The reported Morse reference and coreference totals include MorseFrames grid
+construction, sequence construction, and the corresponding reducer. The GUDHI
+time includes construction of `gudhi.CubicalComplex` from the same vertex values
+and its persistence computation. Ratios `G/ref` and `G/coref` are therefore
+end-to-end Python-facing comparisons; values above `1` mean the corresponding
+MorseFrames path is faster.
+
 The C++ smoke tests are:
 
 ```sh

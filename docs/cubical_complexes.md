@@ -25,6 +25,17 @@ the same lower-star grid with `gudhi.CubicalComplex`, checks that the barcodes
 agree, and prints a GUDHI cubical timing. Pass `--skip-gudhi` to keep the run
 limited to MorseFrames.
 
+For a broader timing comparison, use the cubical benchmark runner:
+
+```sh
+PYTHONPATH=python python3 tools/benchmark_cubical_grids.py \
+  --families sinusoidal noisy-sinusoidal plateau random \
+  --sizes 16 32 \
+  --seeds 0 \
+  --algorithms f-max f-min same-level-reduction \
+  --modulus 3
+```
+
 ```python
 import morseframes as mf
 

@@ -14,6 +14,7 @@ import benchmark_persistence as bench  # noqa: E402
 import analyze_selector_features as selfeat  # noqa: E402
 import calibrate_profile_gate as gatecal  # noqa: E402
 import compare_profile_gates as gatecmp  # noqa: E402
+import benchmark_cubical_grids as cubbench  # noqa: E402
 import run_fair_profile_validation as fairval  # noqa: E402
 import render_synthetic_scale_table as synthscale  # noqa: E402
 import summarize_selector_decisions as seld  # noqa: E402
@@ -126,6 +127,41 @@ class BenchmarkToolTest(unittest.TestCase):
         self.assertEqual(rows[0].num_simplices, 67)
         self.assertLessEqual(rows[0].num_levels, 4)
         self.assertGreater(rows[0].num_critical_simplices, 0)
+
+    def test_cubical_grid_benchmark_smoke(self):
+        if (
+            not cubbench.mp.cpp_backend_available()
+            or cubbench.mp.CppCubicalGrid2DComplex is None
+        ):
+            self.skipTest("C++ cubical backend is not built")
+
+        rows = cubbench.run_benchmarks(
+            families=["sinusoidal", "plateau"],
+            sizes=[3],
+            seeds=[0],
+            algorithms=[cubbench.mp.F_MAX_SEQUENCE],
+            repeats=1,
+            plateau_levels=3,
+            time_gudhi=False,
+        )
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row.family for row in rows}, {"sinusoidal", "plateau"})
+        for row in rows:
+            self.assertEqual(row.width, 3)
+            self.assertEqual(row.height, 3)
+            self.assertEqual(row.num_cells, 25)
+            self.assertEqual(row.algorithm, cubbench.mp.F_MAX_SEQUENCE)
+            self.assertGreater(row.critical_cells, 0)
+            self.assertGreaterEqual(row.critical_ratio, 0.0)
+            self.assertLessEqual(row.critical_ratio, 1.0)
+            self.assertTrue(row.matches_standard)
+            self.assertTrue(row.matches_coreference)
+            self.assertIsNone(row.matches_gudhi)
+            self.assertIsNone(row.gudhi_seconds)
+            self.assertGreater(row.morse_reference_total_seconds, 0.0)
+            self.assertGreater(row.morse_coreference_total_seconds, 0.0)
+            self.assertGreater(row.standard_total_seconds, 0.0)
 
     def test_run_benchmarks_can_force_separate_frame_mode(self):
         rows = bench.run_benchmarks(

@@ -30,6 +30,20 @@ The helper trait `morseframes::is_complex_view_v<T>` checks this interface at
 compile time. The sequence and reference-persistence templates also use
 `static_assert` guards so missing methods fail with an explicit message.
 
+For coefficients over a prime field, a view may additionally expose:
+
+```cpp
+std::uint32_t boundary_coefficient(SimplexId cell,
+                                   std::size_t boundary_index,
+                                   std::uint32_t modulus) const;
+```
+
+Here `boundary_index` indexes `boundary(cell)`. If this method is absent, the
+field reducers use the usual simplicial alternating sign convention. A cubical
+or more general regular-cell view can override the method to provide its own
+incidence numbers without changing the reference, coreference, or persistence
+reducers.
+
 ## Semantic conventions
 
 The `vertices(simplex)` vector is sorted and canonical. Boundaries and

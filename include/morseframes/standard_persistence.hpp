@@ -9,6 +9,7 @@
 
 #include "morseframes/field_arithmetic.hpp"
 #include "morseframes/filtered_complex.hpp"
+#include "morseframes/incidence.hpp"
 #include "morseframes/reference_persistence.hpp"
 
 namespace morseframes {
@@ -104,7 +105,7 @@ inline ModPColumn oriented_boundary_column_modp(
     }
     column.push_back(ModPEntry{
         row,
-        boundary_coefficient(removed_index, modulus),
+        boundary_incidence_coefficient(complex, simplex, removed_index, modulus),
     });
   }
   std::sort(column.begin(), column.end(), [](const ModPEntry& lhs, const ModPEntry& rhs) {

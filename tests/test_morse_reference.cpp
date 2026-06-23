@@ -12,6 +12,7 @@
 #include "morseframes/debug_checks.hpp"
 #include "morseframes/field_annotation_store.hpp"
 #include "morseframes/filtered_complex.hpp"
+#include "morseframes/incidence.hpp"
 #include "morseframes/instrumentation.hpp"
 #include "morseframes/inverse_annotation_store.hpp"
 #include "morseframes/morse_reference_api.hpp"
@@ -101,6 +102,54 @@ void add_weighted_closure(FilteredSimplicialComplex& complex,
     complex.add_simplex(simplex, filtration);
   }
 }
+
+struct CustomIncidenceComplexView {
+  const FilteredSimplicialComplex& complex;
+  morseframes::SimplexId custom_cell = morseframes::kInvalidSimplex;
+  std::size_t custom_boundary_index = 0;
+  std::uint32_t custom_coefficient = 1;
+
+  std::size_t size() const { return complex.size(); }
+  std::uint16_t dimension(morseframes::SimplexId simplex) const {
+    return complex.dimension(simplex);
+  }
+  morseframes::LevelId level(morseframes::SimplexId simplex) const {
+    return complex.level(simplex);
+  }
+  double filtration(morseframes::SimplexId simplex) const {
+    return complex.filtration(simplex);
+  }
+  const std::vector<morseframes::VertexId>& vertices(morseframes::SimplexId simplex) const {
+    return complex.vertices(simplex);
+  }
+  const std::vector<morseframes::SimplexId>& boundary(morseframes::SimplexId simplex) const {
+    return complex.boundary(simplex);
+  }
+  const std::vector<morseframes::SimplexId>& coboundary(morseframes::SimplexId simplex) const {
+    return complex.coboundary(simplex);
+  }
+  const std::vector<morseframes::SimplexId>& filtration_order() const {
+    return complex.filtration_order();
+  }
+  const std::vector<morseframes::SimplexId>& simplices_of_level(
+      morseframes::LevelId level) const {
+    return complex.simplices_of_level(level);
+  }
+  const std::vector<double>& level_values() const { return complex.level_values(); }
+  std::size_t num_levels() const { return complex.num_levels(); }
+
+  std::uint32_t boundary_coefficient(morseframes::SimplexId cell,
+                                     std::size_t boundary_index,
+                                     std::uint32_t modulus) const {
+    if (cell == custom_cell && boundary_index == custom_boundary_index) {
+      return custom_coefficient % modulus;
+    }
+    return morseframes::boundary_coefficient(boundary_index, modulus);
+  }
+};
+
+static_assert(morseframes::is_complex_view_v<CustomIncidenceComplexView>,
+              "CustomIncidenceComplexView should satisfy the Morse complex-view API.");
 
 PersistenceDiagram run_reference(FilteredSimplicialComplex& complex) {
   complex.finalize();
@@ -804,6 +853,42 @@ void test_morse_reference_prime_field_persistence() {
   assert(rejected);
 }
 
+void test_custom_boundary_incidence_coefficients() {
+  FilteredSimplicialComplex complex;
+  add_simplex(complex, {0}, 0.0);
+  add_simplex(complex, {1}, 0.0);
+  add_simplex(complex, {0, 1}, 1.0);
+  complex.finalize();
+
+  const auto v0 = complex.find_simplex({0});
+  const auto v1 = complex.find_simplex({1});
+  const auto edge = complex.find_simplex({0, 1});
+  assert(v0 != morseframes::kInvalidSimplex);
+  assert(v1 != morseframes::kInvalidSimplex);
+  assert(edge != morseframes::kInvalidSimplex);
+  assert(complex.boundary(edge).size() == 2);
+  assert(complex.boundary(edge)[1] == v0);
+
+  CustomIncidenceComplexView view{complex, edge, 1, 1};
+  assert(morseframes::boundary_incidence_coefficient(complex, edge, 1, 5) == 4);
+  assert(morseframes::boundary_incidence_coefficient(view, edge, 1, 5) == 1);
+  assert(morseframes::boundary_incidence_coefficient_of_face(view, edge, v0, 5) == 1);
+
+  morseframes::MorseSequence sequence(complex.size());
+  sequence.add_critical(v0, complex.level(v0));
+  sequence.add_regular_pair(v1, edge, complex.level(edge));
+
+  const auto default_references =
+      morseframes::MorseFieldReferenceComputer(complex, sequence, 5)
+          .compute_full_references();
+  const auto custom_references =
+      morseframes::MorseFieldReferenceComputer(view, sequence, 5)
+          .compute_full_references();
+
+  assert(field_annotation_equals(default_references[v1], {{0, 1}}));
+  assert(field_annotation_equals(custom_references[v1], {{0, 4}}));
+}
+
 void test_morse_coreference_prime_field_persistence() {
   FilteredSimplicialComplex complex;
   const std::vector<double> values = {1.0, 0.0, 1.0, 0.0};
@@ -991,6 +1076,7 @@ int main() {
   test_filled_triangle();
   test_standard_prime_field_persistence();
   test_morse_reference_prime_field_persistence();
+  test_custom_boundary_incidence_coefficients();
   test_morse_coreference_prime_field_persistence();
   test_tetrahedron_boundary();
   test_filled_tetrahedron();

@@ -12,6 +12,7 @@
 #include "morseframes/annotation.hpp"
 #include "morseframes/field_annotation_store.hpp"
 #include "morseframes/filtered_complex.hpp"
+#include "morseframes/incidence.hpp"
 #include "morseframes/inverse_annotation_store.hpp"
 #include "morseframes/morse_sequence.hpp"
 #include "morseframes/working_sets.hpp"
@@ -1050,7 +1051,8 @@ class MorseFieldReferenceComputer {
     const auto& boundary = complex_.boundary(step.tau);
     for (std::size_t removed_index = 0; removed_index < boundary.size(); ++removed_index) {
       const SimplexId face = boundary[removed_index];
-      const std::uint32_t coefficient = boundary_coefficient(removed_index, modulus_);
+      const std::uint32_t coefficient =
+          boundary_incidence_coefficient(complex_, step.tau, removed_index, modulus_);
       if (face == step.sigma) {
         paired_face_coefficient = coefficient;
         found_paired_face = true;
@@ -1336,7 +1338,7 @@ class MorseFieldReferencePersistenceReducer {
         add_scaled_field_annotation_in_place(
             boundary_annotation,
             references_[boundary[removed_index]],
-            boundary_coefficient(removed_index, modulus_),
+            boundary_incidence_coefficient(complex_, sigma, removed_index, modulus_),
             modulus_);
       }
 
@@ -1473,7 +1475,8 @@ class MorseCompactFieldReferencePersistenceReducer {
         result.metrics.boundary_annotation_total_input_size += face_annotation.size();
         add_scaled_field_annotation_in_place(boundary_annotation,
                                              face_annotation,
-                                             boundary_coefficient(face.boundary_index, modulus_),
+                                             boundary_incidence_coefficient(
+                                                 complex_, sigma, face.boundary_index, modulus_),
                                              modulus_);
       }
       if (boundary_annotation.size() > result.metrics.boundary_annotation_max_size) {

@@ -2,13 +2,17 @@
 
 #include <vector>
 
+#include "morseframes/complex_view.hpp"
 #include "morseframes/filtered_complex.hpp"
 #include "morseframes/morse_sequence.hpp"
 
 namespace morseframes {
 
-inline std::vector<SimplexId> reference_working_set(const FilteredSimplicialComplex& complex,
+template <class ComplexView>
+inline std::vector<SimplexId> reference_working_set(const ComplexView& complex,
                                                     const MorseSequence& sequence) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "reference_working_set requires a Morse complex-view type.");
   std::vector<bool> present(complex.size(), false);
 
   for (SimplexId critical : sequence.critical_simplices()) {
@@ -27,8 +31,11 @@ inline std::vector<SimplexId> reference_working_set(const FilteredSimplicialComp
   return result;
 }
 
-inline std::vector<SimplexId> coreference_working_set(const FilteredSimplicialComplex& complex,
+template <class ComplexView>
+inline std::vector<SimplexId> coreference_working_set(const ComplexView& complex,
                                                       const MorseSequence& sequence) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "coreference_working_set requires a Morse complex-view type.");
   std::vector<bool> present(complex.size(), false);
 
   for (SimplexId critical : sequence.critical_simplices()) {

@@ -8,6 +8,7 @@
 
 #include "morseframes/annotation.hpp"
 #include "morseframes/filtered_complex.hpp"
+#include "morseframes/incidence.hpp"
 #include "morseframes/inverse_annotation_store.hpp"
 #include "morseframes/morse_sequence.hpp"
 #include "morseframes/reference_persistence.hpp"
@@ -15,9 +16,13 @@
 
 namespace morseframes {
 
+template <class ComplexView = FilteredSimplicialComplex>
 class MorseCoreferenceComputer {
+  static_assert(is_complex_view_v<ComplexView>,
+                "MorseCoreferenceComputer requires a Morse complex-view type.");
+
  public:
-  MorseCoreferenceComputer(const FilteredSimplicialComplex& complex, const MorseSequence& sequence)
+  MorseCoreferenceComputer(const ComplexView& complex, const MorseSequence& sequence)
       : complex_(complex), sequence_(sequence) {}
 
   std::vector<Annotation> compute_full_coreferences() const {
@@ -52,7 +57,7 @@ class MorseCoreferenceComputer {
     return static_cast<CriticalId>(value);
   }
 
-  const FilteredSimplicialComplex& complex_;
+  const ComplexView& complex_;
   const MorseSequence& sequence_;
 };
 
@@ -67,23 +72,13 @@ struct MorseFieldCoreferenceFrame {
   std::uint32_t modulus = 2;
 };
 
-inline std::uint32_t boundary_coefficient_of_face(
-    const FilteredSimplicialComplex& complex,
-    SimplexId coface,
-    SimplexId face,
-    std::uint32_t modulus) {
-  const auto& boundary = complex.boundary(coface);
-  for (std::size_t removed_index = 0; removed_index < boundary.size(); ++removed_index) {
-    if (boundary[removed_index] == face) {
-      return boundary_coefficient(removed_index, modulus);
-    }
-  }
-  throw std::logic_error("Expected a codimension-one face/coface incidence.");
-}
-
+template <class ComplexView = FilteredSimplicialComplex>
 class MorseFieldCoreferenceComputer {
+  static_assert(is_complex_view_v<ComplexView>,
+                "MorseFieldCoreferenceComputer requires a Morse complex-view type.");
+
  public:
-  MorseFieldCoreferenceComputer(const FilteredSimplicialComplex& complex,
+  MorseFieldCoreferenceComputer(const ComplexView& complex,
                                 const MorseSequence& sequence,
                                 std::uint32_t modulus)
       : complex_(complex), sequence_(sequence), modulus_(modulus) {
@@ -124,7 +119,7 @@ class MorseFieldCoreferenceComputer {
     bool found_paired_coface = false;
     for (SimplexId coface : complex_.coboundary(step.sigma)) {
       const std::uint32_t coefficient =
-          boundary_coefficient_of_face(complex_, coface, step.sigma, modulus_);
+          boundary_incidence_coefficient_of_face(complex_, coface, step.sigma, modulus_);
       if (coface == step.tau) {
         paired_coface_coefficient = coefficient;
         found_paired_coface = true;
@@ -144,14 +139,18 @@ class MorseFieldCoreferenceComputer {
     coreferences[step.tau] = std::move(upper_coreference);
   }
 
-  const FilteredSimplicialComplex& complex_;
+  const ComplexView& complex_;
   const MorseSequence& sequence_;
   std::uint32_t modulus_ = 2;
 };
 
+template <class ComplexView = FilteredSimplicialComplex>
 class MorseCoreferenceFrameBuilder {
+  static_assert(is_complex_view_v<ComplexView>,
+                "MorseCoreferenceFrameBuilder requires a Morse complex-view type.");
+
  public:
-  explicit MorseCoreferenceFrameBuilder(const FilteredSimplicialComplex& complex)
+  explicit MorseCoreferenceFrameBuilder(const ComplexView& complex)
       : complex_(complex) {}
 
   MorseCoreferenceFrame build_coreduction() const {
@@ -341,12 +340,16 @@ class MorseCoreferenceFrameBuilder {
     return static_cast<CriticalId>(value);
   }
 
-  const FilteredSimplicialComplex& complex_;
+  const ComplexView& complex_;
 };
 
+template <class ComplexView = FilteredSimplicialComplex>
 class MorseCoreferencePersistenceReducer {
+  static_assert(is_complex_view_v<ComplexView>,
+                "MorseCoreferencePersistenceReducer requires a Morse complex-view type.");
+
  public:
-  MorseCoreferencePersistenceReducer(const FilteredSimplicialComplex& complex,
+  MorseCoreferencePersistenceReducer(const ComplexView& complex,
                                      const MorseSequence& sequence,
                                      const std::vector<Annotation>& coreferences)
       : complex_(complex),
@@ -445,14 +448,18 @@ class MorseCoreferencePersistenceReducer {
     annotations_.xor_into_all_containing(pivot, coboundary_annotation);
   }
 
-  const FilteredSimplicialComplex& complex_;
+  const ComplexView& complex_;
   const MorseSequence& sequence_;
   InverseAnnotationStore annotations_;
 };
 
+template <class ComplexView = FilteredSimplicialComplex>
 class MorseFieldCoreferencePersistenceReducer {
+  static_assert(is_complex_view_v<ComplexView>,
+                "MorseFieldCoreferencePersistenceReducer requires a Morse complex-view type.");
+
  public:
-  MorseFieldCoreferencePersistenceReducer(const FilteredSimplicialComplex& complex,
+  MorseFieldCoreferencePersistenceReducer(const ComplexView& complex,
                                           const MorseSequence& sequence,
                                           std::vector<FieldAnnotation> coreferences,
                                           std::uint32_t modulus)
@@ -483,7 +490,7 @@ class MorseFieldCoreferencePersistenceReducer {
         add_scaled_field_annotation_in_place(
             coboundary_annotation,
             coreferences_[coface],
-            boundary_coefficient_of_face(complex_, coface, sigma, modulus_),
+            boundary_incidence_coefficient_of_face(complex_, coface, sigma, modulus_),
             modulus_);
       }
 
@@ -547,16 +554,21 @@ class MorseFieldCoreferencePersistenceReducer {
     return static_cast<CriticalId>(value);
   }
 
-  const FilteredSimplicialComplex& complex_;
+  const ComplexView& complex_;
   const MorseSequence& sequence_;
   std::vector<FieldAnnotation> coreferences_;
   std::uint32_t modulus_ = 2;
 };
 
+template <class ComplexView = FilteredSimplicialComplex>
 class MorseCompactFieldCoreferencePersistenceReducer {
+  static_assert(is_complex_view_v<ComplexView>,
+                "MorseCompactFieldCoreferencePersistenceReducer requires a Morse "
+                "complex-view type.");
+
  public:
   MorseCompactFieldCoreferencePersistenceReducer(
-      const FilteredSimplicialComplex& complex,
+      const ComplexView& complex,
       const MorseSequence& sequence,
       const std::vector<FieldAnnotation>& coreferences,
       std::uint32_t modulus)
@@ -571,7 +583,7 @@ class MorseCompactFieldCoreferencePersistenceReducer {
   }
 
   MorseCompactFieldCoreferencePersistenceReducer(
-      const FilteredSimplicialComplex& complex,
+      const ComplexView& complex,
       const MorseSequence& sequence,
       std::vector<SimplexId> working_set,
       std::vector<FieldAnnotation> annotations,
@@ -605,7 +617,7 @@ class MorseCompactFieldCoreferencePersistenceReducer {
         add_scaled_field_annotation_in_place(
             coboundary_annotation,
             annotations_.annotation(coface),
-            boundary_coefficient_of_face(complex_, coface, sigma, modulus_),
+            boundary_incidence_coefficient_of_face(complex_, coface, sigma, modulus_),
             modulus_);
       }
 
@@ -655,25 +667,32 @@ class MorseCompactFieldCoreferencePersistenceReducer {
     return static_cast<CriticalId>(value);
   }
 
-  const FilteredSimplicialComplex& complex_;
+  const ComplexView& complex_;
   const MorseSequence& sequence_;
   std::vector<SimplexId> working_set_;
   FieldAnnotationStore annotations_;
   std::uint32_t modulus_ = 2;
 };
 
+template <class ComplexView>
 inline PersistenceDiagram compute_morse_coreference_persistence(
-    const FilteredSimplicialComplex& complex, const MorseSequence& sequence) {
+    const ComplexView& complex, const MorseSequence& sequence) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "compute_morse_coreference_persistence requires a Morse complex-view type.");
   MorseCoreferenceComputer coreference_computer(complex, sequence);
   auto coreferences = coreference_computer.compute_full_coreferences();
   MorseCoreferencePersistenceReducer reducer(complex, sequence, coreferences);
   return reducer.compute();
 }
 
+template <class ComplexView>
 inline PersistenceDiagram compute_morse_coreference_prime_field_persistence(
-    const FilteredSimplicialComplex& complex,
+    const ComplexView& complex,
     const MorseSequence& sequence,
     std::uint32_t modulus) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "compute_morse_coreference_prime_field_persistence requires a Morse "
+                "complex-view type.");
   auto coreferences =
       MorseFieldCoreferenceComputer(complex, sequence, modulus).compute_full_coreferences();
   auto working_set = coreference_working_set(complex, sequence);

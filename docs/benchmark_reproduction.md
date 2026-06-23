@@ -53,6 +53,11 @@ To include the native C++ backend, install the package in editable mode:
 ```sh
 python3 -m pip install -e ".[dev]"
 python3 -c "import morseframes as mf; print(mf.__version__, mf.cpp_backend_available())"
+PYTHONPATH=python python3 python/examples/cubical_grid_tutorial.py \
+  --width 5 \
+  --height 5 \
+  --modulus 3 \
+  --repeats 1
 ```
 
 The C++ smoke tests are:

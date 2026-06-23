@@ -10,6 +10,16 @@ constructed from vertex filtration values.
 The Python interface exposes the same backend through
 `morseframes.CubicalGrid2DComplex` when the native extension is available.
 
+Run the complete tutorial from the repository root with:
+
+```sh
+PYTHONPATH=python python3 python/examples/cubical_grid_tutorial.py \
+  --width 8 \
+  --height 8 \
+  --algorithm f-max \
+  --modulus 3
+```
+
 ```python
 import morseframes as mf
 

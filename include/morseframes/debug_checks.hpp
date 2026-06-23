@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "morseframes/annotation.hpp"
+#include "morseframes/complex_view.hpp"
 #include "morseframes/filtered_complex.hpp"
 #include "morseframes/morse_sequence.hpp"
 #include "morseframes/reference_persistence.hpp"
@@ -18,15 +19,21 @@ inline void require_debug_condition(bool condition, const char* message) {
   }
 }
 
-inline bool boundary_contains(const FilteredSimplicialComplex& complex,
+template <class ComplexView>
+inline bool boundary_contains(const ComplexView& complex,
                               SimplexId simplex,
                               SimplexId face) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "boundary_contains requires a Morse complex-view type.");
   const auto& boundary = complex.boundary(simplex);
   return std::find(boundary.begin(), boundary.end(), face) != boundary.end();
 }
 
-inline void validate_morse_sequence(const FilteredSimplicialComplex& complex,
+template <class ComplexView>
+inline void validate_morse_sequence(const ComplexView& complex,
                                     const MorseSequence& sequence) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "validate_morse_sequence requires a Morse complex-view type.");
   std::vector<bool> inserted(complex.size(), false);
 
   for (const MorseStep& step : sequence.steps()) {
@@ -63,9 +70,12 @@ inline void validate_morse_sequence(const FilteredSimplicialComplex& complex,
   }
 }
 
-inline void validate_reference_invariants(const FilteredSimplicialComplex& complex,
+template <class ComplexView>
+inline void validate_reference_invariants(const ComplexView& complex,
                                           const MorseSequence& sequence,
                                           const std::vector<Annotation>& references) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "validate_reference_invariants requires a Morse complex-view type.");
   require_debug_condition(references.size() == complex.size(), "Reference table has wrong size.");
 
   for (const MorseStep& step : sequence.steps()) {
@@ -85,9 +95,12 @@ inline void validate_reference_invariants(const FilteredSimplicialComplex& compl
   }
 }
 
-inline void validate_coreference_invariants(const FilteredSimplicialComplex& complex,
+template <class ComplexView>
+inline void validate_coreference_invariants(const ComplexView& complex,
                                             const MorseSequence& sequence,
                                             const std::vector<Annotation>& coreferences) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "validate_coreference_invariants requires a Morse complex-view type.");
   require_debug_condition(coreferences.size() == complex.size(), "Coreference table has wrong size.");
 
   for (const MorseStep& step : sequence.steps()) {

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "morseframes/coreference_persistence.hpp"
+#include "morseframes/cubical_complex.hpp"
 #include "morseframes/debug_checks.hpp"
 #include "morseframes/field_annotation_store.hpp"
 #include "morseframes/filtered_complex.hpp"
@@ -150,6 +151,8 @@ struct CustomIncidenceComplexView {
 
 static_assert(morseframes::is_complex_view_v<CustomIncidenceComplexView>,
               "CustomIncidenceComplexView should satisfy the Morse complex-view API.");
+static_assert(morseframes::is_complex_view_v<morseframes::CubicalGrid2DComplex>,
+              "CubicalGrid2DComplex should satisfy the Morse complex-view API.");
 
 PersistenceDiagram run_reference(FilteredSimplicialComplex& complex) {
   complex.finalize();
@@ -318,8 +321,9 @@ PersistenceDiagram run_reference(FilteredSimplicialComplex& complex) {
   return morse_diagram;
 }
 
+template <class ComplexView>
 void assert_field_reference_matches_standard(
-    const FilteredSimplicialComplex& complex,
+    const ComplexView& complex,
     const morseframes::MorseSequence& sequence,
     std::uint32_t modulus) {
   morseframes::validate_morse_sequence(complex, sequence);
@@ -348,8 +352,9 @@ void assert_field_reference_matches_standard(
   assert_same_barcode(wrapper_morse_diagram, standard_diagram);
 }
 
+template <class ComplexView>
 void assert_field_coreference_matches_standard(
-    const FilteredSimplicialComplex& complex,
+    const ComplexView& complex,
     const morseframes::MorseSequence& sequence,
     std::uint32_t modulus) {
   morseframes::validate_morse_sequence(complex, sequence);
@@ -889,6 +894,121 @@ void test_custom_boundary_incidence_coefficients() {
   assert(field_annotation_equals(custom_references[v1], {{0, 4}}));
 }
 
+void test_cubical_grid_boundary_and_incidence() {
+  const morseframes::CubicalGrid2DComplex grid(2, 2, {0.0, 0.0, 0.0, 0.0});
+
+  assert(grid.size() == 9);
+  const auto bottom_left = grid.vertex(0, 0);
+  const auto bottom_right = grid.vertex(1, 0);
+  const auto top_left = grid.vertex(0, 1);
+  const auto top_right = grid.vertex(1, 1);
+  const auto bottom = grid.horizontal_edge(0, 0);
+  const auto top = grid.horizontal_edge(0, 1);
+  const auto left = grid.vertical_edge(0, 0);
+  const auto right = grid.vertical_edge(1, 0);
+  const auto face = grid.square(0, 0);
+
+  assert(grid.dimension(bottom_left) == 0);
+  assert(grid.dimension(bottom) == 1);
+  assert(grid.dimension(face) == 2);
+  assert(grid.cell_type(face) == morseframes::CubicalCellType::Square);
+  assert(grid.vertices(face) == std::vector<morseframes::VertexId>({0, 1, 2, 3}));
+
+  assert(grid.boundary(bottom) == std::vector<morseframes::SimplexId>({bottom_right, bottom_left}));
+  assert(morseframes::boundary_incidence_coefficient(grid, bottom, 0, 5) == 1);
+  assert(morseframes::boundary_incidence_coefficient(grid, bottom, 1, 5) == 4);
+
+  assert(grid.boundary(face) ==
+         std::vector<morseframes::SimplexId>({right, left, top, bottom}));
+  assert(morseframes::boundary_incidence_coefficient(grid, face, 0, 5) == 1);
+  assert(morseframes::boundary_incidence_coefficient(grid, face, 1, 5) == 4);
+  assert(morseframes::boundary_incidence_coefficient(grid, face, 2, 5) == 4);
+  assert(morseframes::boundary_incidence_coefficient(grid, face, 3, 5) == 1);
+
+  std::vector<std::uint32_t> boundary_of_boundary(grid.size(), 0);
+  constexpr std::uint32_t modulus = 5;
+  for (std::size_t edge_index = 0; edge_index < grid.boundary(face).size(); ++edge_index) {
+    const auto edge = grid.boundary(face)[edge_index];
+    const auto face_edge_coefficient =
+        morseframes::boundary_incidence_coefficient(grid, face, edge_index, modulus);
+    for (std::size_t vertex_index = 0; vertex_index < grid.boundary(edge).size(); ++vertex_index) {
+      const auto vertex = grid.boundary(edge)[vertex_index];
+      const auto edge_vertex_coefficient =
+          morseframes::boundary_incidence_coefficient(grid, edge, vertex_index, modulus);
+      boundary_of_boundary[vertex] =
+          static_cast<std::uint32_t>(
+              (boundary_of_boundary[vertex] +
+               morseframes::modp_multiply(face_edge_coefficient,
+                                          edge_vertex_coefficient,
+                                          modulus)) %
+              modulus);
+    }
+  }
+
+  assert(boundary_of_boundary[bottom_left] == 0);
+  assert(boundary_of_boundary[bottom_right] == 0);
+  assert(boundary_of_boundary[top_left] == 0);
+  assert(boundary_of_boundary[top_right] == 0);
+}
+
+void test_cubical_grid_morse_persistence() {
+  const morseframes::CubicalGrid2DComplex grid(
+      3,
+      3,
+      {
+          0.0, 1.0, 0.0,
+          1.0, 2.0, 1.0,
+          0.0, 1.0, 0.0,
+      });
+
+  const auto standard_z2 = morseframes::compute_standard_z2_persistence(grid);
+  const auto standard_f3 = morseframes::compute_standard_prime_field_persistence(grid, 3);
+  assert_same_barcode(standard_z2, standard_f3);
+
+  auto check_sequence = [&](morseframes::MorseSequence sequence) {
+    morseframes::validate_morse_sequence(grid, sequence);
+
+    const auto references =
+        morseframes::MorseReferenceComputer(grid, sequence).compute_full_references();
+    morseframes::validate_reference_invariants(grid, sequence, references);
+    assert_same_barcode(
+        morseframes::MorseReferencePersistenceReducer(grid, sequence, references).compute(),
+        standard_z2);
+    assert_same_barcode(
+        morseframes::compute_morse_reference_persistence(grid, sequence),
+        standard_z2);
+
+    const auto coreferences =
+        morseframes::MorseCoreferenceComputer(grid, sequence).compute_full_coreferences();
+    morseframes::validate_coreference_invariants(grid, sequence, coreferences);
+    assert_same_barcode(
+        morseframes::MorseCoreferencePersistenceReducer(grid, sequence, coreferences).compute(),
+        standard_z2);
+    assert_same_barcode(
+        morseframes::compute_morse_coreference_persistence(grid, sequence),
+        standard_z2);
+
+    assert_field_reference_matches_standard(grid, sequence, 3);
+    assert_field_coreference_matches_standard(grid, sequence, 3);
+  };
+
+  check_sequence(FSequenceBuilder(grid).build_saturated());
+  check_sequence(FSequenceBuilder(grid).build_plateau_greedy());
+  check_sequence(FSequenceBuilder(grid).build_same_level_reduction());
+  check_sequence(FSequenceBuilder(grid).build_f_max());
+  check_sequence(FSequenceBuilder(grid).build_f_min());
+  check_sequence(FSequenceBuilder(grid).build_flooding_max());
+  check_sequence(FSequenceBuilder(grid).build_flooding_min());
+  check_sequence(FSequenceBuilder(grid).build_flooding_minmax());
+  check_sequence(FSequenceBuilder(grid).build_flooding_maxmin());
+
+  const auto finite = morseframes::off_diagonal_pairs(standard_z2);
+  assert(count_essential_dim(standard_z2, 0) == 1);
+  assert(count_essential_dim(standard_z2, 1) == 0);
+  assert(count_essential_dim(standard_z2, 2) == 0);
+  assert(count_finite_dim(finite, 0) >= 1);
+}
+
 void test_morse_coreference_prime_field_persistence() {
   FilteredSimplicialComplex complex;
   const std::vector<double> values = {1.0, 0.0, 1.0, 0.0};
@@ -1077,6 +1197,8 @@ int main() {
   test_standard_prime_field_persistence();
   test_morse_reference_prime_field_persistence();
   test_custom_boundary_incidence_coefficients();
+  test_cubical_grid_boundary_and_incidence();
+  test_cubical_grid_morse_persistence();
   test_morse_coreference_prime_field_persistence();
   test_tetrahedron_boundary();
   test_filled_tetrahedron();

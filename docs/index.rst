@@ -33,6 +33,7 @@ The current public alpha can be installed from PyPI:
    :caption: C++ and integration
 
    cpp_complex_view_api
+   cubical_complexes
    gudhi_contribution_design_note
    gudhi_upstream_patch_map
 

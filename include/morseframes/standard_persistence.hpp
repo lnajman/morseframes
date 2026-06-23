@@ -89,12 +89,15 @@ inline void modp_add_scaled_in_place(ModPColumn& target,
   target = std::move(result);
 }
 
+template <class ComplexView>
 inline ModPColumn oriented_boundary_column_modp(
-    const FilteredSimplicialComplex& complex,
+    const ComplexView& complex,
     SimplexId simplex,
     const std::vector<std::uint32_t>& order_index,
     std::uint32_t column_index,
     std::uint32_t modulus) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "oriented_boundary_column_modp requires a Morse complex-view type.");
   const auto& boundary = complex.boundary(simplex);
   ModPColumn column;
   column.reserve(boundary.size());
@@ -114,8 +117,11 @@ inline ModPColumn oriented_boundary_column_modp(
   return column;
 }
 
+template <class ComplexView>
 inline PersistenceDiagram compute_standard_z2_persistence(
-    const FilteredSimplicialComplex& complex) {
+    const ComplexView& complex) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "compute_standard_z2_persistence requires a Morse complex-view type.");
   const auto& order = complex.filtration_order();
   const std::size_t n = order.size();
   const std::uint32_t invalid = std::numeric_limits<std::uint32_t>::max();
@@ -189,9 +195,12 @@ inline PersistenceDiagram compute_standard_z2_persistence(
   return diagram;
 }
 
+template <class ComplexView>
 inline PersistenceDiagram compute_standard_prime_field_persistence(
-    const FilteredSimplicialComplex& complex,
+    const ComplexView& complex,
     std::uint32_t modulus) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "compute_standard_prime_field_persistence requires a Morse complex-view type.");
   validate_prime_field_characteristic(modulus);
   if (modulus == 2) {
     return compute_standard_z2_persistence(complex);

@@ -51,6 +51,11 @@ coboundaries are expressed with the same local simplex ids. Filtration is
 monotone on faces, and `level(simplex)` indexes the sorted unique values returned
 by `level_values()`.
 
+On the experimental cubical branch, `morseframes::CubicalGrid2DComplex` satisfies
+the same view API. Its `vertices(cell)` method is a canonical key made of the
+grid vertices incident to the cell, and its optional `boundary_coefficient`
+method supplies cubical incidence signs over prime fields.
+
 Tie-breaking inside sequence strategies is representation-independent: when two
 candidates have the same algorithmic score, they are ordered by filtration level,
 dimension, then vertex tuple. This matters for comparing a direct GUDHI view with

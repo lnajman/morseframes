@@ -14,6 +14,7 @@
 #include <nanobind/stl/vector.h>
 
 #include "morseframes/coreference_persistence.hpp"
+#include "morseframes/cubical_complex.hpp"
 #include "morseframes/filtered_complex.hpp"
 #include "morseframes/morse_sequence.hpp"
 #include "morseframes/reference_persistence.hpp"
@@ -47,6 +48,15 @@ struct PyFilteredComplex {
     complex.finalize();
     finalized = true;
   }
+};
+
+struct PyCubicalGrid2DComplex {
+  PyCubicalGrid2DComplex(std::size_t vertex_width,
+                         std::size_t vertex_height,
+                         std::vector<double> vertex_values)
+      : complex(vertex_width, vertex_height, std::move(vertex_values)) {}
+
+  morseframes::CubicalGrid2DComplex complex;
 };
 
 struct PySimplexTreeBuilder {
@@ -124,6 +134,26 @@ void require_finalized(const PyFilteredComplex& complex) {
   }
 }
 
+void require_ready(const PyFilteredComplex& complex) {
+  require_finalized(complex);
+}
+
+void require_ready(const PyCubicalGrid2DComplex&) {}
+
+const char* cubical_cell_type_name(morseframes::CubicalCellType type) {
+  switch (type) {
+    case morseframes::CubicalCellType::Vertex:
+      return "vertex";
+    case morseframes::CubicalCellType::HorizontalEdge:
+      return "horizontal_edge";
+    case morseframes::CubicalCellType::VerticalEdge:
+      return "vertical_edge";
+    case morseframes::CubicalCellType::Square:
+      return "square";
+  }
+  return "unknown";
+}
+
 nb::list annotation_table_to_python(const std::vector<morseframes::Annotation>& annotations) {
   nb::list result;
   for (const auto& annotation : annotations) {
@@ -188,8 +218,9 @@ nb::list sequence_steps_to_python(const PyMorseSequence& sequence) {
   return result;
 }
 
-nb::list paired_with_to_python(const morseframes::FilteredSimplicialComplex& complex,
-                               const morseframes::MorseSequence& sequence) {
+template <class ComplexView>
+nb::list paired_with_to_python_view(const ComplexView& complex,
+                                    const morseframes::MorseSequence& sequence) {
   std::vector<morseframes::SimplexId> paired_with(
       complex.size(), static_cast<morseframes::SimplexId>(morseframes::kInvalidSimplex));
   for (const auto& step : sequence.steps()) {
@@ -211,9 +242,10 @@ nb::list paired_with_to_python(const morseframes::FilteredSimplicialComplex& com
   return result;
 }
 
-nb::list paired_with_to_python(const PyFilteredComplex& complex, const PyMorseSequence& sequence) {
-  require_finalized(complex);
-  return paired_with_to_python(complex.complex, sequence.sequence);
+template <class PyComplex>
+nb::list paired_with_to_python(const PyComplex& complex, const PyMorseSequence& sequence) {
+  require_ready(complex);
+  return paired_with_to_python_view(complex.complex, sequence.sequence);
 }
 
 nb::list finite_pairs_to_python(const std::vector<morseframes::PersistencePair>& pairs) {
@@ -507,9 +539,10 @@ bool is_implemented_sequence_algorithm(const std::string& algorithm) {
          algorithm == "flooding-maxmin";
 }
 
-PyMorseSequence build_sequence(const PyFilteredComplex& complex,
+template <class PyComplex>
+PyMorseSequence build_sequence(const PyComplex& complex,
                                const std::string& algorithm) {
-  require_finalized(complex);
+  require_ready(complex);
   const std::string normalized = normalize_sequence_algorithm(algorithm);
   if (normalized == "flooding" || normalized == "stack-flooding") {
     throw std::logic_error(
@@ -546,9 +579,10 @@ PyMorseSequence build_sequence(const PyFilteredComplex& complex,
   return PyMorseSequence{morseframes::FSequenceBuilder(complex.complex).build_saturated()};
 }
 
-PyMorseReferenceFrame build_sequence_and_reference_map(const PyFilteredComplex& complex,
+template <class PyComplex>
+PyMorseReferenceFrame build_sequence_and_reference_map(const PyComplex& complex,
                                                        const std::string& algorithm) {
-  require_finalized(complex);
+  require_ready(complex);
   const std::string normalized = normalize_sequence_algorithm(algorithm);
   if (normalized == "flooding" || normalized == "stack-flooding") {
     throw std::logic_error(
@@ -593,9 +627,10 @@ PyMorseReferenceFrame build_sequence_and_reference_map(const PyFilteredComplex& 
       morseframes::MorseReferenceFrameBuilder(complex.complex).build_saturated()};
 }
 
-PyMorseCoreferenceFrame build_sequence_and_coreference_map(const PyFilteredComplex& complex,
+template <class PyComplex>
+PyMorseCoreferenceFrame build_sequence_and_coreference_map(const PyComplex& complex,
                                                            const std::string& algorithm) {
-  require_finalized(complex);
+  require_ready(complex);
   const std::string normalized = normalize_sequence_algorithm(algorithm);
   if (normalized == "flooding" || normalized == "stack-flooding") {
     throw std::logic_error(
@@ -633,37 +668,41 @@ PyMorseCoreferenceFrame build_sequence_and_coreference_map(const PyFilteredCompl
       morseframes::MorseCoreferenceFrame{std::move(sequence), std::move(coreferences)}};
 }
 
-PyReferenceMap compute_reference_map_object(const PyFilteredComplex& complex,
+template <class PyComplex>
+PyReferenceMap compute_reference_map_object(const PyComplex& complex,
                                             const PyMorseSequence& sequence) {
-  require_finalized(complex);
+  require_ready(complex);
   auto references =
       morseframes::MorseReferenceComputer(complex.complex, sequence.sequence).compute_full_references();
   return PyReferenceMap{std::move(references)};
 }
 
-PyFieldReferenceMap compute_reference_map_modp_object(const PyFilteredComplex& complex,
+template <class PyComplex>
+PyFieldReferenceMap compute_reference_map_modp_object(const PyComplex& complex,
                                                       const PyMorseSequence& sequence,
                                                       std::uint32_t modulus) {
-  require_finalized(complex);
+  require_ready(complex);
   auto references =
       morseframes::MorseFieldReferenceComputer(complex.complex, sequence.sequence, modulus)
           .compute_full_references();
   return PyFieldReferenceMap{std::move(references)};
 }
 
-PyReferenceMap compute_coreference_map_object(const PyFilteredComplex& complex,
+template <class PyComplex>
+PyReferenceMap compute_coreference_map_object(const PyComplex& complex,
                                               const PyMorseSequence& sequence) {
-  require_finalized(complex);
+  require_ready(complex);
   auto coreferences =
       morseframes::MorseCoreferenceComputer(complex.complex, sequence.sequence)
           .compute_full_coreferences();
   return PyReferenceMap{std::move(coreferences)};
 }
 
-PyFieldReferenceMap compute_coreference_map_modp_object(const PyFilteredComplex& complex,
+template <class PyComplex>
+PyFieldReferenceMap compute_coreference_map_modp_object(const PyComplex& complex,
                                                         const PyMorseSequence& sequence,
                                                         std::uint32_t modulus) {
-  require_finalized(complex);
+  require_ready(complex);
   auto coreferences =
       morseframes::MorseFieldCoreferenceComputer(complex.complex, sequence.sequence, modulus)
           .compute_full_coreferences();
@@ -674,7 +713,8 @@ nb::list reference_map_to_python(const PyReferenceMap& references) {
   return annotation_table_to_python(references.references);
 }
 
-nb::list compute_reference_map(const PyFilteredComplex& complex, const PyMorseSequence& sequence) {
+template <class PyComplex>
+nb::list compute_reference_map(const PyComplex& complex, const PyMorseSequence& sequence) {
   return reference_map_to_python(compute_reference_map_object(complex, sequence));
 }
 
@@ -682,27 +722,31 @@ nb::list field_reference_map_to_python(const PyFieldReferenceMap& references) {
   return field_annotation_table_to_python(references.references);
 }
 
-nb::list compute_reference_map_modp(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::list compute_reference_map_modp(const PyComplex& complex,
                                     const PyMorseSequence& sequence,
                                     std::uint32_t modulus) {
   return field_reference_map_to_python(
       compute_reference_map_modp_object(complex, sequence, modulus));
 }
 
-nb::list compute_coreference_map(const PyFilteredComplex& complex, const PyMorseSequence& sequence) {
+template <class PyComplex>
+nb::list compute_coreference_map(const PyComplex& complex, const PyMorseSequence& sequence) {
   return reference_map_to_python(compute_coreference_map_object(complex, sequence));
 }
 
-nb::list compute_coreference_map_modp(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::list compute_coreference_map_modp(const PyComplex& complex,
                                       const PyMorseSequence& sequence,
                                       std::uint32_t modulus) {
   return field_reference_map_to_python(
       compute_coreference_map_modp_object(complex, sequence, modulus));
 }
 
-nb::dict compute_morse_persistence(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict compute_morse_persistence(const PyComplex& complex,
                                    const PyMorseSequence& sequence) {
-  require_finalized(complex);
+  require_ready(complex);
   auto references =
       morseframes::MorseReferenceComputer(complex.complex, sequence.sequence).compute_full_references();
   auto diagram =
@@ -711,19 +755,21 @@ nb::dict compute_morse_persistence(const PyFilteredComplex& complex,
   return diagram_to_python(diagram);
 }
 
-nb::dict compute_morse_persistence_modp(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict compute_morse_persistence_modp(const PyComplex& complex,
                                         const PyMorseSequence& sequence,
                                         std::uint32_t modulus) {
-  require_finalized(complex);
+  require_ready(complex);
   auto diagram =
       morseframes::compute_morse_reference_prime_field_persistence(
           complex.complex, sequence.sequence, modulus);
   return diagram_to_python(diagram);
 }
 
-nb::dict compute_morse_coreference_persistence(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict compute_morse_coreference_persistence(const PyComplex& complex,
                                                const PyMorseSequence& sequence) {
-  require_finalized(complex);
+  require_ready(complex);
   auto coreferences =
       morseframes::MorseCoreferenceComputer(complex.complex, sequence.sequence)
           .compute_full_coreferences();
@@ -734,20 +780,22 @@ nb::dict compute_morse_coreference_persistence(const PyFilteredComplex& complex,
   return diagram_to_python(diagram);
 }
 
-nb::dict compute_morse_coreference_persistence_modp(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict compute_morse_coreference_persistence_modp(const PyComplex& complex,
                                                     const PyMorseSequence& sequence,
                                                     std::uint32_t modulus) {
-  require_finalized(complex);
+  require_ready(complex);
   auto diagram =
       morseframes::compute_morse_coreference_prime_field_persistence(
           complex.complex, sequence.sequence, modulus);
   return diagram_to_python(diagram);
 }
 
-nb::dict reduce_morse_persistence(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict reduce_morse_persistence(const PyComplex& complex,
                                   const PyMorseSequence& sequence,
                                   nb::sequence references) {
-  require_finalized(complex);
+  require_ready(complex);
   auto reference_table = annotation_table_from_python(references);
   auto diagram =
       morseframes::MorseReferencePersistenceReducer(complex.complex, sequence.sequence, reference_table)
@@ -755,11 +803,12 @@ nb::dict reduce_morse_persistence(const PyFilteredComplex& complex,
   return diagram_to_python(diagram);
 }
 
+template <class PyComplex>
 nb::dict reduce_morse_persistence_with_metrics(
-    const PyFilteredComplex& complex,
+    const PyComplex& complex,
     const PyMorseSequence& sequence,
     nb::sequence references) {
-  require_finalized(complex);
+  require_ready(complex);
   auto reference_table = annotation_table_from_python(references);
   const auto setup_started = Clock::now();
   morseframes::MorseReferencePersistenceReducer reducer(
@@ -774,10 +823,11 @@ nb::dict reduce_morse_persistence_with_metrics(
   return reduction_result_to_python(result);
 }
 
-nb::dict reduce_morse_persistence_object(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict reduce_morse_persistence_object(const PyComplex& complex,
                                          const PyMorseSequence& sequence,
                                          const PyReferenceMap& references) {
-  require_finalized(complex);
+  require_ready(complex);
   auto diagram =
       morseframes::MorseReferencePersistenceReducer(
           complex.complex, sequence.sequence, references.references)
@@ -785,10 +835,11 @@ nb::dict reduce_morse_persistence_object(const PyFilteredComplex& complex,
   return diagram_to_python(diagram);
 }
 
-nb::dict reduce_morse_coreference_persistence_object(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict reduce_morse_coreference_persistence_object(const PyComplex& complex,
                                                      const PyMorseSequence& sequence,
                                                      const PyReferenceMap& coreferences) {
-  require_finalized(complex);
+  require_ready(complex);
   auto diagram =
       morseframes::MorseCoreferencePersistenceReducer(
           complex.complex, sequence.sequence, coreferences.references)
@@ -796,10 +847,11 @@ nb::dict reduce_morse_coreference_persistence_object(const PyFilteredComplex& co
   return diagram_to_python(diagram);
 }
 
-nb::dict reduce_morse_persistence_object_with_metrics(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict reduce_morse_persistence_object_with_metrics(const PyComplex& complex,
                                                       const PyMorseSequence& sequence,
                                                       const PyReferenceMap& references) {
-  require_finalized(complex);
+  require_ready(complex);
   const auto setup_started = Clock::now();
   morseframes::MorseReferencePersistenceReducer reducer(
       complex.complex, sequence.sequence, references.references);
@@ -813,18 +865,20 @@ nb::dict reduce_morse_persistence_object_with_metrics(const PyFilteredComplex& c
   return reduction_result_to_python(result);
 }
 
-nb::dict reduce_morse_reference_frame_object(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict reduce_morse_reference_frame_object(const PyComplex& complex,
                                              const PyMorseReferenceFrame& frame) {
-  require_finalized(complex);
+  require_ready(complex);
   auto diagram =
       morseframes::MorseReferencePersistenceReducer(complex.complex, frame.sequence, frame.references)
           .compute();
   return diagram_to_python(diagram);
 }
 
-nb::dict reduce_morse_reference_frame_object_with_metrics(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict reduce_morse_reference_frame_object_with_metrics(const PyComplex& complex,
                                                           const PyMorseReferenceFrame& frame) {
-  require_finalized(complex);
+  require_ready(complex);
   const auto setup_started = Clock::now();
   morseframes::MorseReferencePersistenceReducer reducer(complex.complex, frame.sequence, frame.references);
   const auto compute_started = Clock::now();
@@ -837,9 +891,10 @@ nb::dict reduce_morse_reference_frame_object_with_metrics(const PyFilteredComple
   return reduction_result_to_python(result);
 }
 
-nb::dict reduce_morse_coreference_frame_object(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict reduce_morse_coreference_frame_object(const PyComplex& complex,
                                                const PyMorseCoreferenceFrame& frame) {
-  require_finalized(complex);
+  require_ready(complex);
   auto diagram =
       morseframes::MorseCoreferencePersistenceReducer(
           complex.complex, frame.sequence, frame.coreferences)
@@ -847,10 +902,11 @@ nb::dict reduce_morse_coreference_frame_object(const PyFilteredComplex& complex,
   return diagram_to_python(diagram);
 }
 
+template <class PyComplex>
 nb::dict reduce_morse_coreference_frame_object_with_metrics(
-    const PyFilteredComplex& complex,
+    const PyComplex& complex,
     const PyMorseCoreferenceFrame& frame) {
-  require_finalized(complex);
+  require_ready(complex);
   const auto setup_started = Clock::now();
   morseframes::MorseCoreferencePersistenceReducer reducer(
       complex.complex, frame.sequence, frame.coreferences);
@@ -864,22 +920,25 @@ nb::dict reduce_morse_coreference_frame_object_with_metrics(
   return reduction_result_to_python(result);
 }
 
-nb::dict compute_standard_persistence(const PyFilteredComplex& complex) {
-  require_finalized(complex);
+template <class PyComplex>
+nb::dict compute_standard_persistence(const PyComplex& complex) {
+  require_ready(complex);
   return diagram_to_python(morseframes::compute_standard_z2_persistence(complex.complex));
 }
 
-nb::dict compute_standard_persistence_modp(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict compute_standard_persistence_modp(const PyComplex& complex,
                                            std::uint32_t modulus) {
-  require_finalized(complex);
+  require_ready(complex);
   return diagram_to_python(
       morseframes::compute_standard_prime_field_persistence(complex.complex, modulus));
 }
 
-nb::dict benchmark_morse_reference_core(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict benchmark_morse_reference_core(const PyComplex& complex,
                                         const std::string& algorithm,
                                         const std::string& frame_mode) {
-  require_finalized(complex);
+  require_ready(complex);
   const std::string normalized_algorithm = normalize_sequence_algorithm(algorithm);
   if (normalized_algorithm == "flooding" || normalized_algorithm == "stack-flooding") {
     throw std::logic_error(
@@ -1011,9 +1070,10 @@ nb::dict benchmark_morse_reference_core(const PyFilteredComplex& complex,
       normalized_frame_mode);
 }
 
-nb::dict profile_morse_reference_frame_core(const PyFilteredComplex& complex,
+template <class PyComplex>
+nb::dict profile_morse_reference_frame_core(const PyComplex& complex,
                                             const std::string& algorithm) {
-  require_finalized(complex);
+  require_ready(complex);
   const std::string normalized_algorithm = normalize_sequence_algorithm(algorithm);
   if (normalized_algorithm == "flooding" || normalized_algorithm == "stack-flooding") {
     throw std::logic_error(
@@ -1061,8 +1121,9 @@ nb::dict profile_morse_reference_frame_core(const PyFilteredComplex& complex,
   return result;
 }
 
-nb::list benchmark_coreduction_directions_core(const PyFilteredComplex& complex) {
-  require_finalized(complex);
+template <class PyComplex>
+nb::list benchmark_coreduction_directions_core(const PyComplex& complex) {
+  require_ready(complex);
 
   const auto standard_started = Clock::now();
   auto standard_diagram = morseframes::compute_standard_z2_persistence(complex.complex);
@@ -1138,6 +1199,121 @@ nb::list benchmark_coreduction_directions_core(const PyFilteredComplex& complex)
   return rows;
 }
 
+template <class PyComplex>
+void bind_complex_view_functions(nb::module_& m) {
+  m.def("compute_morse_sequence",
+        &build_sequence<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("algorithm") = "saturated");
+  m.def("compute_morse_sequence_and_reference_map_object",
+        &build_sequence_and_reference_map<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("algorithm") = "saturated");
+  m.def("compute_morse_sequence_and_coreference_map_object",
+        &build_sequence_and_coreference_map<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("algorithm") = "same-level-reduction");
+  m.def("compute_reference_map_object",
+        &compute_reference_map_object<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"));
+  m.def("compute_coreference_map_object",
+        &compute_coreference_map_object<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"));
+  m.def("compute_reference_map", &compute_reference_map<PyComplex>, nb::arg("complex"), nb::arg("sequence"));
+  m.def("compute_reference_map_modp",
+        &compute_reference_map_modp<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"),
+        nb::arg("modulus"));
+  m.def("compute_coreference_map",
+        &compute_coreference_map<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"));
+  m.def("compute_coreference_map_modp",
+        &compute_coreference_map_modp<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"),
+        nb::arg("modulus"));
+  m.def("compute_morse_persistence",
+        &compute_morse_persistence<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"));
+  m.def("compute_morse_persistence_modp",
+        &compute_morse_persistence_modp<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"),
+        nb::arg("modulus"));
+  m.def("compute_morse_coreference_persistence",
+        &compute_morse_coreference_persistence<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"));
+  m.def("compute_morse_coreference_persistence_modp",
+        &compute_morse_coreference_persistence_modp<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"),
+        nb::arg("modulus"));
+  m.def("reduce_morse_persistence",
+        &reduce_morse_persistence<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"),
+        nb::arg("references"));
+  m.def("reduce_morse_persistence_with_metrics",
+        &reduce_morse_persistence_with_metrics<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"),
+        nb::arg("references"));
+  m.def("reduce_morse_persistence_object",
+        &reduce_morse_persistence_object<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"),
+        nb::arg("references"));
+  m.def("reduce_morse_coreference_persistence_object",
+        &reduce_morse_coreference_persistence_object<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"),
+        nb::arg("coreferences"));
+  m.def("reduce_morse_persistence_object_with_metrics",
+        &reduce_morse_persistence_object_with_metrics<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("sequence"),
+        nb::arg("references"));
+  m.def("reduce_morse_reference_frame_object",
+        &reduce_morse_reference_frame_object<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("frame"));
+  m.def("reduce_morse_reference_frame_object_with_metrics",
+        &reduce_morse_reference_frame_object_with_metrics<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("frame"));
+  m.def("reduce_morse_coreference_frame_object",
+        &reduce_morse_coreference_frame_object<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("frame"));
+  m.def("reduce_morse_coreference_frame_object_with_metrics",
+        &reduce_morse_coreference_frame_object_with_metrics<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("frame"));
+  m.def("compute_standard_persistence", &compute_standard_persistence<PyComplex>, nb::arg("complex"));
+  m.def("compute_standard_persistence_modp",
+        &compute_standard_persistence_modp<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("modulus"));
+  m.def("benchmark_morse_reference_core",
+        &benchmark_morse_reference_core<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("algorithm") = "saturated",
+        nb::arg("frame_mode") = "fused");
+  m.def("profile_morse_reference_frame_core",
+        &profile_morse_reference_frame_core<PyComplex>,
+        nb::arg("complex"),
+        nb::arg("algorithm") = "saturated");
+  m.def("benchmark_coreduction_directions_core",
+        &benchmark_coreduction_directions_core<PyComplex>,
+        nb::arg("complex"));
+}
+
 nb::dict analyze(const std::vector<SimplexInput>& simplices) {
   morseframes::FilteredSimplicialComplex complex;
   for (const auto& [vertices, filtration] : simplices) {
@@ -1155,7 +1331,7 @@ nb::dict analyze(const std::vector<SimplexInput>& simplices) {
   result["steps"] = sequence_steps_to_python(PyMorseSequence{frame.sequence});
   result["critical_simplices"] = frame.sequence.critical_simplices();
   result["critical_index_of_simplex"] = frame.sequence.critical_index_of_simplex();
-  result["paired_with"] = paired_with_to_python(complex, frame.sequence);
+  result["paired_with"] = paired_with_to_python_view(complex, frame.sequence);
   result["references"] = annotation_table_to_python(frame.references);
   result["morse"] = diagram_to_python(morse_diagram);
   result["standard"] = diagram_to_python(standard_diagram);
@@ -1216,6 +1392,109 @@ NB_MODULE(_morse_core, m) {
         require_finalized(self);
         return self.complex.simplices_of_level(level);
       });
+
+  nb::class_<PyCubicalGrid2DComplex>(m, "CubicalGrid2DComplex")
+      .def(nb::init<std::size_t, std::size_t, std::vector<double>>(),
+           nb::arg("vertex_width"),
+           nb::arg("vertex_height"),
+           nb::arg("vertex_values"))
+      .def_static("from_vertex_values",
+                  [](std::size_t vertex_width,
+                     std::size_t vertex_height,
+                     std::vector<double> vertex_values) {
+                    return PyCubicalGrid2DComplex(
+                        vertex_width,
+                        vertex_height,
+                        std::move(vertex_values));
+                  },
+                  nb::arg("vertex_width"),
+                  nb::arg("vertex_height"),
+                  nb::arg("vertex_values"))
+      .def_prop_ro("size", [](const PyCubicalGrid2DComplex& self) {
+        return self.complex.size();
+      })
+      .def_prop_ro("num_levels", [](const PyCubicalGrid2DComplex& self) {
+        return self.complex.num_levels();
+      })
+      .def_prop_ro("level_values", [](const PyCubicalGrid2DComplex& self) {
+        return self.complex.level_values();
+      })
+      .def_prop_ro("filtration_order", [](const PyCubicalGrid2DComplex& self) {
+        return self.complex.filtration_order();
+      })
+      .def_prop_ro("vertex_width", [](const PyCubicalGrid2DComplex& self) {
+        return self.complex.vertex_width();
+      })
+      .def_prop_ro("vertex_height", [](const PyCubicalGrid2DComplex& self) {
+        return self.complex.vertex_height();
+      })
+      .def_prop_ro("square_width", [](const PyCubicalGrid2DComplex& self) {
+        return self.complex.square_width();
+      })
+      .def_prop_ro("square_height", [](const PyCubicalGrid2DComplex& self) {
+        return self.complex.square_height();
+      })
+      .def("vertices", [](const PyCubicalGrid2DComplex& self, morseframes::SimplexId cell) {
+        const auto& vertices = self.complex.vertices(cell);
+        return std::vector<morseframes::VertexId>(vertices.begin(), vertices.end());
+      })
+      .def("dimension", [](const PyCubicalGrid2DComplex& self, morseframes::SimplexId cell) {
+        return self.complex.dimension(cell);
+      })
+      .def("level", [](const PyCubicalGrid2DComplex& self, morseframes::SimplexId cell) {
+        return self.complex.level(cell);
+      })
+      .def("filtration", [](const PyCubicalGrid2DComplex& self, morseframes::SimplexId cell) {
+        return self.complex.filtration(cell);
+      })
+      .def("boundary", [](const PyCubicalGrid2DComplex& self, morseframes::SimplexId cell) {
+        const auto& boundary = self.complex.boundary(cell);
+        return std::vector<morseframes::SimplexId>(boundary.begin(), boundary.end());
+      })
+      .def("coboundary", [](const PyCubicalGrid2DComplex& self, morseframes::SimplexId cell) {
+        const auto& coboundary = self.complex.coboundary(cell);
+        return std::vector<morseframes::SimplexId>(coboundary.begin(), coboundary.end());
+      })
+      .def("simplices_of_level", [](const PyCubicalGrid2DComplex& self, morseframes::LevelId level) {
+        return self.complex.simplices_of_level(level);
+      })
+      .def("cell_type", [](const PyCubicalGrid2DComplex& self, morseframes::SimplexId cell) {
+        return cubical_cell_type_name(self.complex.cell_type(cell));
+      })
+      .def("boundary_coefficient",
+           [](const PyCubicalGrid2DComplex& self,
+              morseframes::SimplexId cell,
+              std::size_t boundary_index,
+              std::uint32_t modulus) {
+             return self.complex.boundary_coefficient(cell, boundary_index, modulus);
+           },
+           nb::arg("cell"),
+           nb::arg("boundary_index"),
+           nb::arg("modulus"))
+      .def("vertex",
+           [](const PyCubicalGrid2DComplex& self, std::size_t x, std::size_t y) {
+             return self.complex.vertex(x, y);
+           },
+           nb::arg("x"),
+           nb::arg("y"))
+      .def("horizontal_edge",
+           [](const PyCubicalGrid2DComplex& self, std::size_t x, std::size_t y) {
+             return self.complex.horizontal_edge(x, y);
+           },
+           nb::arg("x"),
+           nb::arg("y"))
+      .def("vertical_edge",
+           [](const PyCubicalGrid2DComplex& self, std::size_t x, std::size_t y) {
+             return self.complex.vertical_edge(x, y);
+           },
+           nb::arg("x"),
+           nb::arg("y"))
+      .def("square",
+           [](const PyCubicalGrid2DComplex& self, std::size_t x, std::size_t y) {
+             return self.complex.square(x, y);
+           },
+           nb::arg("x"),
+           nb::arg("y"));
 
   nb::class_<PySimplexTreeBuilder>(m, "SimplexTreeBuilder")
       .def(nb::init<const std::string&>(), nb::arg("merge") = "min")
@@ -1297,6 +1576,11 @@ NB_MODULE(_morse_core, m) {
            [](const PyMorseSequence& self, const PyFilteredComplex& complex) {
              return paired_with_to_python(complex, self);
            },
+           nb::arg("complex"))
+      .def("paired_with",
+           [](const PyMorseSequence& self, const PyCubicalGrid2DComplex& complex) {
+             return paired_with_to_python(complex, self);
+           },
            nb::arg("complex"));
 
   nb::class_<PyReferenceMap>(m, "ReferenceMap")
@@ -1322,116 +1606,7 @@ NB_MODULE(_morse_core, m) {
         return PyReferenceMap{self.coreferences};
       });
 
-  m.def("compute_morse_sequence",
-        &build_sequence,
-        nb::arg("complex"),
-        nb::arg("algorithm") = "saturated");
-  m.def("compute_morse_sequence_and_reference_map_object",
-        &build_sequence_and_reference_map,
-        nb::arg("complex"),
-        nb::arg("algorithm") = "saturated");
-  m.def("compute_morse_sequence_and_coreference_map_object",
-        &build_sequence_and_coreference_map,
-        nb::arg("complex"),
-        nb::arg("algorithm") = "same-level-reduction");
-  m.def("compute_reference_map_object",
-        &compute_reference_map_object,
-        nb::arg("complex"),
-        nb::arg("sequence"));
-  m.def("compute_coreference_map_object",
-        &compute_coreference_map_object,
-        nb::arg("complex"),
-        nb::arg("sequence"));
-  m.def("compute_reference_map", &compute_reference_map, nb::arg("complex"), nb::arg("sequence"));
-  m.def("compute_reference_map_modp",
-        &compute_reference_map_modp,
-        nb::arg("complex"),
-        nb::arg("sequence"),
-        nb::arg("modulus"));
-  m.def("compute_coreference_map",
-        &compute_coreference_map,
-        nb::arg("complex"),
-        nb::arg("sequence"));
-  m.def("compute_coreference_map_modp",
-        &compute_coreference_map_modp,
-        nb::arg("complex"),
-        nb::arg("sequence"),
-        nb::arg("modulus"));
-  m.def("compute_morse_persistence",
-        &compute_morse_persistence,
-        nb::arg("complex"),
-        nb::arg("sequence"));
-  m.def("compute_morse_persistence_modp",
-        &compute_morse_persistence_modp,
-        nb::arg("complex"),
-        nb::arg("sequence"),
-        nb::arg("modulus"));
-  m.def("compute_morse_coreference_persistence",
-        &compute_morse_coreference_persistence,
-        nb::arg("complex"),
-        nb::arg("sequence"));
-  m.def("compute_morse_coreference_persistence_modp",
-        &compute_morse_coreference_persistence_modp,
-        nb::arg("complex"),
-        nb::arg("sequence"),
-        nb::arg("modulus"));
-  m.def("reduce_morse_persistence",
-        &reduce_morse_persistence,
-        nb::arg("complex"),
-        nb::arg("sequence"),
-        nb::arg("references"));
-  m.def("reduce_morse_persistence_with_metrics",
-        &reduce_morse_persistence_with_metrics,
-        nb::arg("complex"),
-        nb::arg("sequence"),
-        nb::arg("references"));
-  m.def("reduce_morse_persistence_object",
-        &reduce_morse_persistence_object,
-        nb::arg("complex"),
-        nb::arg("sequence"),
-        nb::arg("references"));
-  m.def("reduce_morse_coreference_persistence_object",
-        &reduce_morse_coreference_persistence_object,
-        nb::arg("complex"),
-        nb::arg("sequence"),
-        nb::arg("coreferences"));
-  m.def("reduce_morse_persistence_object_with_metrics",
-        &reduce_morse_persistence_object_with_metrics,
-        nb::arg("complex"),
-        nb::arg("sequence"),
-        nb::arg("references"));
-  m.def("reduce_morse_reference_frame_object",
-        &reduce_morse_reference_frame_object,
-        nb::arg("complex"),
-        nb::arg("frame"));
-  m.def("reduce_morse_reference_frame_object_with_metrics",
-        &reduce_morse_reference_frame_object_with_metrics,
-        nb::arg("complex"),
-        nb::arg("frame"));
-  m.def("reduce_morse_coreference_frame_object",
-        &reduce_morse_coreference_frame_object,
-        nb::arg("complex"),
-        nb::arg("frame"));
-  m.def("reduce_morse_coreference_frame_object_with_metrics",
-        &reduce_morse_coreference_frame_object_with_metrics,
-        nb::arg("complex"),
-        nb::arg("frame"));
-  m.def("compute_standard_persistence", &compute_standard_persistence, nb::arg("complex"));
-  m.def("compute_standard_persistence_modp",
-        &compute_standard_persistence_modp,
-        nb::arg("complex"),
-        nb::arg("modulus"));
-  m.def("benchmark_morse_reference_core",
-        &benchmark_morse_reference_core,
-        nb::arg("complex"),
-        nb::arg("algorithm") = "saturated",
-        nb::arg("frame_mode") = "fused");
-  m.def("profile_morse_reference_frame_core",
-        &profile_morse_reference_frame_core,
-        nb::arg("complex"),
-        nb::arg("algorithm") = "saturated");
-  m.def("benchmark_coreduction_directions_core",
-        &benchmark_coreduction_directions_core,
-        nb::arg("complex"));
+  bind_complex_view_functions<PyFilteredComplex>(m);
+  bind_complex_view_functions<PyCubicalGrid2DComplex>(m);
   m.def("analyze", &analyze, nb::arg("simplices"));
 }

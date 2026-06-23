@@ -28,6 +28,7 @@ else:
         _morse_core = None
 
 CppFilteredComplex = getattr(_morse_core, "FilteredComplex", None)
+CppCubicalGrid2DComplex = getattr(_morse_core, "CubicalGrid2DComplex", None)
 CppMorseSequence = getattr(_morse_core, "MorseSequence", None)
 CppReferenceMap = getattr(_morse_core, "ReferenceMap", None)
 CppMorseReferenceFrame = getattr(_morse_core, "MorseReferenceFrame", None)
@@ -106,6 +107,18 @@ class SimplexRecord:
     filtration: float
     boundary: tuple[int, ...]
     coboundary: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class CubicalCellRecord:
+    id: int
+    vertices: tuple[int, ...]
+    dimension: int
+    level: int
+    filtration: float
+    boundary: tuple[int, ...]
+    coboundary: tuple[int, ...]
+    cell_type: str
 
 
 @dataclass(frozen=True)
@@ -884,6 +897,232 @@ class FilteredComplex:
             core.add_simplex(list(simplex), filtration)
         core.finalize()
         self._cpp = core
+
+
+class CubicalGrid2DComplex:
+    """Native-backed filtered two-dimensional cubical grid.
+
+    The grid is built from row-major vertex values. Each edge and square receives
+    the maximum filtration value of its vertices, so plateaus are represented
+    directly without a lower-star subdivision.
+    """
+
+    _simplicial_payload_supported = False
+
+    def __init__(
+        self,
+        vertex_width: int,
+        vertex_height: int,
+        vertex_values: Sequence[float],
+        *,
+        _cpp: object | None = None,
+    ) -> None:
+        if CppCubicalGrid2DComplex is None:
+            raise RuntimeError("The C++ backend is required for cubical complexes.")
+        self._cpp = (
+            _cpp
+            if _cpp is not None
+            else CppCubicalGrid2DComplex(
+                int(vertex_width),
+                int(vertex_height),
+                [float(value) for value in vertex_values],
+            )
+        )
+        self._records = self._make_records()
+        self._cell_key_to_id = {record.vertices: record.id for record in self._records}
+
+    @classmethod
+    def from_vertex_values(
+        cls,
+        vertex_width: int,
+        vertex_height: int,
+        vertex_values: Sequence[float],
+    ) -> "CubicalGrid2DComplex":
+        if CppCubicalGrid2DComplex is None:
+            raise RuntimeError("The C++ backend is required for cubical complexes.")
+        constructor = getattr(CppCubicalGrid2DComplex, "from_vertex_values", None)
+        if constructor is None:
+            return cls(vertex_width, vertex_height, vertex_values)
+        return cls(
+            int(vertex_width),
+            int(vertex_height),
+            vertex_values,
+            _cpp=constructor(
+                int(vertex_width),
+                int(vertex_height),
+                [float(value) for value in vertex_values],
+            ),
+        )
+
+    def _make_records(self) -> tuple[CubicalCellRecord, ...]:
+        records: list[CubicalCellRecord] = []
+        for cell in range(int(self._cpp.size)):
+            records.append(
+                CubicalCellRecord(
+                    id=cell,
+                    vertices=tuple(int(vertex) for vertex in self._cpp.vertices(cell)),
+                    dimension=int(self._cpp.dimension(cell)),
+                    level=int(self._cpp.level(cell)),
+                    filtration=float(self._cpp.filtration(cell)),
+                    boundary=tuple(int(face) for face in self._cpp.boundary(cell)),
+                    coboundary=tuple(int(coface) for coface in self._cpp.coboundary(cell)),
+                    cell_type=str(self._cpp.cell_type(cell)),
+                )
+            )
+        return tuple(records)
+
+    def __len__(self) -> int:
+        return self.size
+
+    @property
+    def size(self) -> int:
+        return int(self._cpp.size)
+
+    @property
+    def num_levels(self) -> int:
+        return int(self._cpp.num_levels)
+
+    @property
+    def level_values(self) -> tuple[float, ...]:
+        return tuple(float(value) for value in self._cpp.level_values)
+
+    @property
+    def filtration_order(self) -> tuple[int, ...]:
+        return tuple(int(cell) for cell in self._cpp.filtration_order)
+
+    @property
+    def vertex_width(self) -> int:
+        return int(self._cpp.vertex_width)
+
+    @property
+    def vertex_height(self) -> int:
+        return int(self._cpp.vertex_height)
+
+    @property
+    def square_width(self) -> int:
+        return int(self._cpp.square_width)
+
+    @property
+    def square_height(self) -> int:
+        return int(self._cpp.square_height)
+
+    def simplices(self) -> Iterator[CubicalCellRecord]:
+        return iter(self._records)
+
+    def simplex_records(self) -> tuple[CubicalCellRecord, ...]:
+        return self._records
+
+    def simplex_list(self) -> tuple[tuple[int, ...], ...]:
+        return tuple(record.vertices for record in self._records)
+
+    def as_simplices(self) -> tuple[tuple[int, ...], ...]:
+        return self.simplex_list()
+
+    def filtration_list(self) -> tuple[tuple[tuple[int, ...], float], ...]:
+        return tuple(
+            (self._records[cell].vertices, self._records[cell].filtration)
+            for cell in self.filtration_order
+        )
+
+    def simplex(self, simplex_id: int) -> CubicalCellRecord:
+        return self.cell(simplex_id)
+
+    def cell(self, cell_id: int) -> CubicalCellRecord:
+        return self._records[int(cell_id)]
+
+    def vertices(self, cell_id: int) -> tuple[int, ...]:
+        return self.cell(cell_id).vertices
+
+    def dimension(self, cell_id: int) -> int:
+        return self.cell(cell_id).dimension
+
+    def level(self, cell_id: int) -> int:
+        return self.cell(cell_id).level
+
+    def filtration(self, cell_id: int) -> float:
+        return self.cell(cell_id).filtration
+
+    def boundary(self, cell_id: int) -> tuple[int, ...]:
+        return self.cell(cell_id).boundary
+
+    def coboundary(self, cell_id: int) -> tuple[int, ...]:
+        return self.cell(cell_id).coboundary
+
+    def simplices_of_level(self, level: int) -> tuple[int, ...]:
+        return tuple(int(cell) for cell in self._cpp.simplices_of_level(int(level)))
+
+    def cell_type(self, cell_id: int) -> str:
+        return self.cell(cell_id).cell_type
+
+    def boundary_coefficient(self, cell_id: int, boundary_index: int, modulus: int) -> int:
+        return int(self._cpp.boundary_coefficient(int(cell_id), int(boundary_index), int(modulus)))
+
+    def vertex(self, x: int, y: int) -> int:
+        return int(self._cpp.vertex(int(x), int(y)))
+
+    def horizontal_edge(self, x: int, y: int) -> int:
+        return int(self._cpp.horizontal_edge(int(x), int(y)))
+
+    def vertical_edge(self, x: int, y: int) -> int:
+        return int(self._cpp.vertical_edge(int(x), int(y)))
+
+    def square(self, x: int, y: int) -> int:
+        return int(self._cpp.square(int(x), int(y)))
+
+    def find_simplex(self, vertices: Sequence[int]) -> int | None:
+        return self._cell_key_to_id.get(tuple(sorted(int(vertex) for vertex in vertices)))
+
+    def simplex_id(self, vertices: Sequence[int]) -> int | None:
+        return self.find_simplex(vertices)
+
+    def contains(self, vertices: Sequence[int]) -> bool:
+        return self.find_simplex(vertices) is not None
+
+    def require_simplex_id(self, vertices: Sequence[int]) -> int:
+        cell_key = tuple(sorted(int(vertex) for vertex in vertices))
+        cell_id = self.find_simplex(cell_key)
+        if cell_id is None:
+            raise KeyError(f"Cell with vertices {cell_key} is not present in the cubical grid.")
+        return cell_id
+
+    def filtration_of(self, vertices: Sequence[int]) -> float:
+        return self.filtration(self.require_simplex_id(vertices))
+
+    def boundary_simplices(self, simplex_or_vertices: int | Sequence[int]) -> tuple[tuple[int, ...], ...]:
+        cell_id = (
+            simplex_or_vertices
+            if isinstance(simplex_or_vertices, int)
+            else self.require_simplex_id(simplex_or_vertices)
+        )
+        return tuple(self.vertices(face) for face in self.boundary(int(cell_id)))
+
+    def coboundary_simplices(self, simplex_or_vertices: int | Sequence[int]) -> tuple[tuple[int, ...], ...]:
+        cell_id = (
+            simplex_or_vertices
+            if isinstance(simplex_or_vertices, int)
+            else self.require_simplex_id(simplex_or_vertices)
+        )
+        return tuple(self.vertices(coface) for coface in self.coboundary(int(cell_id)))
+
+    def __contains__(self, vertices: object) -> bool:
+        if isinstance(vertices, (str, bytes)):
+            return False
+        try:
+            return self.contains(vertices)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False
+
+    def cpp_backend_active(self) -> bool:
+        return True
+
+    def to_cpp(self) -> object:
+        return self._cpp
+
+    def finalize(self) -> "CubicalGrid2DComplex":
+        return self
+
+    def _ensure_finalized(self) -> None:
+        return None
 
 
 class SimplexTreeBuilder:
@@ -2058,7 +2297,12 @@ def compute_reference_map_modp(
         paired_face_coefficient: int | None = None
         lower_reference: dict[int, int] = {}
         for removed_index, face in enumerate(complex_.boundary(step.tau)):
-            coefficient = _boundary_coefficient(removed_index, modulus)
+            coefficient = _boundary_coefficient_for(
+                complex_,
+                step.tau,
+                removed_index,
+                modulus,
+            )
             if face == step.sigma:
                 paired_face_coefficient = coefficient
                 continue
@@ -3246,6 +3490,21 @@ def cpp_filtered_complex_from_simplices(
     if finalize:
         complex_.finalize()
     return complex_
+
+
+def cpp_cubical_grid_2d_from_vertex_values(
+    vertex_width: int,
+    vertex_height: int,
+    vertex_values: Sequence[float],
+) -> object:
+    _require_cpp_backend()
+    if CppCubicalGrid2DComplex is None:
+        raise RuntimeError("The C++ backend does not expose 2D cubical grids.")
+    constructor = getattr(CppCubicalGrid2DComplex, "from_vertex_values", None)
+    values = [float(value) for value in vertex_values]
+    if constructor is not None:
+        return constructor(int(vertex_width), int(vertex_height), values)
+    return CppCubicalGrid2DComplex(int(vertex_width), int(vertex_height), values)
 
 
 def cpp_compute_morse_sequence(
@@ -4732,6 +4991,8 @@ def _diagram_from_cpp_dict(diagram: dict[str, object]) -> PersistenceDiagram:
 def _compute_cpp_payload(complex_: FilteredComplex) -> dict[str, object] | None:
     if _morse_core is None:
         return None
+    if not getattr(complex_, "_simplicial_payload_supported", True):
+        return None
     simplices = [
         (list(record.vertices), record.filtration)
         for record in complex_.simplices()
@@ -4881,7 +5142,7 @@ def _oriented_boundary_column(
 ) -> dict[int, int]:
     column: dict[int, int] = {}
     for removed_index, face in enumerate(complex_.boundary(simplex_id)):
-        coefficient = _boundary_coefficient(removed_index, modulus)
+        coefficient = _boundary_coefficient_for(complex_, simplex_id, removed_index, modulus)
         row = order_index[face]
         column[row] = coefficient
     return column
@@ -4889,6 +5150,18 @@ def _oriented_boundary_column(
 
 def _boundary_coefficient(removed_index: int, modulus: int) -> int:
     return 1 if removed_index % 2 == 0 else modulus - 1
+
+
+def _boundary_coefficient_for(
+    complex_: FilteredComplex,
+    simplex_id: int,
+    boundary_index: int,
+    modulus: int,
+) -> int:
+    coefficient_method = getattr(complex_, "boundary_coefficient", None)
+    if coefficient_method is None:
+        return _boundary_coefficient(boundary_index, modulus)
+    return int(coefficient_method(simplex_id, boundary_index, modulus)) % modulus
 
 
 def _boundary_coefficient_of_face(
@@ -4900,7 +5173,7 @@ def _boundary_coefficient_of_face(
 ) -> int:
     for removed_index, candidate in enumerate(complex_.boundary(coface)):
         if candidate == face:
-            return _boundary_coefficient(removed_index, modulus)
+            return _boundary_coefficient_for(complex_, coface, removed_index, modulus)
     raise RuntimeError("Expected a codimension-one face/coface incidence.")
 
 
@@ -4952,7 +5225,7 @@ def _add_oriented_boundary_references(
         _modp_add_scaled(
             target,
             references[face],
-            _boundary_coefficient(removed_index, modulus),
+            _boundary_coefficient_for(complex_, simplex_id, removed_index, modulus),
             modulus,
         )
 
@@ -5076,6 +5349,7 @@ __all__ = [
     "BENCHMARK_SELECTION_MODE",
     "AdaptivePersistenceResult",
     "Annotation",
+    "CppCubicalGrid2DComplex",
     "CppFilteredComplex",
     "CppMorseCoreferenceFrame",
     "CppMorseReferenceFrame",
@@ -5083,6 +5357,8 @@ __all__ = [
     "CppReferenceMap",
     "CppSimplexTreeBuilder",
     "CoreductionDirectionBenchmark",
+    "CubicalCellRecord",
+    "CubicalGrid2DComplex",
     "EdgeFiltrationSpec",
     "EssentialInterval",
     "EssentialIntervalSimplices",
@@ -5156,6 +5432,7 @@ __all__ = [
     "cpp_compute_reference_map_object",
     "cpp_compute_standard_persistence",
     "cpp_compute_standard_persistence_modp",
+    "cpp_cubical_grid_2d_from_vertex_values",
     "cpp_filtered_complex_from_simplices",
     "cpp_profile_morse_reference_frame",
     "cpp_reference_map_to_tuple",

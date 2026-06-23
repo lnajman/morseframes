@@ -5,6 +5,40 @@ Cubical support is experimental and is developed on the
 `morseframes::CubicalGrid2DComplex`, a rectangular two-dimensional cubical grid
 constructed from vertex filtration values.
 
+## Python
+
+The Python interface exposes the same backend through
+`morseframes.CubicalGrid2DComplex` when the native extension is available.
+
+```python
+import morseframes as mf
+
+grid = mf.CubicalGrid2DComplex.from_vertex_values(
+    3,
+    3,
+    [
+        0.0, 1.0, 0.0,
+        1.0, 2.0, 1.0,
+        0.0, 1.0, 0.0,
+    ],
+)
+
+sequence = mf.compute_morse_sequence(grid, algorithm="f-max")
+diagram = mf.compute_morse_persistence(grid, sequence, modulus=3)
+standard = mf.compute_standard_persistence(grid, modulus=3)
+
+assert diagram.finite_barcode() == standard.finite_barcode()
+```
+
+The object has the same inspection helpers as the simplicial Python complex:
+`size`, `level_values`, `filtration_order`, `simplex_records()`, `vertices`,
+`boundary`, `coboundary`, `filtration`, and `simplices_of_level`. It also adds
+grid-coordinate helpers: `vertex(x, y)`, `horizontal_edge(x, y)`,
+`vertical_edge(x, y)`, and `square(x, y)`. The `cell_type(cell)` method returns
+`"vertex"`, `"horizontal_edge"`, `"vertical_edge"`, or `"square"`.
+
+## C++
+
 ```cpp
 #include "morseframes/cubical_complex.hpp"
 #include "morseframes/morse_sequence.hpp"

@@ -188,6 +188,102 @@ class PythonApiTest(unittest.TestCase):
         self.assertGreater(profile.reducer_working_set_size, 0)
         self.assertGreaterEqual(profile.estimated_reducer_work, 0)
 
+    def test_cubical_grid_python_api_when_available(self):
+        if not mp.cpp_backend_available() or mp.CppCubicalGrid2DComplex is None:
+            self.skipTest("C++ cubical backend is not built")
+
+        grid = mp.CubicalGrid2DComplex.from_vertex_values(
+            3,
+            3,
+            [
+                0.0,
+                1.0,
+                0.0,
+                1.0,
+                2.0,
+                1.0,
+                0.0,
+                1.0,
+                0.0,
+            ],
+        )
+        self.assertTrue(grid.cpp_backend_active())
+        self.assertEqual(grid.size, 25)
+        self.assertEqual(grid.vertex_width, 3)
+        self.assertEqual(grid.vertex_height, 3)
+        self.assertEqual(grid.square_width, 2)
+        self.assertEqual(grid.square_height, 2)
+        self.assertEqual(grid.vertex(2, 1), 5)
+        self.assertEqual(grid.horizontal_edge(0, 1), 11)
+        self.assertEqual(grid.vertical_edge(0, 0), 15)
+        self.assertEqual(grid.square(0, 0), 21)
+
+        square = grid.square(0, 0)
+        self.assertEqual(grid.cell_type(square), "square")
+        self.assertEqual(grid.boundary(square), (16, 15, 11, 9))
+        self.assertEqual(
+            [grid.boundary_coefficient(square, index, 3) for index in range(4)],
+            [1, 2, 2, 1],
+        )
+        self.assertEqual(grid.simplex(square).cell_type, "square")
+        self.assertTrue(grid.contains(grid.vertices(square)))
+        self.assertEqual(grid.filtration(square), 2.0)
+
+        standard = mp.compute_standard_persistence(grid, modulus=3)
+        algorithms = (
+            "saturated",
+            "same-level-reduction",
+            "f-max",
+            "f-min",
+            "flooding-max",
+            "flooding-min",
+            "flooding-minmax",
+            "flooding-maxmin",
+        )
+        for algorithm in algorithms:
+            with self.subTest(algorithm=algorithm):
+                sequence = mp.compute_morse_sequence(grid, algorithm=algorithm)
+                self.assertTrue(sequence.cpp_backend_active())
+                morse = mp.compute_morse_persistence(
+                    grid,
+                    sequence,
+                    algorithm=algorithm,
+                    modulus=3,
+                )
+                coreference = mp.compute_morse_coreference_persistence(
+                    grid,
+                    sequence,
+                    algorithm=algorithm,
+                    modulus=3,
+                )
+                self.assertEqual(morse.finite_barcode(), standard.finite_barcode())
+                self.assertEqual(morse.essential_barcode(), standard.essential_barcode())
+                self.assertEqual(coreference.finite_barcode(), standard.finite_barcode())
+                self.assertEqual(coreference.essential_barcode(), standard.essential_barcode())
+
+    def test_low_level_cpp_cubical_grid_when_available(self):
+        if not mp.cpp_backend_available() or mp.CppCubicalGrid2DComplex is None:
+            self.skipTest("C++ cubical backend is not built")
+
+        cpp_grid = mp.cpp_cubical_grid_2d_from_vertex_values(
+            2,
+            2,
+            [0.0, 1.0, 2.0, 3.0],
+        )
+        self.assertEqual(cpp_grid.size, 9)
+        self.assertEqual(cpp_grid.square(0, 0), 8)
+        self.assertEqual(tuple(cpp_grid.boundary(8)), (7, 6, 5, 4))
+        self.assertEqual(
+            [cpp_grid.boundary_coefficient(8, index, 5) for index in range(4)],
+            [1, 4, 4, 1],
+        )
+
+        sequence = mp.cpp_compute_morse_sequence(cpp_grid, algorithm="saturated")
+        standard = mp.cpp_compute_standard_persistence_modp(cpp_grid, 3)
+        morse = mp.cpp_compute_morse_persistence_modp(cpp_grid, sequence, modulus=3)
+        self.assertEqual(morse.finite_barcode(), standard.finite_barcode())
+        self.assertEqual(morse.essential_barcode(), standard.essential_barcode())
+
     def test_morse_sequence_algorithm_option_is_explicit(self):
         complex_ = edge_complex()
 

@@ -20,6 +20,11 @@ PYTHONPATH=python python3 python/examples/cubical_grid_tutorial.py \
   --modulus 3
 ```
 
+When the optional `gudhi` Python package is importable, the tutorial also builds
+the same lower-star grid with `gudhi.CubicalComplex`, checks that the barcodes
+agree, and prints a GUDHI cubical timing. Pass `--skip-gudhi` to keep the run
+limited to MorseFrames.
+
 ```python
 import morseframes as mf
 
@@ -36,8 +41,10 @@ grid = mf.CubicalGrid2DComplex.from_vertex_values(
 sequence = mf.compute_morse_sequence(grid, algorithm="f-max")
 diagram = mf.compute_morse_persistence(grid, sequence, modulus=3)
 standard = mf.compute_standard_persistence(grid, modulus=3)
+gudhi = mf.gudhi_cubical_barcode(grid, modulus=3)
 
 assert diagram.finite_barcode() == standard.finite_barcode()
+assert gudhi[0] == standard.finite_barcode()
 ```
 
 The object has the same inspection helpers as the simplicial Python complex:

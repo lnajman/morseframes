@@ -230,6 +230,11 @@ class PythonApiTest(unittest.TestCase):
         self.assertEqual(grid.filtration(square), 2.0)
 
         standard = mp.compute_standard_persistence(grid, modulus=3)
+        if _gudhi_available():
+            gudhi_finite, gudhi_essential = mp.gudhi_cubical_barcode(grid, modulus=3)
+            self.assertEqual(standard.finite_barcode(), gudhi_finite)
+            self.assertEqual(standard.essential_barcode(), gudhi_essential)
+
         algorithms = (
             "saturated",
             "same-level-reduction",
@@ -260,6 +265,37 @@ class PythonApiTest(unittest.TestCase):
                 self.assertEqual(morse.essential_barcode(), standard.essential_barcode())
                 self.assertEqual(coreference.finite_barcode(), standard.finite_barcode())
                 self.assertEqual(coreference.essential_barcode(), standard.essential_barcode())
+
+    @unittest.skipUnless(_gudhi_available(), "GUDHI is not importable")
+    def test_cubical_grid_matches_gudhi_oracle(self):
+        if not mp.cpp_backend_available() or mp.CppCubicalGrid2DComplex is None:
+            self.skipTest("C++ cubical backend is not built")
+
+        grid = mp.CubicalGrid2DComplex.from_vertex_values(
+            4,
+            3,
+            [
+                0.0,
+                1.0,
+                0.0,
+                2.0,
+                1.0,
+                3.0,
+                1.0,
+                2.0,
+                0.0,
+                1.0,
+                0.0,
+                2.0,
+            ],
+        )
+        for modulus in (2, 3, 5):
+            with self.subTest(modulus=modulus):
+                standard = mp.compute_standard_persistence(grid, modulus=modulus)
+                gudhi = mp.gudhi_cubical_barcode(grid, modulus=modulus)
+                self.assertEqual(standard.finite_barcode(), gudhi[0])
+                self.assertEqual(standard.essential_barcode(), gudhi[1])
+                mp.assert_matches_gudhi_cubical(grid, modulus=modulus)
 
     def test_low_level_cpp_cubical_grid_when_available(self):
         if not mp.cpp_backend_available() or mp.CppCubicalGrid2DComplex is None:

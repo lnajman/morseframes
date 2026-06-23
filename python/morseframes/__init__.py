@@ -3444,6 +3444,42 @@ def gudhi_barcode(
     return tuple(sorted(finite)), tuple(sorted(essential))
 
 
+def gudhi_cubical_barcode(
+    grid: CubicalGrid2DComplex,
+    *,
+    include_zero: bool = False,
+    modulus: int = 2,
+) -> tuple[tuple[tuple[int, float, float], ...], tuple[tuple[int, float], ...]]:
+    """Compute a comparable barcode with GUDHI's 2D cubical complex."""
+
+    modulus = _validate_prime_modulus(modulus)
+
+    try:
+        import gudhi  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError("GUDHI is not importable in this Python environment.") from exc
+
+    cubical_complex = getattr(gudhi, "CubicalComplex", None)
+    if cubical_complex is None:
+        raise RuntimeError("This GUDHI installation does not expose CubicalComplex.")
+
+    vertices = [
+        [grid.filtration(grid.vertex(x, y)) for x in range(grid.vertex_width)]
+        for y in range(grid.vertex_height)
+    ]
+    cubical = cubical_complex(vertices=vertices)
+    persistence = cubical.persistence(homology_coeff_field=modulus, min_persistence=0)
+
+    finite: list[tuple[int, float, float]] = []
+    essential: list[tuple[int, float]] = []
+    for dimension, (birth, death) in persistence:
+        if death == inf:
+            essential.append((int(dimension), float(birth)))
+        elif include_zero or birth < death:
+            finite.append((int(dimension), float(birth), float(death)))
+    return tuple(sorted(finite)), tuple(sorted(essential))
+
+
 def assert_matches_standard(complex_: FilteredComplex, *, include_zero: bool = False) -> None:
     morse = compute_morse_persistence(complex_).finite_barcode(include_zero=include_zero)
     standard = compute_standard_persistence(complex_).finite_barcode(include_zero=include_zero)
@@ -3469,6 +3505,30 @@ def assert_matches_gudhi(complex_: FilteredComplex, *, include_zero: bool = Fals
     if morse.essential_barcode() != gudhi_essential:
         raise AssertionError(
             f"Morse essential barcode {morse.essential_barcode()!r} != GUDHI {gudhi_essential!r}"
+        )
+
+
+def assert_matches_gudhi_cubical(
+    grid: CubicalGrid2DComplex,
+    *,
+    include_zero: bool = False,
+    modulus: int = 2,
+) -> None:
+    morse = compute_morse_persistence(grid, modulus=modulus)
+    gudhi_finite, gudhi_essential = gudhi_cubical_barcode(
+        grid,
+        include_zero=include_zero,
+        modulus=modulus,
+    )
+    if morse.finite_barcode(include_zero=include_zero) != gudhi_finite:
+        raise AssertionError(
+            f"Morse finite barcode {morse.finite_barcode(include_zero=include_zero)!r} "
+            f"!= GUDHI cubical {gudhi_finite!r}"
+        )
+    if morse.essential_barcode() != gudhi_essential:
+        raise AssertionError(
+            f"Morse essential barcode {morse.essential_barcode()!r} "
+            f"!= GUDHI cubical {gudhi_essential!r}"
         )
 
 
@@ -5388,6 +5448,7 @@ __all__ = [
     "SameLevelReductionDirectionBenchmark",
     "SimplexRecord",
     "VertexFiltrationSpec",
+    "assert_matches_gudhi_cubical",
     "assert_matches_gudhi",
     "assert_matches_standard",
     "benchmark_coreduction_directions",
@@ -5439,6 +5500,7 @@ __all__ = [
     "cpp_reduce_morse_coreference_persistence",
     "cpp_reduce_morse_persistence",
     "cpp_reduce_morse_persistence_with_metrics",
+    "gudhi_cubical_barcode",
     "gudhi_barcode",
     "morse_sequence_as_simplices",
     "profile_morse_reference_frame",

@@ -63,6 +63,11 @@ def parse_args() -> argparse.Namespace:
         help="prime field modulus; use 2 for ordinary Z2",
     )
     parser.add_argument("--repeats", type=int, default=3, help="best-of timing repetitions")
+    parser.add_argument(
+        "--skip-gudhi",
+        action="store_true",
+        help="skip the optional GUDHI cubical comparison",
+    )
     return parser.parse_args()
 
 
@@ -102,11 +107,25 @@ def main() -> None:
         lambda: mf.compute_standard_persistence(grid, modulus=args.modulus),
         repeats=args.repeats,
     )
+    gudhi_seconds = None
+    gudhi_barcode = None
+    gudhi_error = None
+    if not args.skip_gudhi:
+        try:
+            gudhi_seconds, gudhi_barcode = time_best(
+                lambda: mf.gudhi_cubical_barcode(grid, modulus=args.modulus),
+                repeats=args.repeats,
+            )
+        except RuntimeError as exc:
+            gudhi_error = str(exc)
 
     assert morse.finite_barcode() == standard.finite_barcode()
     assert morse.essential_barcode() == standard.essential_barcode()
     assert coreference.finite_barcode() == standard.finite_barcode()
     assert coreference.essential_barcode() == standard.essential_barcode()
+    if gudhi_barcode is not None:
+        assert gudhi_barcode[0] == standard.finite_barcode()
+        assert gudhi_barcode[1] == standard.essential_barcode()
 
     square = grid.square(0, 0)
     print(f"MorseFrames {mf.__version__}")
@@ -126,12 +145,21 @@ def main() -> None:
     print(f"  Morse ref:   {morse_seconds:.6f}s")
     print(f"  Morse coref: {coreference_seconds:.6f}s")
     print(f"  standard:    {standard_seconds:.6f}s")
+    if gudhi_seconds is not None:
+        print(f"  GUDHI cub.:  {gudhi_seconds:.6f}s")
+    elif gudhi_error is not None:
+        print(f"  GUDHI cub.:  unavailable ({gudhi_error})")
     if morse_seconds:
         print(f"  standard / Morse ref: {standard_seconds / morse_seconds:.3f}x")
+    if gudhi_seconds is not None and morse_seconds:
+        print(f"  GUDHI cub. / Morse ref: {gudhi_seconds / morse_seconds:.3f}x")
     print("\nBarcodes")
     print(f"  finite:    {morse.finite_barcode()}")
     print(f"  essential: {morse.essential_barcode()}")
-    print("\nMorse reference, coreference, and ordinary persistence agree.")
+    if gudhi_barcode is None:
+        print("\nMorse reference, coreference, and ordinary persistence agree.")
+    else:
+        print("\nMorse reference, coreference, ordinary persistence, and GUDHI cubical agree.")
 
 
 if __name__ == "__main__":

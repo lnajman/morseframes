@@ -60,6 +60,9 @@ PYTHONPATH=python python3 python/examples/cubical_grid_tutorial.py \
   --repeats 1
 ```
 
+If the optional `gudhi` Python package is installed, the cubical tutorial also
+checks and times `gudhi.CubicalComplex` on the same vertex-valued grid.
+
 The C++ smoke tests are:
 
 ```sh

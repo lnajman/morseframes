@@ -293,14 +293,23 @@ class FSequenceBuilder {
         [](const MorseSequence&, const MorseStep&) {});
   }
 
+  // Forward Max(S,F)-style seed-and-expand construction.  This is an
+  // F-sequence builder, but not necessarily a flooding sequence: after a
+  // critical seed is inserted it consumes all available same-level
+  // coreduction-like pairs before choosing the next seed.
   MorseSequence build_f_max() const {
     return build_f_max_with_step_callback([](const MorseSequence&, const MorseStep&) {});
   }
 
+  // Decreasing Min(S,F)-style dual construction.  Events are removed from the
+  // high end using same-level reduction-like pairs, then replayed in reverse to
+  // produce the increasing Morse sequence consumed by the rest of the pipeline.
   MorseSequence build_f_min() const {
     return build_f_min_with_step_callback([](const MorseSequence&, const MorseStep&) {});
   }
 
+  // The named flooding builders are filtration-monotone: they exhaust one
+  // filtration value before moving to the next.
   MorseSequence build_flooding_max() const {
     return build_flooding_max_with_step_callback([](const MorseSequence&, const MorseStep&) {});
   }

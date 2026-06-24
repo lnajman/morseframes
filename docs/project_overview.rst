@@ -47,7 +47,9 @@ Core Objects
    current strategies include saturated, F-Min, F-Max, same-level reduction,
    plateau-greedy, and flooding variants. The strategy interface is deliberately
    explicit so that new sequence algorithms can be added without changing the
-   persistence interface.
+   persistence interface. Saturated, same-level, plateau-greedy, and the named
+   flooding variants are filtration-monotone flooding constructions; F-Min and
+   F-Max are global seed-and-expand ``F``-sequence builders.
 
 ``Reference map``
    Expresses the boundary information needed by critical simplexes in terms of

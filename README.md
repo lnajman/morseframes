@@ -33,6 +33,12 @@ The current codebase contains:
 - an experimental GUDHI-facing adapter for `Simplex_tree`;
 - tests, examples, and reproducible benchmark drivers.
 
+Strategy terminology follows the paper: flooding strategies are
+filtration-monotone `F`-sequences, while `f-max` and `f-min` are global
+seed-and-expand `F`-sequence builders. All exposed strategies keep regular
+pairs inside one filtration level, so plateaus are handled without perturbing
+the filtration values.
+
 The GUDHI adapter is included to make future upstream integration easier. It
 should be considered experimental, but the current native benchmark signal is
 encouraging: the optimized direct `Simplex_tree` path is near parity with

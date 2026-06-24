@@ -43,6 +43,11 @@ EdgeFiltrationSpec = float | Mapping[tuple[int, int], float] | Callable[[tuple[i
 
 CRITICAL = "critical"
 REGULAR_PAIR = "regular_pair"
+
+# Strategy taxonomy: saturated/same-level/plateau-greedy/flooding-* are
+# filtration-monotone flooding constructions; f-max and f-min are global
+# seed-and-expand F-sequence builders that still keep every regular pair inside
+# one filtration level.
 SATURATED_SEQUENCE = "saturated"
 PLATEAU_GREEDY_SEQUENCE = "plateau-greedy"
 SAME_LEVEL_REDUCTION_SEQUENCE = "same-level-reduction"

@@ -10,6 +10,14 @@ with the input filtration. Regular pairs are restricted to a single filtration
 level, so the methods work directly on complexes with plateaus. No lower-star
 refinement is required by the API.
 
+A flooding sequence is an `F`-sequence whose order is globally nondecreasing
+with respect to the filtration: once a simplex of value `lambda` has appeared,
+no later simplex has a smaller filtration value. The saturated, same-level,
+plateau-greedy, and named `flooding-*` strategies are flooding constructions in
+this sense. The `f-max` and `f-min` strategies are valid `F`-sequence
+constructors, but they are global seed-and-expand strategies and are not
+required to be flooding.
+
 ## Canonical Strategy Names
 
 The Python API accepts these canonical names:
@@ -59,7 +67,7 @@ Canonical name:
 The saturated strategy scans filtration levels in increasing order. Inside each
 level, it repeatedly performs all currently available same-level regular pairs.
 When no such pair is available, it marks one fillable simplex critical and then
-continues.
+continues. This is the simplest flooding construction exposed by the package.
 
 Informally:
 
@@ -81,21 +89,24 @@ Canonical name:
 "f-max"
 ```
 
-`f-max` implements the increasing, maximal-side construction. It scans the
-simplex filtration in increasing order and gives priority to same-level
-coreduction-like pairs: an upper simplex `tau` is paired with its unique
-remaining boundary face `sigma` when both lie at the same level. If no such pair
-is available, the next insertable simplex becomes critical.
+`f-max` implements a forward seed-and-expand construction. It scans the simplex
+filtration in increasing order. When the current admissible pair queue is empty,
+the next not-yet-inserted simplex, often a `0`-simplex, becomes a critical seed.
+The builder then gives priority to all same-level coreduction-like pairs
+unlocked by the current state: an upper simplex `tau` is paired with its unique
+remaining boundary face `sigma` when both lie at the same level. Once no such
+pair remains, the next seed is chosen.
 
 Informally:
 
 ```text
 prefer same-level coreduction-like pairs,
-otherwise add the next available critical simplex.
+otherwise add the next available critical seed.
 ```
 
 This is the implementation corresponding to the `Max(S,F)` style used in our
-experiments.
+experiments. It is a valid `F`-sequence constructor, but it is not necessarily a
+flooding construction.
 
 ## F-Min
 
@@ -106,10 +117,12 @@ Canonical name:
 ```
 
 `f-min` is the decreasing dual of `f-max`. It scans from the high end of the
-filtration, removes same-level reduction-like pairs when a lower simplex has a
-unique remaining coface, and marks a simplex critical when no such pair is
-available. The decreasing events are then reversed to produce the increasing
-Morse sequence used by the rest of the pipeline.
+filtration, often from top-dimensional simplexes. When no same-level
+reduction-like pair is available, the next not-yet-removed simplex becomes a
+critical seed. The builder then removes same-level reduction-like pairs when a
+lower simplex has a unique remaining coface. The decreasing events are finally
+reversed to produce the increasing Morse sequence used by the rest of the
+pipeline.
 
 Informally:
 
@@ -120,7 +133,8 @@ reverse the events into an increasing sequence.
 ```
 
 This is the implementation corresponding to the `Min(S,F)` style used in our
-experiments.
+experiments. It is a valid `F`-sequence constructor, but it is not necessarily a
+flooding construction.
 
 ## Same-Level Reduction
 
@@ -134,7 +148,8 @@ This strategy processes each filtration plateau independently. Within one level
 it collapses same-level free-face pairs until no same-level free face remains.
 The remaining active simplexes in that level are then marked critical. Finally,
 the collapse pairs are emitted in reverse order so that the resulting Morse
-sequence is an increasing sequence.
+sequence is an increasing sequence. Because it exhausts one filtration value
+before moving to the next, it is a flooding construction.
 
 Informally:
 
@@ -156,7 +171,7 @@ Canonical name:
 "plateau-greedy"
 ```
 
-`plateau-greedy` follows the same increasing recurrence as `"saturated"`, but it
+`plateau-greedy` follows the same flooding recurrence as `"saturated"`, but it
 uses a more strategic choice when it is stuck and must mark a fillable simplex
 critical. Among the fillable candidates, it scores each candidate by how many
 currently almost-pairable same-level cofaces it would unlock.
@@ -183,9 +198,9 @@ Canonical names:
 "flooding-maxmin"
 ```
 
-The flooding strategies process one filtration level at a time while maintaining
-both active boundary and active coboundary counts. They remove simplexes from
-the active plateau using four local operations:
+The named flooding strategies process one filtration level at a time while
+maintaining both active boundary and active coboundary counts. They remove
+simplexes from the active plateau using four local operations:
 
 - **coreduction:** remove a pair from the maximal/increasing side;
 - **coperforation:** mark a maximal-side critical simplex;
@@ -248,4 +263,3 @@ upstream contribution is realistic.
 
 For now, the native Python and C++ MorseFrames APIs are the reference
 implementation. The GUDHI-facing API should be treated as experimental.
-

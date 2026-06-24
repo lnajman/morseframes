@@ -88,6 +88,13 @@ strategies are:
 
 The default is `"saturated"`.
 
+Flooding strategies are filtration-monotone `F`-sequences: after the sequence
+has reached a filtration value, it does not return to a lower value. The
+`saturated`, `same-level-reduction`, `plateau-greedy`, and `flooding-*`
+strategies have this form. The `f-max` and `f-min` strategies are global
+seed-and-expand `F`-sequence builders; they keep regular pairs inside one
+filtration level, but they are not required to be flooding.
+
 ## Morse Sequences
 
 Compute a Morse sequence:

@@ -2,7 +2,8 @@
 
 This page explains how to regenerate the public benchmark artifacts in this
 repository. It is meant for software reproducibility: manuscript text and
-discussion notes live outside the public repository.
+discussion notes live outside the public repository, in the private manuscript
+workspace until a public preprint or published version exists.
 
 Run commands from the repository root.
 

@@ -20,6 +20,10 @@ and
 Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development instructions and
 [CITATION.cff](CITATION.cff) for citation metadata.
 
+The manuscript source for the Morse-frame persistence paper is kept outside
+this public software repository. When a public preprint or published version is
+available, the documentation will link to it.
+
 The current codebase contains:
 
 - a header-only C++ core for filtered simplicial complexes;

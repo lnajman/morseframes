@@ -27,6 +27,7 @@ The current public alpha can be installed from PyPI:
    python_prime_field_tutorial
    strategies
    plotting_demo
+   related_paper
 
 .. toctree::
    :maxdepth: 2

@@ -457,6 +457,60 @@ class PythonApiTest(unittest.TestCase):
         self.assertEqual(diagram.essential_barcode(), ((0, 0.0),))
         mp.assert_matches_standard(complex_)
 
+    def test_non_flooding_manual_sequence_uses_flooding_order(self):
+        complex_ = mp.FilteredComplex.from_simplices(
+            [
+                ([0], 0.0),
+                ([1], 1.0),
+                ([0, 1], 1.0),
+            ]
+        )
+        v0 = complex_.require_simplex_id([0])
+        v1 = complex_.require_simplex_id([1])
+        edge = complex_.require_simplex_id([0, 1])
+        critical_simplices = (v1, v0, edge)
+        critical_index = [-1] * complex_.size
+        for critical_id, simplex in enumerate(critical_simplices):
+            critical_index[simplex] = critical_id
+        sequence = mp.MorseSequence(
+            steps=(
+                mp.MorseStep(mp.CRITICAL, v1, None, complex_.level(v1)),
+                mp.MorseStep(mp.CRITICAL, v0, None, complex_.level(v0)),
+                mp.MorseStep(mp.CRITICAL, edge, None, complex_.level(edge)),
+            ),
+            critical_simplices=critical_simplices,
+            critical_index_of_simplex=tuple(critical_index),
+            paired_with=(None,) * complex_.size,
+            algorithm="manual-non-flooding",
+        )
+
+        standard = mp.compute_standard_persistence(complex_)
+        reference = mp.compute_morse_persistence(complex_, sequence)
+        coreference = mp.compute_morse_coreference_persistence(complex_, sequence)
+
+        self.assertEqual(reference.finite_barcode(), standard.finite_barcode())
+        self.assertEqual(reference.essential_barcode(), standard.essential_barcode())
+        self.assertEqual(coreference.finite_barcode(), standard.finite_barcode())
+        self.assertEqual(coreference.essential_barcode(), standard.essential_barcode())
+        self.assertEqual(reference.finite_barcode(), ())
+        self.assertEqual(reference.essential_barcode(), ((0, 0.0),))
+
+        reference_modp = mp.compute_morse_persistence_modp(
+            complex_,
+            sequence=sequence,
+            modulus=3,
+        )
+        coreference_modp = mp.compute_morse_coreference_persistence_modp(
+            complex_,
+            sequence=sequence,
+            modulus=3,
+        )
+        standard_modp = mp.compute_standard_persistence_modp(complex_, 3)
+        self.assertEqual(reference_modp.finite_barcode(), standard_modp.finite_barcode())
+        self.assertEqual(reference_modp.essential_barcode(), standard_modp.essential_barcode())
+        self.assertEqual(coreference_modp.finite_barcode(), standard_modp.finite_barcode())
+        self.assertEqual(coreference_modp.essential_barcode(), standard_modp.essential_barcode())
+
     def test_filled_triangle_matches_standard(self):
         complex_ = filled_triangle_complex()
         morse = mp.compute_morse_persistence(complex_)

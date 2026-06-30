@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "morseframes/annotation.hpp"
+#include "morseframes/critical_order.hpp"
 #include "morseframes/field_annotation_store.hpp"
 #include "morseframes/filtered_complex.hpp"
 #include "morseframes/inverse_annotation_store.hpp"
@@ -179,7 +180,8 @@ template <class ComplexView>
 ReferenceReductionPlan build_reference_reduction_plan(
     const ComplexView& complex,
     const MorseSequence& sequence,
-    const std::vector<Annotation>& references) {
+    const std::vector<Annotation>& references,
+    const CriticalOrder& critical_order) {
   static_assert(is_complex_view_v<ComplexView>,
                 "build_reference_reduction_plan requires a Morse complex-view type.");
   std::vector<std::uint8_t> present(complex.size(), 0);
@@ -189,9 +191,8 @@ ReferenceReductionPlan build_reference_reduction_plan(
   plan.boundary_candidates.reserve(critical_simplices.size());
   plan.zero_boundary_critical_ids.reserve(critical_simplices.size());
 
-  for (std::size_t index = 0; index < critical_simplices.size(); ++index) {
-    const CriticalId critical_id = checked_reduction_plan_critical_id(index);
-    const SimplexId critical = critical_simplices[index];
+  for (CriticalId critical_id : critical_order.critical_ids) {
+    const SimplexId critical = critical_simplices[critical_id];
     present[critical] = 1;
 
     bool may_have_nonzero_boundary = false;
@@ -235,7 +236,19 @@ template <class ComplexView>
 ReferenceReductionPlan build_reference_reduction_plan(
     const ComplexView& complex,
     const MorseSequence& sequence,
-    const std::vector<FieldAnnotation>& references) {
+    const std::vector<Annotation>& references) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "build_reference_reduction_plan requires a Morse complex-view type.");
+  return build_reference_reduction_plan(
+      complex, sequence, references, build_flooding_critical_order(complex, sequence));
+}
+
+template <class ComplexView>
+ReferenceReductionPlan build_reference_reduction_plan(
+    const ComplexView& complex,
+    const MorseSequence& sequence,
+    const std::vector<FieldAnnotation>& references,
+    const CriticalOrder& critical_order) {
   static_assert(is_complex_view_v<ComplexView>,
                 "build_reference_reduction_plan requires a Morse complex-view type.");
   std::vector<std::uint8_t> present(complex.size(), 0);
@@ -245,9 +258,8 @@ ReferenceReductionPlan build_reference_reduction_plan(
   plan.boundary_candidates.reserve(critical_simplices.size());
   plan.zero_boundary_critical_ids.reserve(critical_simplices.size());
 
-  for (std::size_t index = 0; index < critical_simplices.size(); ++index) {
-    const CriticalId critical_id = checked_reduction_plan_critical_id(index);
-    const SimplexId critical = critical_simplices[index];
+  for (CriticalId critical_id : critical_order.critical_ids) {
+    const SimplexId critical = critical_simplices[critical_id];
     present[critical] = 1;
 
     bool may_have_nonzero_boundary = false;
@@ -283,6 +295,17 @@ ReferenceReductionPlan build_reference_reduction_plan(
   }
   assign_reduction_plan_local_indices(complex.size(), plan);
   return plan;
+}
+
+template <class ComplexView>
+ReferenceReductionPlan build_reference_reduction_plan(
+    const ComplexView& complex,
+    const MorseSequence& sequence,
+    const std::vector<FieldAnnotation>& references) {
+  static_assert(is_complex_view_v<ComplexView>,
+                "build_reference_reduction_plan requires a Morse complex-view type.");
+  return build_reference_reduction_plan(
+      complex, sequence, references, build_flooding_critical_order(complex, sequence));
 }
 
 template <class ComplexView>
@@ -1143,7 +1166,7 @@ class MorseReferencePersistenceReducer {
         continue;
       }
 
-      const CriticalId pivot = boundary_annotation.back();
+      const CriticalId pivot = latest_critical_label(boundary_annotation, critical_order_);
       const SimplexId birth = critical_simplices[pivot];
       diagram.finite_pairs.push_back(PersistencePair{
           birth,
@@ -1228,7 +1251,7 @@ class MorseReferencePersistenceReducer {
         continue;
       }
 
-      const CriticalId pivot = boundary_annotation.back();
+      const CriticalId pivot = latest_critical_label(boundary_annotation, critical_order_);
       const SimplexId birth = critical_simplices[pivot];
       const std::uint16_t dimension = complex_.dimension(birth);
 
@@ -1285,6 +1308,7 @@ class MorseReferencePersistenceReducer {
   const MorseSequence& sequence_;
   ReferenceReductionPlan reduction_plan_;
   InverseAnnotationStore annotations_;
+  CriticalOrder critical_order_ = build_flooding_critical_order(complex_, sequence_);
 };
 
 template <class ComplexView>
@@ -1326,9 +1350,7 @@ class MorseFieldReferencePersistenceReducer {
     std::vector<std::uint8_t> killed(critical_simplices.size(), 0);
     PersistenceDiagram diagram;
 
-    for (CriticalId sigma_critical_id = 0;
-         sigma_critical_id < critical_simplices.size();
-         ++sigma_critical_id) {
+    for (CriticalId sigma_critical_id : critical_order_.critical_ids) {
       const SimplexId sigma = critical_simplices[sigma_critical_id];
       FieldAnnotation boundary_annotation;
       const auto& boundary = complex_.boundary(sigma);
@@ -1345,8 +1367,10 @@ class MorseFieldReferencePersistenceReducer {
         continue;
       }
 
-      const CriticalId pivot = boundary_annotation.back().label;
-      const std::uint32_t pivot_coefficient = boundary_annotation.back().coefficient;
+      const FieldAnnotationEntry pivot_entry =
+          latest_critical_entry(boundary_annotation, critical_order_);
+      const CriticalId pivot = pivot_entry.label;
+      const std::uint32_t pivot_coefficient = pivot_entry.coefficient;
       const SimplexId birth = critical_simplices.at(pivot);
 
       diagram.finite_pairs.push_back(PersistencePair{
@@ -1397,6 +1421,7 @@ class MorseFieldReferencePersistenceReducer {
   const MorseSequence& sequence_;
   std::vector<FieldAnnotation> references_;
   std::uint32_t modulus_ = 2;
+  CriticalOrder critical_order_ = build_flooding_critical_order(complex_, sequence_);
 };
 
 template <class ComplexView>
@@ -1489,8 +1514,10 @@ class MorseCompactFieldReferencePersistenceReducer {
         continue;
       }
 
-      const CriticalId pivot = boundary_annotation.back().label;
-      const std::uint32_t pivot_coefficient = boundary_annotation.back().coefficient;
+      const FieldAnnotationEntry pivot_entry =
+          latest_critical_entry(boundary_annotation, critical_order_);
+      const CriticalId pivot = pivot_entry.label;
+      const std::uint32_t pivot_coefficient = pivot_entry.coefficient;
       const SimplexId birth = critical_simplices.at(pivot);
       const std::uint16_t dimension = complex_.dimension(birth);
 
@@ -1533,6 +1560,7 @@ class MorseCompactFieldReferencePersistenceReducer {
   ReferenceReductionPlan reduction_plan_;
   FieldAnnotationStore annotations_;
   std::uint32_t modulus_ = 2;
+  CriticalOrder critical_order_ = build_flooding_critical_order(complex_, sequence_);
 };
 
 template <class ComplexView>

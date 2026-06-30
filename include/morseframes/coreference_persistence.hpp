@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "morseframes/annotation.hpp"
+#include "morseframes/critical_order.hpp"
 #include "morseframes/filtered_complex.hpp"
 #include "morseframes/inverse_annotation_store.hpp"
 #include "morseframes/morse_sequence.hpp"
@@ -367,10 +368,11 @@ class MorseCoreferencePersistenceReducer {
     result.metrics.working_set_size = annotations_.size();
     result.metrics.critical_count = critical_simplices.size();
 
-    for (auto simplex_it = critical_simplices.rbegin(); simplex_it != critical_simplices.rend();
-         ++simplex_it) {
-      const SimplexId sigma = *simplex_it;
-      const auto sigma_critical_id = checked_critical_id(sequence_.critical_index(sigma));
+    for (auto order_it = critical_order_.critical_ids.rbegin();
+         order_it != critical_order_.critical_ids.rend();
+         ++order_it) {
+      const CriticalId sigma_critical_id = *order_it;
+      const SimplexId sigma = critical_simplices[sigma_critical_id];
 
       Annotation coboundary_annotation;
       for (SimplexId coface : complex_.coboundary(sigma)) {
@@ -393,7 +395,7 @@ class MorseCoreferencePersistenceReducer {
         continue;
       }
 
-      const CriticalId pivot = coboundary_annotation.front();
+      const CriticalId pivot = earliest_critical_label(coboundary_annotation, critical_order_);
       const SimplexId death = critical_simplices.at(pivot);
 
       result.diagram.finite_pairs.push_back(PersistencePair{
@@ -448,6 +450,7 @@ class MorseCoreferencePersistenceReducer {
   const FilteredSimplicialComplex& complex_;
   const MorseSequence& sequence_;
   InverseAnnotationStore annotations_;
+  CriticalOrder critical_order_ = build_flooding_critical_order(complex_, sequence_);
 };
 
 class MorseFieldCoreferencePersistenceReducer {
@@ -472,11 +475,11 @@ class MorseFieldCoreferencePersistenceReducer {
     std::vector<bool> killed_dual(critical_simplices.size(), false);
     PersistenceDiagram diagram;
 
-    for (auto simplex_it = critical_simplices.rbegin();
-         simplex_it != critical_simplices.rend();
-         ++simplex_it) {
-      const SimplexId sigma = *simplex_it;
-      const auto sigma_critical_id = checked_critical_id(sequence_.critical_index(sigma));
+    for (auto order_it = critical_order_.critical_ids.rbegin();
+         order_it != critical_order_.critical_ids.rend();
+         ++order_it) {
+      const CriticalId sigma_critical_id = *order_it;
+      const SimplexId sigma = critical_simplices[sigma_critical_id];
 
       FieldAnnotation coboundary_annotation;
       for (SimplexId coface : complex_.coboundary(sigma)) {
@@ -492,8 +495,10 @@ class MorseFieldCoreferencePersistenceReducer {
         continue;
       }
 
-      const CriticalId pivot = coboundary_annotation.front().label;
-      const std::uint32_t pivot_coefficient = coboundary_annotation.front().coefficient;
+      const FieldAnnotationEntry pivot_entry =
+          earliest_critical_entry(coboundary_annotation, critical_order_);
+      const CriticalId pivot = pivot_entry.label;
+      const std::uint32_t pivot_coefficient = pivot_entry.coefficient;
       const SimplexId death = critical_simplices.at(pivot);
 
       diagram.finite_pairs.push_back(PersistencePair{
@@ -551,6 +556,7 @@ class MorseFieldCoreferencePersistenceReducer {
   const MorseSequence& sequence_;
   std::vector<FieldAnnotation> coreferences_;
   std::uint32_t modulus_ = 2;
+  CriticalOrder critical_order_ = build_flooding_critical_order(complex_, sequence_);
 };
 
 class MorseCompactFieldCoreferencePersistenceReducer {
@@ -594,11 +600,11 @@ class MorseCompactFieldCoreferencePersistenceReducer {
     std::vector<bool> killed_dual(critical_simplices.size(), false);
     PersistenceDiagram diagram;
 
-    for (auto simplex_it = critical_simplices.rbegin();
-         simplex_it != critical_simplices.rend();
-         ++simplex_it) {
-      const SimplexId sigma = *simplex_it;
-      const auto sigma_critical_id = checked_critical_id(sequence_.critical_index(sigma));
+    for (auto order_it = critical_order_.critical_ids.rbegin();
+         order_it != critical_order_.critical_ids.rend();
+         ++order_it) {
+      const CriticalId sigma_critical_id = *order_it;
+      const SimplexId sigma = critical_simplices[sigma_critical_id];
 
       FieldAnnotation coboundary_annotation;
       for (SimplexId coface : complex_.coboundary(sigma)) {
@@ -614,8 +620,10 @@ class MorseCompactFieldCoreferencePersistenceReducer {
         continue;
       }
 
-      const CriticalId pivot = coboundary_annotation.front().label;
-      const std::uint32_t pivot_coefficient = coboundary_annotation.front().coefficient;
+      const FieldAnnotationEntry pivot_entry =
+          earliest_critical_entry(coboundary_annotation, critical_order_);
+      const CriticalId pivot = pivot_entry.label;
+      const std::uint32_t pivot_coefficient = pivot_entry.coefficient;
       const SimplexId death = critical_simplices.at(pivot);
 
       diagram.finite_pairs.push_back(PersistencePair{
@@ -660,6 +668,7 @@ class MorseCompactFieldCoreferencePersistenceReducer {
   std::vector<SimplexId> working_set_;
   FieldAnnotationStore annotations_;
   std::uint32_t modulus_ = 2;
+  CriticalOrder critical_order_ = build_flooding_critical_order(complex_, sequence_);
 };
 
 inline PersistenceDiagram compute_morse_coreference_persistence(

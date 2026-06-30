@@ -2298,6 +2298,33 @@ def compute_morse_complex(
     )
 
 
+def _flooding_critical_order(complex_: FilteredComplex, sequence: MorseSequence) -> tuple[int, ...]:
+    return tuple(
+        sorted(
+            range(len(sequence.critical_simplices)),
+            key=lambda critical_id: (
+                complex_.level(sequence.critical_simplices[critical_id]),
+                critical_id,
+            ),
+        )
+    )
+
+
+def _critical_order_rank(critical_order: Sequence[int]) -> list[int]:
+    rank = [0] * len(critical_order)
+    for index, critical_id in enumerate(critical_order):
+        rank[critical_id] = index
+    return rank
+
+
+def _latest_critical_label(labels: Iterable[int], rank: Sequence[int]) -> int:
+    return max(labels, key=lambda label: rank[label])
+
+
+def _earliest_critical_label(labels: Iterable[int], rank: Sequence[int]) -> int:
+    return min(labels, key=lambda label: rank[label])
+
+
 def compute_morse_persistence(
     complex_: FilteredComplex,
     sequence: MorseSequence | None = None,
@@ -2366,14 +2393,14 @@ def compute_morse_persistence(
     sequence = sequence or compute_morse_sequence(complex_, algorithm=algorithm)
     references = list(references or compute_reference_map(complex_, sequence, algorithm=algorithm))
     critical_simplices = sequence.critical_simplices
+    critical_order = _flooding_critical_order(complex_, sequence)
+    critical_rank = _critical_order_rank(critical_order)
     active = [False] * len(critical_simplices)
     killed = [False] * len(critical_simplices)
     finite_pairs: list[PersistencePair] = []
 
-    for sigma in critical_simplices:
-        sigma_critical_id = sequence.critical_index(sigma)
-        if sigma_critical_id < 0:
-            raise RuntimeError("Expected a critical simplex.")
+    for sigma_critical_id in critical_order:
+        sigma = critical_simplices[sigma_critical_id]
 
         boundary_annotation: Annotation = ()
         for face in complex_.boundary(sigma):
@@ -2383,7 +2410,7 @@ def compute_morse_persistence(
             active[sigma_critical_id] = True
             continue
 
-        pivot = boundary_annotation[-1]
+        pivot = _latest_critical_label(boundary_annotation, critical_rank)
         birth = critical_simplices[pivot]
         finite_pairs.append(
             PersistencePair(
@@ -2455,14 +2482,14 @@ def _compute_morse_persistence_modp(
         ]
 
     critical_simplices = sequence.critical_simplices
+    critical_order = _flooding_critical_order(complex_, sequence)
+    critical_rank = _critical_order_rank(critical_order)
     active = [False] * len(critical_simplices)
     killed = [False] * len(critical_simplices)
     finite_pairs: list[PersistencePair] = []
 
-    for sigma in critical_simplices:
-        sigma_critical_id = sequence.critical_index(sigma)
-        if sigma_critical_id < 0:
-            raise RuntimeError("Expected a critical simplex.")
+    for sigma_critical_id in critical_order:
+        sigma = critical_simplices[sigma_critical_id]
 
         boundary_annotation: dict[int, int] = {}
         _add_oriented_boundary_references(
@@ -2473,11 +2500,11 @@ def _compute_morse_persistence_modp(
             modulus,
         )
 
-        pivot = _modp_low(boundary_annotation)
-        if pivot is None:
+        if not boundary_annotation:
             active[sigma_critical_id] = True
             continue
 
+        pivot = _latest_critical_label(boundary_annotation, critical_rank)
         birth = critical_simplices[pivot]
         finite_pairs.append(
             PersistencePair(
@@ -2565,14 +2592,14 @@ def compute_morse_coreference_persistence(
         coreferences or compute_coreference_map(complex_, sequence, algorithm=algorithm)
     )
     critical_simplices = sequence.critical_simplices
+    critical_order = _flooding_critical_order(complex_, sequence)
+    critical_rank = _critical_order_rank(critical_order)
     active_dual = [False] * len(critical_simplices)
     killed_dual = [False] * len(critical_simplices)
     finite_pairs: list[PersistencePair] = []
 
-    for sigma in reversed(critical_simplices):
-        sigma_critical_id = sequence.critical_index(sigma)
-        if sigma_critical_id < 0:
-            raise RuntimeError("Expected a critical simplex.")
+    for sigma_critical_id in reversed(critical_order):
+        sigma = critical_simplices[sigma_critical_id]
 
         coboundary_annotation: Annotation = ()
         for coface in complex_.coboundary(sigma):
@@ -2585,7 +2612,7 @@ def compute_morse_coreference_persistence(
             active_dual[sigma_critical_id] = True
             continue
 
-        pivot = coboundary_annotation[0]
+        pivot = _earliest_critical_label(coboundary_annotation, critical_rank)
         death = critical_simplices[pivot]
         finite_pairs.append(
             PersistencePair(
@@ -2657,14 +2684,14 @@ def _compute_morse_coreference_persistence_modp(
         ]
 
     critical_simplices = sequence.critical_simplices
+    critical_order = _flooding_critical_order(complex_, sequence)
+    critical_rank = _critical_order_rank(critical_order)
     active_dual = [False] * len(critical_simplices)
     killed_dual = [False] * len(critical_simplices)
     finite_pairs: list[PersistencePair] = []
 
-    for sigma in reversed(critical_simplices):
-        sigma_critical_id = sequence.critical_index(sigma)
-        if sigma_critical_id < 0:
-            raise RuntimeError("Expected a critical simplex.")
+    for sigma_critical_id in reversed(critical_order):
+        sigma = critical_simplices[sigma_critical_id]
 
         coboundary_annotation: dict[int, int] = {}
         _add_oriented_coboundary_coreferences(
@@ -2675,11 +2702,11 @@ def _compute_morse_coreference_persistence_modp(
             modulus,
         )
 
-        pivot = _modp_min(coboundary_annotation)
-        if pivot is None:
+        if not coboundary_annotation:
             active_dual[sigma_critical_id] = True
             continue
 
+        pivot = _earliest_critical_label(coboundary_annotation, critical_rank)
         death = critical_simplices[pivot]
         finite_pairs.append(
             PersistencePair(

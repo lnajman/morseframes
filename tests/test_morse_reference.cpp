@@ -696,6 +696,52 @@ void test_same_level_edge_has_no_off_diagonal_pair() {
   assert(count_essential_dim(diagram, 0) == 1);
 }
 
+void test_non_flooding_f_sequence_is_reduced_in_flooding_order() {
+  FilteredSimplicialComplex complex;
+  add_simplex(complex, {0}, 0.0);
+  add_simplex(complex, {1}, 1.0);
+  add_simplex(complex, {0, 1}, 1.0);
+  complex.finalize();
+
+  const auto v0 = complex.find_simplex({0});
+  const auto v1 = complex.find_simplex({1});
+  const auto edge = complex.find_simplex({0, 1});
+
+  morseframes::MorseSequence sequence(complex.size());
+  sequence.add_critical(v1, complex.level(v1));
+  sequence.add_critical(v0, complex.level(v0));
+  sequence.add_critical(edge, complex.level(edge));
+  morseframes::validate_morse_sequence(complex, sequence);
+
+  const auto standard = morseframes::compute_standard_z2_persistence(complex);
+  auto references =
+      morseframes::MorseReferenceComputer(complex, sequence).compute_full_references();
+  morseframes::validate_reference_invariants(complex, sequence, references);
+  const auto reference =
+      morseframes::MorseReferencePersistenceReducer(complex, sequence, references).compute();
+  const auto reference_with_metrics =
+      morseframes::MorseReferencePersistenceReducer(complex, sequence, references)
+          .compute_with_metrics()
+          .diagram;
+
+  auto coreferences =
+      morseframes::MorseCoreferenceComputer(complex, sequence).compute_full_coreferences();
+  morseframes::validate_coreference_invariants(complex, sequence, coreferences);
+  const auto coreference =
+      morseframes::MorseCoreferencePersistenceReducer(complex, sequence, coreferences).compute();
+
+  assert_same_barcode(reference, standard);
+  assert_same_barcode(reference_with_metrics, standard);
+  assert_same_barcode(coreference, standard);
+  assert(morseframes::off_diagonal_pairs(reference).empty());
+  assert(reference.essential.size() == 1);
+  assert(reference.essential.front().dimension == 0);
+  assert(close(reference.essential.front().birth_value, 0.0));
+
+  assert_field_reference_matches_standard(complex, sequence, 3);
+  assert_field_coreference_matches_standard(complex, sequence, 3);
+}
+
 void test_triangle_boundary() {
   FilteredSimplicialComplex complex;
   add_simplex(complex, {0}, 0.0);
@@ -987,6 +1033,7 @@ int main() {
   test_reducer_skips_initially_zero_boundaries();
   test_two_vertices_joined_by_later_edge();
   test_same_level_edge_has_no_off_diagonal_pair();
+  test_non_flooding_f_sequence_is_reduced_in_flooding_order();
   test_triangle_boundary();
   test_filled_triangle();
   test_standard_prime_field_persistence();

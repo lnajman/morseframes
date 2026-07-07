@@ -23,7 +23,7 @@ env:
   CIBW_SKIP: "*-musllinux_*"
   CIBW_TEST_COMMAND: >-
     python -c "import morseframes as mf;
-    assert mf.__version__ == '0.1.0a1';
+    assert mf.__version__ == '0.1.0a2';
     assert mf.cpp_backend_available();
     print(mf.__version__, mf.cpp_backend_available())"
 

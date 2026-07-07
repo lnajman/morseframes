@@ -79,7 +79,7 @@ cmake -S . -B build -DMORSEFRAMES_BUILD_GUDHI_TOOLS=OFF
 The current public alpha is available on PyPI:
 
 ```sh
-python3 -m pip install "morseframes==0.1.0a1"
+python3 -m pip install "morseframes==0.1.0a2"
 python3 -c "import morseframes as mf; print(mf.__version__, mf.cpp_backend_available())"
 ```
 

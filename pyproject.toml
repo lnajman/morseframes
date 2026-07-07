@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "morseframes"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Morse sequences, reference maps, Morse complexes, and Morse-based persistent homology"
 readme = "README.md"
 requires-python = ">=3.10"

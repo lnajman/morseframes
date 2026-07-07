@@ -2,6 +2,21 @@
 
 All notable changes to MorseFrames are recorded here.
 
+## 0.1.0a2 - 2026-07-07
+
+Second public alpha release.
+
+### Fixed
+
+- Compute Morse persistence in the flooding order induced by the filtration,
+  so non-flooding sequence order does not change the ordinary filtration
+  barcode.
+
+### Changed
+
+- Added a public development note disclosing OpenAI Codex assistance for parts
+  of the implementation, tests, benchmarks, examples, and documentation.
+
 ## 0.1.0a1 - 2026-06-20
 
 Initial public alpha release.

@@ -5,7 +5,7 @@ The current public alpha can be installed from PyPI:
 
 .. code-block:: sh
 
-   python3 -m pip install "morseframes==0.1.0a1"
+   python3 -m pip install "morseframes==0.1.0a2"
 
 For development from a source checkout, install in editable mode:
 

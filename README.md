@@ -166,6 +166,12 @@ If you use MorseFrames in academic work, please cite it using the metadata in
 Development and testing instructions are collected in `CONTRIBUTING.md`.
 Release notes are collected in `CHANGELOG.md`.
 
+## Development note
+
+Parts of the implementation, tests, benchmarks, examples, and documentation
+were developed with assistance from OpenAI Codex. All mathematical choices,
+algorithmic design, validation, and released code were reviewed by the authors.
+
 ## Status
 
 This is research code. The public API is useful for experimentation, but names

@@ -89,3 +89,10 @@ The public repository contains:
 The library is still research code. Names and interfaces may evolve while the
 paper and the GUDHI integration mature, but the current structure is already
 usable for experiments and examples.
+
+Development Note
+----------------
+
+Parts of the implementation, tests, benchmarks, examples, and documentation
+were developed with assistance from OpenAI Codex. All mathematical choices,
+algorithmic design, validation, and released code were reviewed by the authors.

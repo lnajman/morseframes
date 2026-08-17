@@ -999,12 +999,36 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   morseframes::validate_morse_sequence(complex, sequence);
   assert(sequence.critical_simplices().size() == 1);
 
+  morseframes::MorseSequenceBuildMetrics parallel_metrics;
+  const auto parallel_sequence =
+      FSequenceBuilder(complex, &parallel_metrics)
+          .build_flooding_reduction_kernel_parallel_with_step_callback(
+              [](const morseframes::MorseSequence&,
+                 const morseframes::MorseStep&) {},
+              2);
+  morseframes::validate_morse_sequence(complex, parallel_sequence);
+  assert(sequence.steps().size() == parallel_sequence.steps().size());
+  for (std::size_t index = 0; index < sequence.steps().size(); ++index) {
+    const auto& expected = sequence.steps()[index];
+    const auto& actual = parallel_sequence.steps()[index];
+    assert(expected.type == actual.type);
+    assert(expected.sigma == actual.sigma);
+    assert(expected.tau == actual.tau);
+    assert(expected.level == actual.level);
+  }
+  assert(parallel_metrics.reduction_kernel_parallel_batches > 0);
+  assert(parallel_metrics.reduction_kernel_max_parallel_facets == 2);
+
   const auto strategy =
       morseframes::morse_sequence_strategy_from_name("reduction-kernel");
   assert(strategy ==
          morseframes::MorseSequenceStrategy::FloodingReductionKernel);
   assert(std::string(morseframes::morse_sequence_strategy_name(strategy)) ==
          "flooding-reduction-kernel");
+  const auto parallel_strategy = morseframes::morse_sequence_strategy_from_name(
+      "reduction-kernel-parallel");
+  assert(parallel_strategy ==
+         morseframes::MorseSequenceStrategy::FloodingReductionKernelParallel);
 
   const auto result = morseframes::compute_morse_reference_persistence(
       complex, strategy);

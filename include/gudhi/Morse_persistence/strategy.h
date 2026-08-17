@@ -63,6 +63,7 @@ inline Morse_sequence_strategy from_kernel_strategy(morseframes::MorseSequenceSt
     case morseframes::MorseSequenceStrategy::FloodingMax:
     case morseframes::MorseSequenceStrategy::FloodingMin:
     case morseframes::MorseSequenceStrategy::FloodingReductionKernel:
+    case morseframes::MorseSequenceStrategy::FloodingReductionKernelParallel:
     case morseframes::MorseSequenceStrategy::FloodingMinMax:
     case morseframes::MorseSequenceStrategy::FloodingMaxMin:
       break;

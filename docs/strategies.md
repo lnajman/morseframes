@@ -31,6 +31,7 @@ The Python API accepts these canonical names:
 "flooding-max"
 "flooding-min"
 "flooding-reduction-kernel"
+"flooding-reduction-kernel-parallel"
 "flooding-minmax"
 "flooding-maxmin"
 ```
@@ -218,6 +219,14 @@ the read-only `ComplexView` interface. Frame profiles report the number of
 processed levels, kernel rounds, facet kernels, reductions, and perforations,
 as well as time spent finding facets, protecting cores, computing local
 reductions, and merging a round.
+
+The companion strategy `"flooding-reduction-kernel-parallel"` uses the same
+workspace and local-kernel routine. Facet cells in a round are evaluated in
+bounded asynchronous batches against one immutable active-set snapshot. Results
+are collected and merged in the original facet order, so the parallel and
+sequential strategies produce the same deterministic Morse sequence. The
+pure-Python fallback preserves those semantics sequentially; native C++ enables
+the facet executor.
 
 ## Flooding Variants
 

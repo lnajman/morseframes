@@ -109,6 +109,8 @@ struct MorseReferenceFrameMetrics {
   std::size_t sequence_reduction_kernel_facet_kernels = 0;
   std::size_t sequence_reduction_kernel_reductions = 0;
   std::size_t sequence_reduction_kernel_perforations = 0;
+  std::size_t sequence_reduction_kernel_parallel_batches = 0;
+  std::size_t sequence_reduction_kernel_max_parallel_facets = 0;
   std::size_t final_live_nonempty_annotations = 0;
   std::size_t final_live_total_annotation_size = 0;
   std::size_t peak_live_nonempty_annotations = 0;
@@ -536,6 +538,20 @@ class MorseReferenceFrameBuilder {
     return MorseReferenceFrame{std::move(sequence), std::move(references)};
   }
 
+  MorseReferenceFrame build_flooding_reduction_kernel_parallel() const {
+    std::vector<Annotation> references(complex_.size());
+    Annotation reference_update_scratch;
+    auto sequence = FSequenceBuilder(complex_)
+                        .build_flooding_reduction_kernel_parallel_with_step_callback(
+                            [&](const MorseSequence& sequence,
+                                const MorseStep& step) {
+                              update_reference_for_step(
+                                  sequence, step, references,
+                                  reference_update_scratch);
+                            });
+    return MorseReferenceFrame{std::move(sequence), std::move(references)};
+  }
+
   MorseReferenceFrame build_flooding_minmax() const {
     std::vector<Annotation> references(complex_.size());
     Annotation reference_update_scratch;
@@ -616,6 +632,16 @@ class MorseReferenceFrameBuilder {
                                           auto* sequence_metrics) {
       return FSequenceBuilder(complex_, sequence_metrics)
           .build_flooding_reduction_kernel_with_step_callback(
+              std::forward<decltype(step_callback)>(step_callback));
+    });
+  }
+
+  MorseReferenceReductionInput
+  build_flooding_reduction_kernel_parallel_reduction_input() const {
+    return build_reduction_input_with([&](auto&& step_callback,
+                                          auto* sequence_metrics) {
+      return FSequenceBuilder(complex_, sequence_metrics)
+          .build_flooding_reduction_kernel_parallel_with_step_callback(
               std::forward<decltype(step_callback)>(step_callback));
     });
   }
@@ -1033,6 +1059,10 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.reduction_kernel_reductions;
       frame_metrics.sequence_reduction_kernel_perforations =
           sequence_build_metrics.reduction_kernel_perforations;
+      frame_metrics.sequence_reduction_kernel_parallel_batches =
+          sequence_build_metrics.reduction_kernel_parallel_batches;
+      frame_metrics.sequence_reduction_kernel_max_parallel_facets =
+          sequence_build_metrics.reduction_kernel_max_parallel_facets;
     }
 
     const auto pack_start =

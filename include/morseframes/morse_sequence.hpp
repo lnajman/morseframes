@@ -62,6 +62,8 @@ struct MorseSequenceBuildMetrics {
   std::size_t reduction_kernel_facet_kernels = 0;
   std::size_t reduction_kernel_reductions = 0;
   std::size_t reduction_kernel_perforations = 0;
+  std::size_t reduction_kernel_parallel_batches = 0;
+  std::size_t reduction_kernel_max_parallel_facets = 0;
 };
 
 class MorseSequence {
@@ -331,6 +333,12 @@ class FSequenceBuilder {
   MorseSequence build_flooding_reduction_kernel() const {
     return build_flooding_reduction_kernel_with_step_callback(
         [](const MorseSequence&, const MorseStep&) {});
+  }
+
+  MorseSequence build_flooding_reduction_kernel_parallel(
+      std::size_t max_workers = 0) const {
+    return build_flooding_reduction_kernel_parallel_with_step_callback(
+        [](const MorseSequence&, const MorseStep&) {}, max_workers);
   }
 
   MorseSequence build_flooding_minmax() const {
@@ -1131,10 +1139,28 @@ class FSequenceBuilder {
   template <typename StepCallback>
   MorseSequence build_flooding_reduction_kernel_with_step_callback(
       StepCallback&& on_step) const {
+    return build_flooding_reduction_kernel_with_execution_options(
+        ReductionKernelExecutionOptions{},
+        std::forward<StepCallback>(on_step));
+  }
+
+  template <typename StepCallback>
+  MorseSequence build_flooding_reduction_kernel_parallel_with_step_callback(
+      StepCallback&& on_step, std::size_t max_workers = 0) const {
+    ReductionKernelExecutionOptions options;
+    options.policy = ReductionKernelExecutionPolicy::Parallel;
+    options.max_workers = max_workers;
+    return build_flooding_reduction_kernel_with_execution_options(
+        options, std::forward<StepCallback>(on_step));
+  }
+
+  template <typename StepCallback>
+  MorseSequence build_flooding_reduction_kernel_with_execution_options(
+      ReductionKernelExecutionOptions options, StepCallback&& on_step) const {
     const std::size_t n = complex_.size();
     MorseSequence sequence(n);
     auto&& callback = on_step;
-    ReductionKernelWorkspace<ComplexView> workspace(complex_);
+    ReductionKernelWorkspace<ComplexView> workspace(complex_, options);
 
     for (LevelId level = 0; level < complex_.num_levels(); ++level) {
       const auto events = workspace.compute_level(level);
@@ -1173,6 +1199,10 @@ class FSequenceBuilder {
           kernel_metrics.reductions;
       sequence_metrics_->reduction_kernel_perforations =
           kernel_metrics.perforations;
+      sequence_metrics_->reduction_kernel_parallel_batches =
+          kernel_metrics.parallel_batches;
+      sequence_metrics_->reduction_kernel_max_parallel_facets =
+          kernel_metrics.max_parallel_facets;
     }
 
     return sequence;

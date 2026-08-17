@@ -57,6 +57,9 @@ F_MIN_SEQUENCE = "f-min"
 FLOODING_MAX_SEQUENCE = "flooding-max"
 FLOODING_MIN_SEQUENCE = "flooding-min"
 FLOODING_REDUCTION_KERNEL_SEQUENCE = "flooding-reduction-kernel"
+FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE = (
+    "flooding-reduction-kernel-parallel"
+)
 FLOODING_MINMAX_SEQUENCE = "flooding-minmax"
 FLOODING_MAXMIN_SEQUENCE = "flooding-maxmin"
 AUTO_MORSE_SEQUENCE_ALGORITHM = "auto"
@@ -70,6 +73,7 @@ MORSE_SEQUENCE_ALGORITHMS = (
     FLOODING_MAX_SEQUENCE,
     FLOODING_MIN_SEQUENCE,
     FLOODING_REDUCTION_KERNEL_SEQUENCE,
+    FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
     FLOODING_MINMAX_SEQUENCE,
     FLOODING_MAXMIN_SEQUENCE,
 )
@@ -81,6 +85,7 @@ DEFAULT_MORSE_ALGORITHM_PORTFOLIO = (
     FLOODING_MAX_SEQUENCE,
     FLOODING_MIN_SEQUENCE,
     FLOODING_REDUCTION_KERNEL_SEQUENCE,
+    FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
     FLOODING_MINMAX_SEQUENCE,
     FLOODING_MAXMIN_SEQUENCE,
     PLATEAU_GREEDY_SEQUENCE,
@@ -1171,10 +1176,14 @@ def compute_morse_sequence(
         FLOODING_MAX_SEQUENCE,
         FLOODING_MIN_SEQUENCE,
         FLOODING_REDUCTION_KERNEL_SEQUENCE,
+        FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
         FLOODING_MINMAX_SEQUENCE,
         FLOODING_MAXMIN_SEQUENCE,
     }:
-        if algorithm == FLOODING_REDUCTION_KERNEL_SEQUENCE:
+        if algorithm in {
+            FLOODING_REDUCTION_KERNEL_SEQUENCE,
+            FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+        }:
             return _compute_flooding_reduction_kernel_morse_sequence_python(
                 complex_, algorithm=algorithm
             )
@@ -2100,6 +2109,7 @@ def compute_morse_sequence_and_reference_map(
         FLOODING_MAX_SEQUENCE,
         FLOODING_MIN_SEQUENCE,
         FLOODING_REDUCTION_KERNEL_SEQUENCE,
+        FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
         FLOODING_MINMAX_SEQUENCE,
         FLOODING_MAXMIN_SEQUENCE,
     }:
@@ -2107,7 +2117,11 @@ def compute_morse_sequence_and_reference_map(
             _compute_flooding_reduction_kernel_morse_sequence_python(
                 complex_, algorithm=algorithm
             )
-            if algorithm == FLOODING_REDUCTION_KERNEL_SEQUENCE
+            if algorithm
+            in {
+                FLOODING_REDUCTION_KERNEL_SEQUENCE,
+                FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+            }
             else _compute_flooding_morse_sequence_python(complex_, algorithm=algorithm)
         )
         return MorseReferenceFrame(
@@ -4487,6 +4501,8 @@ def _profile_morse_reference_frame_python(
         "sequence_reduction_kernel_facet_kernels": 0,
         "sequence_reduction_kernel_reductions": 0,
         "sequence_reduction_kernel_perforations": 0,
+        "sequence_reduction_kernel_parallel_batches": 0,
+        "sequence_reduction_kernel_max_parallel_facets": 0,
         "final_live_nonempty_annotations": full_reference_nonempty,
         "final_live_total_annotation_size": full_reference_total,
         "peak_live_nonempty_annotations": full_reference_nonempty,
@@ -4605,6 +4621,8 @@ def _empty_frame_metrics() -> dict[str, object]:
         "sequence_reduction_kernel_facet_kernels": 0,
         "sequence_reduction_kernel_reductions": 0,
         "sequence_reduction_kernel_perforations": 0,
+        "sequence_reduction_kernel_parallel_batches": 0,
+        "sequence_reduction_kernel_max_parallel_facets": 0,
         "final_live_nonempty_annotations": 0,
         "final_live_total_annotation_size": 0,
         "peak_live_nonempty_annotations": 0,
@@ -4738,7 +4756,8 @@ def _normalize_morse_sequence_algorithm(algorithm: str) -> str:
         "flooding-minimal": FLOODING_MIN_SEQUENCE,
         "minimal-flooding": FLOODING_MIN_SEQUENCE,
         "reduction-kernel": FLOODING_REDUCTION_KERNEL_SEQUENCE,
-        "parallel-reduction-kernel": FLOODING_REDUCTION_KERNEL_SEQUENCE,
+        "parallel-reduction-kernel": FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+        "reduction-kernel-parallel": FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
         "flooding-minmax": FLOODING_MINMAX_SEQUENCE,
         "flooding-min-max": FLOODING_MINMAX_SEQUENCE,
         "min-max": FLOODING_MINMAX_SEQUENCE,
@@ -5305,6 +5324,7 @@ __all__ = [
     "FLOODING_MINMAX_SEQUENCE",
     "FLOODING_MIN_SEQUENCE",
     "FLOODING_REDUCTION_KERNEL_SEQUENCE",
+    "FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE",
     "PersistenceBenchmark",
     "MorseComplex",
     "MorseCoreferenceFrame",

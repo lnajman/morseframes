@@ -204,6 +204,9 @@ class PythonApiTest(unittest.TestCase):
         reduction_kernel_sequence = mp.compute_morse_sequence(
             complex_, algorithm="reduction-kernel"
         )
+        parallel_reduction_kernel_sequence = mp.compute_morse_sequence(
+            complex_, algorithm="reduction-kernel-parallel"
+        )
         f_max_sequence = mp.compute_morse_sequence(complex_, algorithm="paper-max")
         f_min_sequence = mp.compute_morse_sequence(complex_, algorithm="min-s-f")
         diagram = mp.compute_morse_persistence(complex_, algorithm="saturated")
@@ -228,6 +231,10 @@ class PythonApiTest(unittest.TestCase):
             mp.FLOODING_REDUCTION_KERNEL_SEQUENCE,
             mp.MORSE_SEQUENCE_ALGORITHMS,
         )
+        self.assertIn(
+            mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+            mp.MORSE_SEQUENCE_ALGORITHMS,
+        )
         self.assertIn(mp.FLOODING_MINMAX_SEQUENCE, mp.MORSE_SEQUENCE_ALGORITHMS)
         self.assertIn(mp.FLOODING_MAXMIN_SEQUENCE, mp.MORSE_SEQUENCE_ALGORITHMS)
         self.assertIn(mp.FLOODING_MAX_SEQUENCE, mp.DEFAULT_MORSE_ALGORITHM_PORTFOLIO)
@@ -249,6 +256,14 @@ class PythonApiTest(unittest.TestCase):
         self.assertEqual(
             reduction_kernel_sequence.algorithm,
             mp.FLOODING_REDUCTION_KERNEL_SEQUENCE,
+        )
+        self.assertEqual(
+            parallel_reduction_kernel_sequence.algorithm,
+            mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+        )
+        self.assertEqual(
+            reduction_kernel_sequence.steps,
+            parallel_reduction_kernel_sequence.steps,
         )
         self.assertEqual(f_max_sequence.algorithm, mp.F_MAX_SEQUENCE)
         self.assertEqual(f_min_sequence.algorithm, mp.F_MIN_SEQUENCE)

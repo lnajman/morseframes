@@ -42,6 +42,64 @@ def injective_triangle_boundary_complex():
     )
 
 
+def process_lower_stars_oracle(complex_):
+    """Small recomputing oracle for Robins' lower-star priority rules."""
+    vertex_order = tuple(
+        simplex
+        for simplex in complex_.filtration_order
+        if complex_.dimension(simplex) == 0
+    )
+    vertex_rank = {
+        complex_.vertices(simplex)[0]: rank
+        for rank, simplex in enumerate(vertex_order)
+    }
+    robins_key = {}
+    lower_stars = {vertex: set() for vertex in vertex_order}
+    for simplex in range(complex_.size):
+        ranks = tuple(
+            sorted(
+                (vertex_rank[vertex] for vertex in complex_.vertices(simplex)),
+                reverse=True,
+            )
+        )
+        simplex_owner = vertex_order[ranks[0]]
+        robins_key[simplex] = ranks
+        lower_stars[simplex_owner].add(simplex)
+
+    events = []
+    classified = set()
+    for star_vertex in vertex_order:
+        remaining = lower_stars[star_vertex]
+        while remaining:
+            missing = {
+                simplex: tuple(
+                    face
+                    for face in complex_.boundary(simplex)
+                    if face not in classified and face in remaining
+                )
+                for simplex in remaining
+            }
+            pairable = [
+                simplex for simplex, faces in missing.items() if len(faces) == 1
+            ]
+            if pairable:
+                tau = min(pairable, key=lambda simplex: robins_key[simplex])
+                sigma = missing[tau][0]
+                events.append((mp.REGULAR_PAIR, sigma, tau))
+                remaining.remove(sigma)
+                remaining.remove(tau)
+                classified.update((sigma, tau))
+                continue
+            fillable = [
+                simplex for simplex, faces in missing.items() if not faces
+            ]
+            critical = min(fillable, key=lambda simplex: robins_key[simplex])
+            events.append((mp.CRITICAL, critical, None))
+            remaining.remove(critical)
+            classified.add(critical)
+    return tuple(events)
+
+
 def plateau_complex():
     return mp.FilteredComplex.from_simplices(
         [
@@ -1200,6 +1258,10 @@ class PythonApiTest(unittest.TestCase):
 
                 sequence = mp.compute_morse_sequence(
                     complex_, algorithm=mp.PROCESS_LOWER_STARS_SEQUENCE
+                )
+                self.assertEqual(
+                    tuple((step.type, step.sigma, step.tau) for step in sequence.steps),
+                    process_lower_stars_oracle(complex_),
                 )
                 self.assertEqual(
                     mp.compute_morse_persistence(complex_, sequence).finite_barcode(),

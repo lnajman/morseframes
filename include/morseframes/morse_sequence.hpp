@@ -1067,12 +1067,28 @@ class FSequenceBuilder {
       }
     };
 
-    std::vector<std::uint8_t> inserted(n, 0);
-    std::vector<std::uint32_t> local_boundary_count(n, 0);
-    std::vector<SimplexId> local_boundary_xor(n, 0);
+    struct LowerStarEvent {
+      MorseStepType type = MorseStepType::Critical;
+      SimplexId sigma = kInvalidSimplex;
+      SimplexId tau = kInvalidSimplex;
+    };
+    std::vector<std::vector<LowerStarEvent>> events_by_star(vertex_order.size());
 
-    for (SimplexId star_vertex : vertex_order) {
+    auto process_lower_star = [&](std::size_t star_rank) {
+      const SimplexId star_vertex = vertex_order[star_rank];
       const auto& lower_star = owned[star_vertex];
+      auto& events = events_by_star[star_rank];
+      events.reserve(lower_star.size());
+
+      std::unordered_map<SimplexId, std::size_t> local_index;
+      local_index.reserve(lower_star.size());
+      for (std::size_t index = 0; index < lower_star.size(); ++index) {
+        local_index.emplace(lower_star[index], index);
+      }
+      std::vector<std::uint8_t> classified(lower_star.size(), 0);
+      std::vector<std::uint32_t> local_boundary_count(lower_star.size(), 0);
+      std::vector<SimplexId> local_boundary_xor(lower_star.size(), 0);
+
       RobinsMinPriority priority{&robins_key};
       std::priority_queue<SimplexId, std::vector<SimplexId>, RobinsMinPriority>
           pair_candidates(priority);
@@ -1081,48 +1097,50 @@ class FSequenceBuilder {
       std::size_t remaining = lower_star.size();
 
       auto enqueue = [&](SimplexId simplex) {
-        if (inserted[simplex] || owner[simplex] != star_vertex) {
+        const std::size_t index = local_index.at(simplex);
+        if (classified[index]) {
           return;
         }
-        if (local_boundary_count[simplex] == 1) {
+        if (local_boundary_count[index] == 1) {
           pair_candidates.push(simplex);
-        } else if (local_boundary_count[simplex] == 0) {
+        } else if (local_boundary_count[index] == 0) {
           zero_candidates.push(simplex);
         }
       };
 
       for (SimplexId simplex : lower_star) {
-        local_boundary_count[simplex] = 0;
-        local_boundary_xor[simplex] = 0;
+        const std::size_t index = local_index.at(simplex);
         for (SimplexId face : complex_.boundary(simplex)) {
-          if (owner[face] == star_vertex && !inserted[face]) {
-            ++local_boundary_count[simplex];
-            local_boundary_xor[simplex] ^= face;
-          } else if (!inserted[face]) {
-            throw std::logic_error(
-                "A lower-star attachment face was not inserted earlier.");
+          if (owner[face] == star_vertex) {
+            ++local_boundary_count[index];
+            local_boundary_xor[index] ^= face;
           }
         }
         enqueue(simplex);
       }
 
-      auto mark_inserted = [&](SimplexId simplex) {
-        if (inserted[simplex]) {
+      auto mark_classified = [&](SimplexId simplex) {
+        const std::size_t index = local_index.at(simplex);
+        if (classified[index]) {
           throw std::logic_error(
               "ProcessLowerStars classified a simplex twice.");
         }
-        inserted[simplex] = 1;
+        classified[index] = 1;
         --remaining;
         for (SimplexId coface : complex_.coboundary(simplex)) {
-          if (owner[coface] != star_vertex || inserted[coface]) {
+          if (owner[coface] != star_vertex) {
             continue;
           }
-          if (local_boundary_count[coface] == 0) {
+          const std::size_t coface_index = local_index.at(coface);
+          if (classified[coface_index]) {
+            continue;
+          }
+          if (local_boundary_count[coface_index] == 0) {
             throw std::logic_error(
                 "ProcessLowerStars local boundary count underflow.");
           }
-          --local_boundary_count[coface];
-          local_boundary_xor[coface] ^= simplex;
+          --local_boundary_count[coface_index];
+          local_boundary_xor[coface_index] ^= simplex;
           enqueue(coface);
         }
       };
@@ -1132,21 +1150,20 @@ class FSequenceBuilder {
         while (!pair_candidates.empty()) {
           const SimplexId tau = pair_candidates.top();
           pair_candidates.pop();
-          if (inserted[tau] || owner[tau] != star_vertex ||
-              local_boundary_count[tau] != 1) {
+          const std::size_t tau_index = local_index.at(tau);
+          if (classified[tau_index] || local_boundary_count[tau_index] != 1) {
             continue;
           }
-          const SimplexId sigma = local_boundary_xor[tau];
-          if (sigma >= n || inserted[sigma] || owner[sigma] != star_vertex) {
+          const SimplexId sigma = local_boundary_xor[tau_index];
+          const auto sigma_it = local_index.find(sigma);
+          if (sigma >= n || sigma_it == local_index.end() ||
+              classified[sigma_it->second]) {
             continue;
           }
-          sequence.add_regular_pair(sigma, tau, complex_.level(tau));
-          callback(sequence, sequence.steps().back());
-          mark_inserted(sigma);
-          mark_inserted(tau);
-          if (sequence_metrics_ != nullptr) {
-            ++sequence_metrics_->regular_pairs;
-          }
+          events.push_back(
+              LowerStarEvent{MorseStepType::RegularPair, sigma, tau});
+          mark_classified(sigma);
+          mark_classified(tau);
           paired = true;
           break;
         }
@@ -1158,8 +1175,9 @@ class FSequenceBuilder {
         while (!zero_candidates.empty()) {
           const SimplexId candidate = zero_candidates.top();
           zero_candidates.pop();
-          if (!inserted[candidate] && owner[candidate] == star_vertex &&
-              local_boundary_count[candidate] == 0) {
+          const std::size_t candidate_index = local_index.at(candidate);
+          if (!classified[candidate_index] &&
+              local_boundary_count[candidate_index] == 0) {
             critical = candidate;
             break;
           }
@@ -1168,12 +1186,31 @@ class FSequenceBuilder {
           throw std::logic_error(
               "ProcessLowerStars found no local expansion or critical step.");
         }
-        sequence.add_critical(critical, complex_.level(critical));
-        callback(sequence, sequence.steps().back());
-        mark_inserted(critical);
-        if (sequence_metrics_ != nullptr) {
-          ++sequence_metrics_->criticals;
+        events.push_back(
+            LowerStarEvent{MorseStepType::Critical, critical, kInvalidSimplex});
+        mark_classified(critical);
+      }
+    };
+
+    for (std::size_t star_rank = 0; star_rank < vertex_order.size(); ++star_rank) {
+      process_lower_star(star_rank);
+    }
+
+    for (const auto& events : events_by_star) {
+      for (const LowerStarEvent& event : events) {
+        if (event.type == MorseStepType::Critical) {
+          sequence.add_critical(event.sigma, complex_.level(event.sigma));
+          if (sequence_metrics_ != nullptr) {
+            ++sequence_metrics_->criticals;
+          }
+        } else {
+          sequence.add_regular_pair(event.sigma, event.tau,
+                                    complex_.level(event.tau));
+          if (sequence_metrics_ != nullptr) {
+            ++sequence_metrics_->regular_pairs;
+          }
         }
+        callback(sequence, sequence.steps().back());
       }
     }
 

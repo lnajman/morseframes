@@ -27,6 +27,8 @@ endif()
 
 project(morseframes LANGUAGES CXX)
 
+find_package(Threads REQUIRED)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -87,6 +89,7 @@ add_library(morseframes INTERFACE)
 target_include_directories(morseframes INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+target_link_libraries(morseframes INTERFACE Threads::Threads)
 
 if(MORSEFRAMES_BUILD_TESTS)
     add_executable(morseframes_tests

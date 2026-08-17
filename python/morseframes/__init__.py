@@ -56,6 +56,10 @@ F_MAX_SEQUENCE = "f-max"
 F_MIN_SEQUENCE = "f-min"
 FLOODING_MAX_SEQUENCE = "flooding-max"
 FLOODING_MIN_SEQUENCE = "flooding-min"
+FLOODING_REDUCTION_KERNEL_SEQUENCE = "flooding-reduction-kernel"
+FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE = (
+    "flooding-reduction-kernel-parallel"
+)
 FLOODING_MINMAX_SEQUENCE = "flooding-minmax"
 FLOODING_MAXMIN_SEQUENCE = "flooding-maxmin"
 AUTO_MORSE_SEQUENCE_ALGORITHM = "auto"
@@ -68,6 +72,8 @@ MORSE_SEQUENCE_ALGORITHMS = (
     F_MIN_SEQUENCE,
     FLOODING_MAX_SEQUENCE,
     FLOODING_MIN_SEQUENCE,
+    FLOODING_REDUCTION_KERNEL_SEQUENCE,
+    FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
     FLOODING_MINMAX_SEQUENCE,
     FLOODING_MAXMIN_SEQUENCE,
 )
@@ -78,6 +84,8 @@ DEFAULT_MORSE_ALGORITHM_PORTFOLIO = (
     SAME_LEVEL_REDUCTION_SEQUENCE,
     FLOODING_MAX_SEQUENCE,
     FLOODING_MIN_SEQUENCE,
+    FLOODING_REDUCTION_KERNEL_SEQUENCE,
+    FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
     FLOODING_MINMAX_SEQUENCE,
     FLOODING_MAXMIN_SEQUENCE,
     PLATEAU_GREEDY_SEQUENCE,
@@ -304,6 +312,9 @@ class MorseReferenceProfile:
     estimated_reducer_work: int
     profile_seconds: float
     metrics: dict[str, object] = field(default_factory=dict, repr=False, compare=False)
+    frame_metrics: dict[str, object] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     @property
     def critical_ratio(self) -> float:
@@ -1150,9 +1161,13 @@ def compute_morse_sequence(
     complex_: FilteredComplex,
     *,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    max_workers: int | None = None,
 ) -> MorseSequence:
     algorithm = _normalize_morse_sequence_algorithm(algorithm)
-    cpp_sequence = _compute_cpp_sequence(complex_, algorithm)
+    native_max_workers = _normalize_parallel_max_workers(algorithm, max_workers)
+    cpp_sequence = _compute_cpp_sequence(
+        complex_, algorithm, max_workers=native_max_workers
+    )
     if cpp_sequence is not None:
         return _sequence_from_cpp_sequence(complex_, cpp_sequence, algorithm=algorithm)
     if algorithm == PLATEAU_GREEDY_SEQUENCE:
@@ -1164,9 +1179,18 @@ def compute_morse_sequence(
     if algorithm in {
         FLOODING_MAX_SEQUENCE,
         FLOODING_MIN_SEQUENCE,
+        FLOODING_REDUCTION_KERNEL_SEQUENCE,
+        FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
         FLOODING_MINMAX_SEQUENCE,
         FLOODING_MAXMIN_SEQUENCE,
     }:
+        if algorithm in {
+            FLOODING_REDUCTION_KERNEL_SEQUENCE,
+            FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+        }:
+            return _compute_flooding_reduction_kernel_morse_sequence_python(
+                complex_, algorithm=algorithm
+            )
         return _compute_flooding_morse_sequence_python(complex_, algorithm=algorithm)
 
     n = complex_.size
@@ -1698,6 +1722,143 @@ def _compute_paper_f_morse_sequence_python(
     )
 
 
+def _compute_flooding_reduction_kernel_morse_sequence_python(
+    complex_: FilteredComplex,
+    *,
+    algorithm: str,
+) -> MorseSequence:
+    n = complex_.size
+    steps: list[MorseStep] = []
+    critical_simplices: list[int] = []
+    critical_index_of_simplex = [-1] * n
+    paired_with: list[int | None] = [None] * n
+    inserted = [False] * n
+    vertices = [set(complex_.vertices(simplex)) for simplex in range(n)]
+
+    def is_face_of(face: int, simplex: int) -> bool:
+        return vertices[face].issubset(vertices[simplex])
+
+    def emit_critical(simplex: int, level: int) -> None:
+        if inserted[simplex]:
+            raise RuntimeError("Tried to insert a reduction-kernel critical twice.")
+        for face in complex_.boundary(simplex):
+            if not inserted[face]:
+                raise RuntimeError("Reduction-kernel critical has a missing boundary face.")
+        critical_index_of_simplex[simplex] = len(critical_simplices)
+        critical_simplices.append(simplex)
+        steps.append(MorseStep(CRITICAL, simplex, None, level))
+        inserted[simplex] = True
+
+    def emit_pair(sigma: int, tau: int, level: int) -> None:
+        if inserted[sigma] or inserted[tau]:
+            raise RuntimeError("Tried to insert a reduction-kernel pair twice.")
+        for face in complex_.boundary(tau):
+            if face != sigma and not inserted[face]:
+                raise RuntimeError("Reduction-kernel pair has a missing boundary face.")
+        steps.append(MorseStep(REGULAR_PAIR, sigma, tau, level))
+        paired_with[sigma] = tau
+        paired_with[tau] = sigma
+        inserted[sigma] = True
+        inserted[tau] = True
+
+    for level in range(complex_.num_levels):
+        bucket = complex_.simplices_of_level(level)
+        active = {simplex for simplex in bucket}
+        decreasing_events: list[tuple[str, int, int | None]] = []
+
+        def facets() -> list[int]:
+            return [
+                simplex
+                for simplex in bucket
+                if simplex in active
+                and not any(
+                    coface in active and complex_.level(coface) == level
+                    for coface in complex_.coboundary(simplex)
+                )
+            ]
+
+        while active:
+            changed = True
+            while changed:
+                changed = False
+                current_facets = facets()
+                round_removed: set[int] = set()
+                round_events: list[tuple[str, int, int | None]] = []
+
+                for facet in current_facets:
+                    cell = [
+                        simplex
+                        for simplex in bucket
+                        if simplex in active and is_face_of(simplex, facet)
+                    ]
+                    protected = {
+                        simplex
+                        for simplex in cell
+                        if any(
+                            other != facet and is_face_of(simplex, other)
+                            for other in current_facets
+                        )
+                    }
+                    locally_removed: set[int] = set()
+
+                    while True:
+                        pair: tuple[int, int] | None = None
+                        for sigma in cell:
+                            if sigma in locally_removed or sigma in protected:
+                                continue
+                            cofaces = [
+                                coface
+                                for coface in complex_.coboundary(sigma)
+                                if coface in active
+                                and coface not in locally_removed
+                                and is_face_of(coface, facet)
+                            ]
+                            if len(cofaces) == 1 and cofaces[0] not in protected:
+                                pair = (sigma, cofaces[0])
+                                break
+                        if pair is None:
+                            break
+                        sigma, tau = pair
+                        locally_removed.update((sigma, tau))
+                        round_events.append((REGULAR_PAIR, sigma, tau))
+
+                    overlap = round_removed.intersection(locally_removed)
+                    if overlap:
+                        raise RuntimeError(
+                            "Facet reduction kernels removed the same simplex twice."
+                        )
+                    round_removed.update(locally_removed)
+
+                if round_removed:
+                    active.difference_update(round_removed)
+                    decreasing_events.extend(round_events)
+                    changed = True
+
+            if active:
+                current_facets = facets()
+                if not current_facets:
+                    raise RuntimeError("A nonempty reduction-kernel section has no facet.")
+                critical = current_facets[0]
+                decreasing_events.append((CRITICAL, critical, None))
+                active.remove(critical)
+
+        for kind, sigma, tau in reversed(decreasing_events):
+            if kind == CRITICAL:
+                emit_critical(sigma, level)
+            else:
+                if tau is None:
+                    raise RuntimeError("Reduction-kernel pair is missing its upper simplex.")
+                emit_pair(sigma, tau, level)
+
+    return MorseSequence(
+        steps=tuple(steps),
+        critical_simplices=tuple(critical_simplices),
+        critical_index_of_simplex=tuple(critical_index_of_simplex),
+        paired_with=tuple(paired_with),
+        algorithm=algorithm,
+    )
+
+
 def _compute_flooding_morse_sequence_python(
     complex_: FilteredComplex,
     *,
@@ -1921,9 +2082,13 @@ def compute_morse_sequence_and_reference_map(
     complex_: FilteredComplex,
     *,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    max_workers: int | None = None,
 ) -> MorseReferenceFrame:
     algorithm = _normalize_morse_sequence_algorithm(algorithm)
-    cpp_frame = _compute_cpp_reference_frame(complex_, algorithm)
+    native_max_workers = _normalize_parallel_max_workers(algorithm, max_workers)
+    cpp_frame = _compute_cpp_reference_frame(
+        complex_, algorithm, max_workers=native_max_workers
+    )
     if cpp_frame is not None:
         cpp_sequence = cpp_frame.sequence
         return MorseReferenceFrame(
@@ -1951,10 +2116,22 @@ def compute_morse_sequence_and_reference_map(
     if algorithm in {
         FLOODING_MAX_SEQUENCE,
         FLOODING_MIN_SEQUENCE,
+        FLOODING_REDUCTION_KERNEL_SEQUENCE,
+        FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
         FLOODING_MINMAX_SEQUENCE,
         FLOODING_MAXMIN_SEQUENCE,
     }:
-        sequence = _compute_flooding_morse_sequence_python(complex_, algorithm=algorithm)
+        sequence = (
+            _compute_flooding_reduction_kernel_morse_sequence_python(
+                complex_, algorithm=algorithm
+            )
+            if algorithm
+            in {
+                FLOODING_REDUCTION_KERNEL_SEQUENCE,
+                FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+            }
+            else _compute_flooding_morse_sequence_python(complex_, algorithm=algorithm)
+        )
         return MorseReferenceFrame(
             sequence=sequence,
             _references=compute_reference_map(complex_, sequence, algorithm=algorithm),
@@ -1966,9 +2143,13 @@ def compute_morse_sequence_and_coreference_map(
     complex_: FilteredComplex,
     *,
     algorithm: str = COREDUCTION_SEQUENCE,
+    max_workers: int | None = None,
 ) -> MorseCoreferenceFrame:
     algorithm = _normalize_morse_sequence_algorithm(algorithm)
-    cpp_frame = _compute_cpp_coreference_frame(complex_, algorithm)
+    native_max_workers = _normalize_parallel_max_workers(algorithm, max_workers)
+    cpp_frame = _compute_cpp_coreference_frame(
+        complex_, algorithm, max_workers=native_max_workers
+    )
     if cpp_frame is not None:
         cpp_sequence = cpp_frame.sequence
         return MorseCoreferenceFrame(
@@ -1976,7 +2157,9 @@ def compute_morse_sequence_and_coreference_map(
             _cpp_frame=cpp_frame,
         )
 
-    sequence = compute_morse_sequence(complex_, algorithm=algorithm)
+    sequence = compute_morse_sequence(
+        complex_, algorithm=algorithm, max_workers=max_workers
+    )
     return MorseCoreferenceFrame(
         sequence=sequence,
         _coreferences=compute_coreference_map(complex_, sequence, algorithm=algorithm),
@@ -3284,11 +3467,14 @@ def cpp_compute_morse_sequence(
     cpp_complex: object,
     *,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    max_workers: int | None = None,
 ) -> object:
     _require_cpp_backend()
+    normalized_algorithm = _normalize_morse_sequence_algorithm(algorithm)
     return _core_compute_morse_sequence(
         cpp_complex,
-        _normalize_morse_sequence_algorithm(algorithm),
+        normalized_algorithm,
+        _normalize_parallel_max_workers(normalized_algorithm, max_workers),
     )
 
 
@@ -4194,6 +4380,7 @@ def _make_morse_reference_profile(payload: dict[str, object]) -> MorseReferenceP
         estimated_reducer_work=int(payload["estimated_reducer_work"]),
         profile_seconds=profile_seconds,
         metrics=metrics,  # type: ignore[arg-type]
+        frame_metrics=frame_metrics,  # type: ignore[arg-type]
     )
 
 
@@ -4316,12 +4503,32 @@ def _profile_morse_reference_frame_python(
         "sequence_emit_nanoseconds": 0,
         "sequence_callback_nanoseconds": 0,
         "sequence_replay_nanoseconds": 0,
+        "sequence_reduction_kernel_facet_nanoseconds": 0,
+        "sequence_reduction_kernel_essential_nanoseconds": 0,
+        "sequence_reduction_kernel_core_nanoseconds": 0,
+        "sequence_reduction_kernel_local_reduction_nanoseconds": 0,
+        "sequence_reduction_kernel_aggregation_nanoseconds": 0,
+        "sequence_reduction_kernel_merge_nanoseconds": 0,
         "sequence_candidate_pushes": 0,
         "sequence_candidate_pops": 0,
         "sequence_stale_candidate_skips": 0,
         "sequence_level_mismatch_skips": 0,
         "sequence_regular_pairs": 0,
         "sequence_criticals": 0,
+        "sequence_reduction_kernel_levels": 0,
+        "sequence_reduction_kernel_rounds": 0,
+        "sequence_reduction_kernel_facet_kernels": 0,
+        "sequence_reduction_kernel_reductions": 0,
+        "sequence_reduction_kernel_perforations": 0,
+        "sequence_reduction_kernel_parallel_batches": 0,
+        "sequence_reduction_kernel_max_parallel_facets": 0,
+        "sequence_reduction_kernel_parallel_level_batches": 0,
+        "sequence_reduction_kernel_max_parallel_levels": 0,
+        "sequence_reduction_kernel_executor_workers": 1,
+        "sequence_reduction_kernel_facet_discovery_parallel_tasks": 0,
+        "sequence_reduction_kernel_essential_parallel_tasks": 0,
+        "sequence_reduction_kernel_aggregation_rounds": 0,
+        "sequence_reduction_kernel_aggregation_parallel_tasks": 0,
         "final_live_nonempty_annotations": full_reference_nonempty,
         "final_live_total_annotation_size": full_reference_total,
         "peak_live_nonempty_annotations": full_reference_nonempty,
@@ -4425,12 +4632,32 @@ def _empty_frame_metrics() -> dict[str, object]:
         "sequence_emit_nanoseconds": 0,
         "sequence_callback_nanoseconds": 0,
         "sequence_replay_nanoseconds": 0,
+        "sequence_reduction_kernel_facet_nanoseconds": 0,
+        "sequence_reduction_kernel_essential_nanoseconds": 0,
+        "sequence_reduction_kernel_core_nanoseconds": 0,
+        "sequence_reduction_kernel_local_reduction_nanoseconds": 0,
+        "sequence_reduction_kernel_aggregation_nanoseconds": 0,
+        "sequence_reduction_kernel_merge_nanoseconds": 0,
         "sequence_candidate_pushes": 0,
         "sequence_candidate_pops": 0,
         "sequence_stale_candidate_skips": 0,
         "sequence_level_mismatch_skips": 0,
         "sequence_regular_pairs": 0,
         "sequence_criticals": 0,
+        "sequence_reduction_kernel_levels": 0,
+        "sequence_reduction_kernel_rounds": 0,
+        "sequence_reduction_kernel_facet_kernels": 0,
+        "sequence_reduction_kernel_reductions": 0,
+        "sequence_reduction_kernel_perforations": 0,
+        "sequence_reduction_kernel_parallel_batches": 0,
+        "sequence_reduction_kernel_max_parallel_facets": 0,
+        "sequence_reduction_kernel_parallel_level_batches": 0,
+        "sequence_reduction_kernel_max_parallel_levels": 0,
+        "sequence_reduction_kernel_executor_workers": 1,
+        "sequence_reduction_kernel_facet_discovery_parallel_tasks": 0,
+        "sequence_reduction_kernel_essential_parallel_tasks": 0,
+        "sequence_reduction_kernel_aggregation_rounds": 0,
+        "sequence_reduction_kernel_aggregation_parallel_tasks": 0,
         "final_live_nonempty_annotations": 0,
         "final_live_total_annotation_size": 0,
         "peak_live_nonempty_annotations": 0,
@@ -4563,6 +4790,9 @@ def _normalize_morse_sequence_algorithm(algorithm: str) -> str:
         "maximal-flooding": FLOODING_MAX_SEQUENCE,
         "flooding-minimal": FLOODING_MIN_SEQUENCE,
         "minimal-flooding": FLOODING_MIN_SEQUENCE,
+        "reduction-kernel": FLOODING_REDUCTION_KERNEL_SEQUENCE,
+        "parallel-reduction-kernel": FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+        "reduction-kernel-parallel": FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
         "flooding-minmax": FLOODING_MINMAX_SEQUENCE,
         "flooding-min-max": FLOODING_MINMAX_SEQUENCE,
         "min-max": FLOODING_MINMAX_SEQUENCE,
@@ -4585,6 +4815,22 @@ def _normalize_morse_sequence_algorithm(algorithm: str) -> str:
         f"Unknown Morse sequence algorithm {algorithm!r}. "
         f"Implemented: {supported}. Reserved for future work: {reserved}."
     )
+
+
+def _normalize_parallel_max_workers(
+    algorithm: str, max_workers: int | None
+) -> int:
+    if max_workers is None:
+        return 0
+    if isinstance(max_workers, bool) or not isinstance(max_workers, int):
+        raise TypeError("max_workers must be an integer or None.")
+    if max_workers < 1:
+        raise ValueError("max_workers must be positive.")
+    if algorithm != FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE:
+        raise ValueError(
+            "max_workers is only valid for flooding-reduction-kernel-parallel."
+        )
+    return max_workers
 
 
 def _normalize_morse_algorithm_portfolio(
@@ -4631,46 +4877,71 @@ def _normalize_morse_selection_mode(selection_mode: str) -> str:
     raise ValueError(f"Unknown Morse selection mode {selection_mode!r}. Supported modes: {supported}.")
 
 
-def _core_compute_morse_sequence(cpp_complex: object, algorithm: str) -> object:
+def _core_compute_morse_sequence(
+    cpp_complex: object, algorithm: str, max_workers: int = 0
+) -> object:
     try:
-        return _morse_core.compute_morse_sequence(cpp_complex, algorithm)
+        return _morse_core.compute_morse_sequence(
+            cpp_complex, algorithm, max_workers
+        )
     except TypeError:
-        if algorithm != SATURATED_SEQUENCE:
+        if max_workers != 0:
             raise
-        return _morse_core.compute_morse_sequence(cpp_complex)
+        try:
+            return _morse_core.compute_morse_sequence(cpp_complex, algorithm)
+        except TypeError:
+            if algorithm != SATURATED_SEQUENCE:
+                raise
+            return _morse_core.compute_morse_sequence(cpp_complex)
 
 
 def _compute_cpp_sequence(
     complex_: FilteredComplex,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    *,
+    max_workers: int = 0,
 ) -> object | None:
     if _morse_core is None or complex_._cpp is None:
         return None
-    return _core_compute_morse_sequence(complex_._cpp, algorithm)
+    return _core_compute_morse_sequence(complex_._cpp, algorithm, max_workers)
 
 
 def _compute_cpp_reference_frame(
     complex_: FilteredComplex,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    *,
+    max_workers: int = 0,
 ) -> object | None:
     if _morse_core is None or complex_._cpp is None:
         return None
     builder = getattr(_morse_core, "compute_morse_sequence_and_reference_map_object", None)
     if builder is None:
         return None
-    return builder(complex_._cpp, algorithm)
+    try:
+        return builder(complex_._cpp, algorithm, max_workers)
+    except TypeError:
+        if max_workers != 0:
+            raise
+        return builder(complex_._cpp, algorithm)
 
 
 def _compute_cpp_coreference_frame(
     complex_: FilteredComplex,
     algorithm: str = COREDUCTION_SEQUENCE,
+    *,
+    max_workers: int = 0,
 ) -> object | None:
     if _morse_core is None or complex_._cpp is None:
         return None
     builder = getattr(_morse_core, "compute_morse_sequence_and_coreference_map_object", None)
     if builder is None:
         return None
-    return builder(complex_._cpp, algorithm)
+    try:
+        return builder(complex_._cpp, algorithm, max_workers)
+    except TypeError:
+        if max_workers != 0:
+            raise
+        return builder(complex_._cpp, algorithm)
 
 
 def _cpp_sequence_for(
@@ -5128,6 +5399,8 @@ __all__ = [
     "FLOODING_MAX_SEQUENCE",
     "FLOODING_MINMAX_SEQUENCE",
     "FLOODING_MIN_SEQUENCE",
+    "FLOODING_REDUCTION_KERNEL_SEQUENCE",
+    "FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE",
     "PersistenceBenchmark",
     "MorseComplex",
     "MorseCoreferenceFrame",

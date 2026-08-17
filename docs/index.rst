@@ -43,6 +43,7 @@ The current public alpha can be installed from PyPI:
 
    benchmark_summary
    benchmark_reproduction
+   reduction_kernel_correctness
    phase0_conventions
 
 .. toctree::

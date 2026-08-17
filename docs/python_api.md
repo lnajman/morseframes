@@ -103,6 +103,22 @@ Compute a Morse sequence:
 sequence = mf.compute_morse_sequence(complex_, algorithm="f-max")
 ```
 
+The parallel reduction-kernel strategy accepts an explicit global worker budget.
+Leave `max_workers` unset to use the native hardware concurrency:
+
+```python
+parallel_sequence = mf.compute_morse_sequence(
+    complex_,
+    algorithm="flooding-reduction-kernel-parallel",
+    max_workers=4,
+)
+```
+
+The same option is available on
+`compute_morse_sequence_and_reference_map` and
+`compute_morse_sequence_and_coreference_map`. It is rejected for nonparallel
+strategies to catch configuration mistakes.
+
 Important fields and helpers:
 
 ```python

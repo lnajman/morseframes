@@ -299,6 +299,8 @@ const std::vector<morseframes::MorseSequenceStrategy>& all_internal_strategies()
       morseframes::MorseSequenceStrategy::FloodingMin,
       morseframes::MorseSequenceStrategy::FloodingMinMax,
       morseframes::MorseSequenceStrategy::FloodingMaxMin,
+      morseframes::MorseSequenceStrategy::FloodingReductionKernel,
+      morseframes::MorseSequenceStrategy::FloodingReductionKernelParallel,
   };
   return strategies;
 }

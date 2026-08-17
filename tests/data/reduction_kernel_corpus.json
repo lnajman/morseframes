@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "description": "Fixed correctness inputs for deterministic reduction-kernel validation.",
+  "cases": [
+    {
+      "name": "single_vertex",
+      "kind": "constant_facets",
+      "facets": [[0]],
+      "filtration": 0.0
+    },
+    {
+      "name": "shared_triangles_plateau",
+      "kind": "constant_facets",
+      "facets": [[0, 1, 2], [1, 2, 3]],
+      "filtration": 0.0
+    },
+    {
+      "name": "four_disjoint_edges_plateau",
+      "kind": "constant_facets",
+      "facets": [[0, 1], [2, 3], [4, 5], [6, 7]],
+      "filtration": 0.0
+    },
+    {
+      "name": "tetrahedron_boundary_plateau",
+      "kind": "constant_facets",
+      "facets": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]],
+      "filtration": 0.0
+    },
+    {
+      "name": "nonpure_triangle_with_attached_edge",
+      "kind": "constant_facets",
+      "facets": [[0, 1, 2], [2, 3]],
+      "filtration": 0.0
+    },
+    {
+      "name": "shared_triangles_lower_star",
+      "kind": "lower_star",
+      "facets": [[0, 1, 2], [1, 2, 3]],
+      "vertex_filtration": [0.0, 1.0, 2.0, 3.0],
+      "dimension_offset": 0.0
+    },
+    {
+      "name": "shared_tetrahedra_lower_star",
+      "kind": "lower_star",
+      "facets": [[0, 1, 2, 3], [1, 2, 3, 4]],
+      "vertex_filtration": [0.0, 2.0, 1.0, 3.0, 2.0],
+      "dimension_offset": 0.0
+    },
+    {
+      "name": "delayed_filled_triangle",
+      "kind": "simplices",
+      "simplices": [
+        [[0], 0.0],
+        [[1], 0.0],
+        [[2], 0.0],
+        [[0, 1], 1.0],
+        [[0, 2], 1.0],
+        [[1, 2], 1.0],
+        [[0, 1, 2], 2.0]
+      ]
+    },
+    {
+      "name": "multilevel_cycle_with_diagonal",
+      "kind": "simplices",
+      "simplices": [
+        [[0], 0.0],
+        [[1], 0.0],
+        [[2], 0.0],
+        [[3], 0.0],
+        [[0, 1], 1.0],
+        [[1, 2], 1.0],
+        [[2, 3], 1.0],
+        [[0, 3], 1.0],
+        [[0, 2], 2.0],
+        [[0, 1, 2], 3.0],
+        [[0, 2, 3], 3.0]
+      ]
+    }
+  ]
+}

@@ -3,13 +3,16 @@
 #include <chrono>
 #include <cstdint>
 #include <cstddef>
+#include <future>
 #include <limits>
+#include <memory>
 #include <queue>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 #include "morseframes/complex_view.hpp"
+#include "morseframes/reduction_kernel.hpp"
 
 #ifndef MORSE_ENABLE_SEQUENCE_BUILDER_CHECKS
 #define MORSE_ENABLE_SEQUENCE_BUILDER_CHECKS 0
@@ -46,12 +49,32 @@ struct MorseSequenceBuildMetrics {
   std::uint64_t emit_nanoseconds = 0;
   std::uint64_t callback_nanoseconds = 0;
   std::uint64_t replay_nanoseconds = 0;
+  std::uint64_t reduction_kernel_facet_nanoseconds = 0;
+  std::uint64_t reduction_kernel_essential_nanoseconds = 0;
+  std::uint64_t reduction_kernel_core_nanoseconds = 0;
+  std::uint64_t reduction_kernel_local_reduction_nanoseconds = 0;
+  std::uint64_t reduction_kernel_aggregation_nanoseconds = 0;
+  std::uint64_t reduction_kernel_merge_nanoseconds = 0;
   std::size_t candidate_pushes = 0;
   std::size_t candidate_pops = 0;
   std::size_t stale_candidate_skips = 0;
   std::size_t level_mismatch_skips = 0;
   std::size_t regular_pairs = 0;
   std::size_t criticals = 0;
+  std::size_t reduction_kernel_levels = 0;
+  std::size_t reduction_kernel_rounds = 0;
+  std::size_t reduction_kernel_facet_kernels = 0;
+  std::size_t reduction_kernel_reductions = 0;
+  std::size_t reduction_kernel_perforations = 0;
+  std::size_t reduction_kernel_parallel_batches = 0;
+  std::size_t reduction_kernel_max_parallel_facets = 0;
+  std::size_t reduction_kernel_parallel_level_batches = 0;
+  std::size_t reduction_kernel_max_parallel_levels = 0;
+  std::size_t reduction_kernel_executor_workers = 1;
+  std::size_t reduction_kernel_facet_discovery_parallel_tasks = 0;
+  std::size_t reduction_kernel_essential_parallel_tasks = 0;
+  std::size_t reduction_kernel_aggregation_rounds = 0;
+  std::size_t reduction_kernel_aggregation_parallel_tasks = 0;
 };
 
 class MorseSequence {
@@ -316,6 +339,17 @@ class FSequenceBuilder {
 
   MorseSequence build_flooding_min() const {
     return build_flooding_min_with_step_callback([](const MorseSequence&, const MorseStep&) {});
+  }
+
+  MorseSequence build_flooding_reduction_kernel() const {
+    return build_flooding_reduction_kernel_with_step_callback(
+        [](const MorseSequence&, const MorseStep&) {});
+  }
+
+  MorseSequence build_flooding_reduction_kernel_parallel(
+      std::size_t max_workers = 0) const {
+    return build_flooding_reduction_kernel_parallel_with_step_callback(
+        [](const MorseSequence&, const MorseStep&) {}, max_workers);
   }
 
   MorseSequence build_flooding_minmax() const {
@@ -1112,6 +1146,134 @@ class FSequenceBuilder {
   MorseSequence build_flooding_max_with_step_callback(StepCallback&& on_step) const {
     return build_flooding_with_step_callback(FloodingScheme::Maximal,
                                              std::forward<StepCallback>(on_step));
+  }
+  template <typename StepCallback>
+  MorseSequence build_flooding_reduction_kernel_with_step_callback(
+      StepCallback&& on_step) const {
+    return build_flooding_reduction_kernel_with_execution_options(
+        ReductionKernelExecutionOptions{},
+        std::forward<StepCallback>(on_step));
+  }
+
+  template <typename StepCallback>
+  MorseSequence build_flooding_reduction_kernel_parallel_with_step_callback(
+      StepCallback&& on_step, std::size_t max_workers = 0) const {
+    ReductionKernelExecutionOptions options;
+    options.policy = ReductionKernelExecutionPolicy::Parallel;
+    options.max_workers = max_workers;
+    return build_flooding_reduction_kernel_with_execution_options(
+        options, std::forward<StepCallback>(on_step));
+  }
+
+  template <typename StepCallback>
+  MorseSequence build_flooding_reduction_kernel_with_execution_options(
+      ReductionKernelExecutionOptions options, StepCallback&& on_step) const {
+    const std::size_t n = complex_.size();
+    MorseSequence sequence(n);
+    auto&& callback = on_step;
+    const std::size_t num_levels = complex_.num_levels();
+    std::shared_ptr<BoundedTaskExecutor> executor;
+    if (options.policy == ReductionKernelExecutionPolicy::Parallel) {
+      executor = std::make_shared<BoundedTaskExecutor>(options.max_workers);
+    }
+    const std::size_t workers =
+        executor == nullptr ? 1 : executor->worker_count();
+    const std::size_t level_workers = std::min(num_levels, workers);
+    ReductionKernelWorkspace<ComplexView> workspace(complex_, options, executor);
+    std::vector<ReductionKernelLevelResult> level_results(num_levels);
+    ReductionKernelMetrics kernel_metrics;
+    kernel_metrics.executor_workers = workers;
+
+    if (level_workers == 1 || num_levels <= 1) {
+      for (LevelId level = 0; level < num_levels; ++level) {
+        level_results[level] = workspace.compute_level_isolated(level);
+      }
+    } else {
+      for (std::size_t first = 0; first < num_levels;
+           first += level_workers) {
+        const std::size_t count =
+            std::min(level_workers, num_levels - first);
+        ++kernel_metrics.parallel_level_batches;
+        kernel_metrics.max_parallel_levels =
+            std::max(kernel_metrics.max_parallel_levels, count);
+        std::vector<std::future<ReductionKernelLevelResult>> futures;
+        futures.reserve(count);
+        for (std::size_t offset = 0; offset < count; ++offset) {
+          const LevelId level = static_cast<LevelId>(first + offset);
+          futures.push_back(executor->submit([level, &workspace]() {
+            return workspace.compute_level_isolated(level);
+          }));
+        }
+        for (std::size_t offset = 0; offset < count; ++offset) {
+          level_results[first + offset] = executor->get(futures[offset]);
+        }
+      }
+    }
+
+    for (LevelId level = 0; level < num_levels; ++level) {
+      auto& level_result = level_results[level];
+      ReductionKernelWorkspace<ComplexView>::accumulate_metrics(
+          kernel_metrics, level_result.metrics);
+      const auto& events = level_result.events;
+      for (std::size_t index = events.size(); index > 0; --index) {
+        const auto& event = events[index - 1];
+        if (event.type == ReductionKernelEventType::Perforation) {
+          sequence.add_critical(event.sigma, level);
+          if (sequence_metrics_ != nullptr) {
+            ++sequence_metrics_->criticals;
+          }
+        } else {
+          sequence.add_regular_pair(event.sigma, event.tau, level);
+          if (sequence_metrics_ != nullptr) {
+            ++sequence_metrics_->regular_pairs;
+          }
+        }
+        callback(sequence, sequence.steps().back());
+      }
+    }
+
+    if (sequence_metrics_ != nullptr) {
+      sequence_metrics_->reduction_kernel_facet_nanoseconds =
+          kernel_metrics.facet_nanoseconds;
+      sequence_metrics_->reduction_kernel_essential_nanoseconds =
+          kernel_metrics.essential_nanoseconds;
+      sequence_metrics_->reduction_kernel_core_nanoseconds =
+          kernel_metrics.core_nanoseconds;
+      sequence_metrics_->reduction_kernel_local_reduction_nanoseconds =
+          kernel_metrics.local_reduction_nanoseconds;
+      sequence_metrics_->reduction_kernel_aggregation_nanoseconds =
+          kernel_metrics.aggregation_nanoseconds;
+      sequence_metrics_->reduction_kernel_merge_nanoseconds =
+          kernel_metrics.merge_nanoseconds;
+      sequence_metrics_->reduction_kernel_levels = kernel_metrics.levels;
+      sequence_metrics_->reduction_kernel_rounds = kernel_metrics.kernel_rounds;
+      sequence_metrics_->reduction_kernel_facet_kernels =
+          kernel_metrics.facet_kernels;
+      sequence_metrics_->reduction_kernel_reductions =
+          kernel_metrics.reductions;
+      sequence_metrics_->reduction_kernel_perforations =
+          kernel_metrics.perforations;
+      sequence_metrics_->reduction_kernel_parallel_batches =
+          kernel_metrics.parallel_batches;
+      sequence_metrics_->reduction_kernel_max_parallel_facets =
+          kernel_metrics.max_parallel_facets;
+      sequence_metrics_->reduction_kernel_parallel_level_batches =
+          kernel_metrics.parallel_level_batches;
+      sequence_metrics_->reduction_kernel_max_parallel_levels =
+          kernel_metrics.max_parallel_levels;
+      sequence_metrics_->reduction_kernel_executor_workers =
+          kernel_metrics.executor_workers;
+      sequence_metrics_->reduction_kernel_facet_discovery_parallel_tasks =
+          kernel_metrics.facet_discovery_parallel_tasks;
+      sequence_metrics_->reduction_kernel_essential_parallel_tasks =
+          kernel_metrics.essential_parallel_tasks;
+      sequence_metrics_->reduction_kernel_aggregation_rounds =
+          kernel_metrics.aggregation_rounds;
+      sequence_metrics_->reduction_kernel_aggregation_parallel_tasks =
+          kernel_metrics.aggregation_parallel_tasks;
+    }
+
+    return sequence;
   }
 
   template <typename StepCallback>

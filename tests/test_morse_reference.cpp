@@ -1,9 +1,12 @@
 #include <algorithm>
+#include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <initializer_list>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -27,6 +30,64 @@ using morseframes::FSequenceBuilder;
 using morseframes::PersistenceDiagram;
 
 constexpr double kEps = 1e-12;
+
+void test_bounded_task_executor() {
+  morseframes::BoundedTaskExecutor executor(3);
+  assert(executor.worker_count() == 3);
+
+  std::atomic<int> active{0};
+  std::atomic<int> peak{0};
+  std::vector<std::future<int>> futures;
+  for (int value = 0; value < 18; ++value) {
+    futures.push_back(executor.submit([value, &active, &peak]() {
+      const int current = active.fetch_add(1) + 1;
+      int observed = peak.load();
+      while (observed < current &&
+             !peak.compare_exchange_weak(observed, current)) {
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      active.fetch_sub(1);
+      return value * value;
+    }));
+  }
+  for (int value = 0; value < 18; ++value) {
+    assert(executor.get(futures[value]) == value * value);
+  }
+  assert(peak.load() > 1);
+  assert(peak.load() <= 3);
+
+  auto nested = executor.submit([&executor]() {
+    std::vector<std::future<int>> inner;
+    for (int value = 1; value <= 8; ++value) {
+      inner.push_back(executor.submit([value]() { return value; }));
+    }
+    int total = 0;
+    for (auto& future : inner) {
+      total += executor.get(future);
+    }
+    return total;
+  });
+  assert(executor.get(nested) == 36);
+
+  auto failure = executor.submit([]() -> int {
+    throw std::runtime_error("executor failure");
+  });
+  bool propagated = false;
+  try {
+    (void)executor.get(failure);
+  } catch (const std::runtime_error&) {
+    propagated = true;
+  }
+  assert(propagated);
+
+  morseframes::BoundedTaskExecutor single_worker_executor(1);
+  auto single_worker_nested = single_worker_executor.submit(
+      [&single_worker_executor]() {
+        auto inner = single_worker_executor.submit([]() { return 17; });
+        return single_worker_executor.get(inner);
+      });
+  assert(single_worker_executor.get(single_worker_nested) == 17);
+}
 
 bool close(double lhs, double rhs) {
   return std::fabs(lhs - rhs) <= kEps;
@@ -212,6 +273,8 @@ PersistenceDiagram run_reference(FilteredSimplicialComplex& complex) {
   };
   check_flooding_sequence(FSequenceBuilder(complex).build_flooding_max());
   check_flooding_sequence(FSequenceBuilder(complex).build_flooding_min());
+  check_flooding_sequence(
+      FSequenceBuilder(complex).build_flooding_reduction_kernel());
   check_flooding_sequence(FSequenceBuilder(complex).build_flooding_minmax());
   check_flooding_sequence(FSequenceBuilder(complex).build_flooding_maxmin());
   check_flooding_sequence(FSequenceBuilder(complex).build_f_max());
@@ -823,6 +886,7 @@ void test_morse_reference_prime_field_persistence() {
   check_sequence(FSequenceBuilder(complex).build_f_min());
   check_sequence(FSequenceBuilder(complex).build_flooding_max());
   check_sequence(FSequenceBuilder(complex).build_flooding_min());
+  check_sequence(FSequenceBuilder(complex).build_flooding_reduction_kernel());
   check_sequence(FSequenceBuilder(complex).build_flooding_minmax());
   check_sequence(FSequenceBuilder(complex).build_flooding_maxmin());
 
@@ -869,6 +933,7 @@ void test_morse_coreference_prime_field_persistence() {
   check_sequence(FSequenceBuilder(complex).build_f_min());
   check_sequence(FSequenceBuilder(complex).build_flooding_max());
   check_sequence(FSequenceBuilder(complex).build_flooding_min());
+  check_sequence(FSequenceBuilder(complex).build_flooding_reduction_kernel());
   check_sequence(FSequenceBuilder(complex).build_flooding_minmax());
   check_sequence(FSequenceBuilder(complex).build_flooding_maxmin());
 
@@ -983,6 +1048,132 @@ void test_lower_star_three_dimensional_pair() {
   assert(count_essential_dim(diagram, 0) == 1);
 }
 
+void test_flooding_reduction_kernel_on_shared_facets() {
+  const auto assert_same_sequence = [](const auto& expected_sequence,
+                                       const auto& actual_sequence) {
+    assert(expected_sequence.steps().size() == actual_sequence.steps().size());
+    for (std::size_t index = 0; index < expected_sequence.steps().size();
+         ++index) {
+      const auto& expected = expected_sequence.steps()[index];
+      const auto& actual = actual_sequence.steps()[index];
+      assert(expected.type == actual.type);
+      assert(expected.sigma == actual.sigma);
+      assert(expected.tau == actual.tau);
+      assert(expected.level == actual.level);
+    }
+  };
+
+  FilteredSimplicialComplex complex;
+  const std::vector<double> values = {0.0, 0.0, 0.0, 0.0};
+  add_weighted_closure(complex, {0, 1, 2}, values);
+  add_weighted_closure(complex, {1, 2, 3}, values);
+  complex.finalize();
+
+  const auto sequence =
+      FSequenceBuilder(complex).build_flooding_reduction_kernel();
+  morseframes::validate_morse_sequence(complex, sequence);
+  assert(sequence.critical_simplices().size() == 1);
+
+  morseframes::MorseSequenceBuildMetrics parallel_metrics;
+  const auto parallel_sequence =
+      FSequenceBuilder(complex, &parallel_metrics)
+          .build_flooding_reduction_kernel_parallel_with_step_callback(
+              [](const morseframes::MorseSequence&,
+                 const morseframes::MorseStep&) {},
+              2);
+  morseframes::validate_morse_sequence(complex, parallel_sequence);
+  assert_same_sequence(sequence, parallel_sequence);
+  assert(parallel_metrics.reduction_kernel_parallel_batches > 0);
+  assert(parallel_metrics.reduction_kernel_max_parallel_facets == 2);
+  assert(parallel_metrics.reduction_kernel_executor_workers == 2);
+  assert(parallel_metrics.reduction_kernel_facet_discovery_parallel_tasks > 0);
+  assert(parallel_metrics.reduction_kernel_essential_parallel_tasks > 0);
+  assert(parallel_metrics.reduction_kernel_aggregation_rounds > 0);
+  const auto single_worker_sequence =
+      FSequenceBuilder(complex).build_flooding_reduction_kernel_parallel(1);
+  morseframes::validate_morse_sequence(complex, single_worker_sequence);
+  assert_same_sequence(sequence, single_worker_sequence);
+
+  FilteredSimplicialComplex multilevel_complex;
+  const std::vector<double> multilevel_values = {0.0, 1.0, 2.0, 3.0};
+  add_weighted_closure(multilevel_complex, {0, 1, 2}, multilevel_values);
+  add_weighted_closure(multilevel_complex, {1, 2, 3}, multilevel_values);
+  multilevel_complex.finalize();
+  const auto multilevel_sequence =
+      FSequenceBuilder(multilevel_complex).build_flooding_reduction_kernel();
+  morseframes::MorseSequenceBuildMetrics multilevel_parallel_metrics;
+  const auto multilevel_parallel_sequence =
+      FSequenceBuilder(multilevel_complex, &multilevel_parallel_metrics)
+          .build_flooding_reduction_kernel_parallel_with_step_callback(
+              [](const morseframes::MorseSequence&,
+                 const morseframes::MorseStep&) {},
+              4);
+  morseframes::validate_morse_sequence(multilevel_complex,
+                                       multilevel_parallel_sequence);
+  assert_same_sequence(multilevel_sequence, multilevel_parallel_sequence);
+  assert(multilevel_parallel_metrics
+             .reduction_kernel_parallel_level_batches > 0);
+  assert(multilevel_parallel_metrics.reduction_kernel_max_parallel_levels ==
+         std::min<std::size_t>(multilevel_complex.num_levels(), 4));
+  assert(multilevel_parallel_metrics.reduction_kernel_executor_workers == 4);
+  const auto automatic_parallel_sequence =
+      FSequenceBuilder(multilevel_complex)
+          .build_flooding_reduction_kernel_parallel();
+  morseframes::validate_morse_sequence(multilevel_complex,
+                                       automatic_parallel_sequence);
+  assert_same_sequence(multilevel_sequence, automatic_parallel_sequence);
+
+  FilteredSimplicialComplex four_facet_complex;
+  for (std::uint32_t edge = 0; edge < 4; ++edge) {
+    const std::uint32_t first = 2 * edge;
+    add_simplex(four_facet_complex, {first}, 0.0);
+    add_simplex(four_facet_complex, {first + 1}, 0.0);
+    add_simplex(four_facet_complex, {first, first + 1}, 0.0);
+  }
+  four_facet_complex.finalize();
+  const auto four_facet_sequence =
+      FSequenceBuilder(four_facet_complex).build_flooding_reduction_kernel();
+  morseframes::MorseSequenceBuildMetrics four_facet_parallel_metrics;
+  const auto four_facet_parallel_sequence =
+      FSequenceBuilder(four_facet_complex, &four_facet_parallel_metrics)
+          .build_flooding_reduction_kernel_parallel_with_step_callback(
+              [](const morseframes::MorseSequence&,
+                 const morseframes::MorseStep&) {},
+              4);
+  morseframes::validate_morse_sequence(four_facet_complex,
+                                       four_facet_parallel_sequence);
+  assert_same_sequence(four_facet_sequence, four_facet_parallel_sequence);
+  assert(four_facet_parallel_metrics
+             .reduction_kernel_aggregation_parallel_tasks > 0);
+
+  const auto strategy =
+      morseframes::morse_sequence_strategy_from_name("reduction-kernel");
+  assert(strategy ==
+         morseframes::MorseSequenceStrategy::FloodingReductionKernel);
+  assert(std::string(morseframes::morse_sequence_strategy_name(strategy)) ==
+         "flooding-reduction-kernel");
+  const auto parallel_strategy = morseframes::morse_sequence_strategy_from_name(
+      "reduction-kernel-parallel");
+  assert(parallel_strategy ==
+         morseframes::MorseSequenceStrategy::FloodingReductionKernelParallel);
+
+  const auto result = morseframes::compute_morse_reference_persistence(
+      complex, strategy);
+  assert_same_barcode(result,
+                      morseframes::compute_standard_z2_persistence(complex));
+
+  auto input = morseframes::MorseReferenceFrameBuilder(complex, true)
+                   .build_flooding_reduction_kernel_reduction_input();
+  const auto& metrics = input.frame_metrics;
+  assert(metrics.sequence_reduction_kernel_levels == 1);
+  assert(metrics.sequence_reduction_kernel_rounds > 0);
+  assert(metrics.sequence_reduction_kernel_facet_kernels > 0);
+  assert(metrics.sequence_reduction_kernel_reductions ==
+         metrics.sequence_regular_pairs);
+  assert(metrics.sequence_reduction_kernel_perforations ==
+         metrics.sequence_criticals);
+}
+
 void test_instrumentation_metrics() {
   FilteredSimplicialComplex complex;
   add_simplex(complex, {0}, 0.0);
@@ -1020,6 +1211,7 @@ void test_instrumentation_metrics() {
 }  // namespace
 
 int main() {
+  test_bounded_task_executor();
   test_boundary_and_coboundary();
   test_inverse_annotation_store();
   test_field_annotation_store();
@@ -1044,6 +1236,7 @@ int main() {
   test_same_level_filled_tetrahedron_is_contractible();
   test_lower_star_two_triangle_strip();
   test_lower_star_three_dimensional_pair();
+  test_flooding_reduction_kernel_on_shared_facets();
   test_instrumentation_metrics();
 
   std::cout << "All Morse persistence prototype tests passed.\n";

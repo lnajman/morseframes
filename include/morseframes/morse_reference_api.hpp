@@ -16,6 +16,8 @@ enum class MorseSequenceStrategy {
   PlateauGreedy,
   FloodingMax,
   FloodingMin,
+  FloodingReductionKernel,
+  FloodingReductionKernelParallel,
   FloodingMinMax,
   FloodingMaxMin,
 };
@@ -36,6 +38,10 @@ inline const char* morse_sequence_strategy_name(MorseSequenceStrategy strategy) 
       return "flooding-max";
     case MorseSequenceStrategy::FloodingMin:
       return "flooding-min";
+    case MorseSequenceStrategy::FloodingReductionKernel:
+      return "flooding-reduction-kernel";
+    case MorseSequenceStrategy::FloodingReductionKernelParallel:
+      return "flooding-reduction-kernel-parallel";
     case MorseSequenceStrategy::FloodingMinMax:
       return "flooding-minmax";
     case MorseSequenceStrategy::FloodingMaxMin:
@@ -65,6 +71,13 @@ inline MorseSequenceStrategy morse_sequence_strategy_from_name(const std::string
   }
   if (strategy == "flooding-min") {
     return MorseSequenceStrategy::FloodingMin;
+  }
+  if (strategy == "flooding-reduction-kernel" || strategy == "reduction-kernel") {
+    return MorseSequenceStrategy::FloodingReductionKernel;
+  }
+  if (strategy == "flooding-reduction-kernel-parallel" ||
+      strategy == "reduction-kernel-parallel") {
+    return MorseSequenceStrategy::FloodingReductionKernelParallel;
   }
   if (strategy == "flooding-minmax" || strategy == "flooding" ||
       strategy == "minmax" || strategy == "min-max") {
@@ -99,6 +112,10 @@ MorseReferenceFrame build_morse_reference_frame(
       return builder.build_flooding_max();
     case MorseSequenceStrategy::FloodingMin:
       return builder.build_flooding_min();
+    case MorseSequenceStrategy::FloodingReductionKernel:
+      return builder.build_flooding_reduction_kernel();
+    case MorseSequenceStrategy::FloodingReductionKernelParallel:
+      return builder.build_flooding_reduction_kernel_parallel();
     case MorseSequenceStrategy::FloodingMinMax:
       return builder.build_flooding_minmax();
     case MorseSequenceStrategy::FloodingMaxMin:
@@ -132,6 +149,10 @@ MorseReferenceReductionInput build_morse_reference_reduction_input(
       return builder.build_flooding_max_reduction_input();
     case MorseSequenceStrategy::FloodingMin:
       return builder.build_flooding_min_reduction_input();
+    case MorseSequenceStrategy::FloodingReductionKernel:
+      return builder.build_flooding_reduction_kernel_reduction_input();
+    case MorseSequenceStrategy::FloodingReductionKernelParallel:
+      return builder.build_flooding_reduction_kernel_parallel_reduction_input();
     case MorseSequenceStrategy::FloodingMinMax:
       return builder.build_flooding_minmax_reduction_input();
     case MorseSequenceStrategy::FloodingMaxMin:

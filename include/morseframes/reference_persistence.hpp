@@ -94,12 +94,21 @@ struct MorseReferenceFrameMetrics {
   std::uint64_t sequence_emit_nanoseconds = 0;
   std::uint64_t sequence_callback_nanoseconds = 0;
   std::uint64_t sequence_replay_nanoseconds = 0;
+  std::uint64_t sequence_reduction_kernel_facet_nanoseconds = 0;
+  std::uint64_t sequence_reduction_kernel_core_nanoseconds = 0;
+  std::uint64_t sequence_reduction_kernel_local_reduction_nanoseconds = 0;
+  std::uint64_t sequence_reduction_kernel_merge_nanoseconds = 0;
   std::size_t sequence_candidate_pushes = 0;
   std::size_t sequence_candidate_pops = 0;
   std::size_t sequence_stale_candidate_skips = 0;
   std::size_t sequence_level_mismatch_skips = 0;
   std::size_t sequence_regular_pairs = 0;
   std::size_t sequence_criticals = 0;
+  std::size_t sequence_reduction_kernel_levels = 0;
+  std::size_t sequence_reduction_kernel_rounds = 0;
+  std::size_t sequence_reduction_kernel_facet_kernels = 0;
+  std::size_t sequence_reduction_kernel_reductions = 0;
+  std::size_t sequence_reduction_kernel_perforations = 0;
   std::size_t final_live_nonempty_annotations = 0;
   std::size_t final_live_total_annotation_size = 0;
   std::size_t peak_live_nonempty_annotations = 0;
@@ -994,6 +1003,14 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.callback_nanoseconds;
       frame_metrics.sequence_replay_nanoseconds =
           sequence_build_metrics.replay_nanoseconds;
+      frame_metrics.sequence_reduction_kernel_facet_nanoseconds =
+          sequence_build_metrics.reduction_kernel_facet_nanoseconds;
+      frame_metrics.sequence_reduction_kernel_core_nanoseconds =
+          sequence_build_metrics.reduction_kernel_core_nanoseconds;
+      frame_metrics.sequence_reduction_kernel_local_reduction_nanoseconds =
+          sequence_build_metrics.reduction_kernel_local_reduction_nanoseconds;
+      frame_metrics.sequence_reduction_kernel_merge_nanoseconds =
+          sequence_build_metrics.reduction_kernel_merge_nanoseconds;
       frame_metrics.sequence_candidate_pushes =
           sequence_build_metrics.candidate_pushes;
       frame_metrics.sequence_candidate_pops =
@@ -1006,6 +1023,16 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.regular_pairs;
       frame_metrics.sequence_criticals =
           sequence_build_metrics.criticals;
+      frame_metrics.sequence_reduction_kernel_levels =
+          sequence_build_metrics.reduction_kernel_levels;
+      frame_metrics.sequence_reduction_kernel_rounds =
+          sequence_build_metrics.reduction_kernel_rounds;
+      frame_metrics.sequence_reduction_kernel_facet_kernels =
+          sequence_build_metrics.reduction_kernel_facet_kernels;
+      frame_metrics.sequence_reduction_kernel_reductions =
+          sequence_build_metrics.reduction_kernel_reductions;
+      frame_metrics.sequence_reduction_kernel_perforations =
+          sequence_build_metrics.reduction_kernel_perforations;
     }
 
     const auto pack_start =

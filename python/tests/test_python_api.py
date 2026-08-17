@@ -296,6 +296,21 @@ class PythonApiTest(unittest.TestCase):
             )
             self.assertEqual(flooding_profile.sequence_algorithm, mp.FLOODING_MINMAX_SEQUENCE)
             self.assertGreaterEqual(flooding_profile.estimated_reducer_work, 0)
+            kernel_profile = mp.profile_morse_reference_frame(
+                complex_,
+                algorithm="flooding-reduction-kernel",
+            )
+            self.assertEqual(
+                kernel_profile.sequence_algorithm,
+                mp.FLOODING_REDUCTION_KERNEL_SEQUENCE,
+            )
+            self.assertEqual(
+                kernel_profile.frame_metrics["sequence_reduction_kernel_levels"],
+                complex_.num_levels,
+            )
+            self.assertGreater(
+                kernel_profile.frame_metrics["sequence_reduction_kernel_rounds"], 0
+            )
 
     def test_morse_sequence_algorithm_rejects_unknown_or_reserved_names(self):
         complex_ = edge_complex()

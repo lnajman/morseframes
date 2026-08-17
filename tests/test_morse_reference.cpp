@@ -1010,6 +1010,17 @@ void test_flooding_reduction_kernel_on_shared_facets() {
       complex, strategy);
   assert_same_barcode(result,
                       morseframes::compute_standard_z2_persistence(complex));
+
+  auto input = morseframes::MorseReferenceFrameBuilder(complex, true)
+                   .build_flooding_reduction_kernel_reduction_input();
+  const auto& metrics = input.frame_metrics;
+  assert(metrics.sequence_reduction_kernel_levels == 1);
+  assert(metrics.sequence_reduction_kernel_rounds > 0);
+  assert(metrics.sequence_reduction_kernel_facet_kernels > 0);
+  assert(metrics.sequence_reduction_kernel_reductions ==
+         metrics.sequence_regular_pairs);
+  assert(metrics.sequence_reduction_kernel_perforations ==
+         metrics.sequence_criticals);
 }
 
 void test_instrumentation_metrics() {

@@ -307,6 +307,9 @@ class MorseReferenceProfile:
     estimated_reducer_work: int
     profile_seconds: float
     metrics: dict[str, object] = field(default_factory=dict, repr=False, compare=False)
+    frame_metrics: dict[str, object] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     @property
     def critical_ratio(self) -> float:
@@ -4346,6 +4349,7 @@ def _make_morse_reference_profile(payload: dict[str, object]) -> MorseReferenceP
         estimated_reducer_work=int(payload["estimated_reducer_work"]),
         profile_seconds=profile_seconds,
         metrics=metrics,  # type: ignore[arg-type]
+        frame_metrics=frame_metrics,  # type: ignore[arg-type]
     )
 
 
@@ -4468,12 +4472,21 @@ def _profile_morse_reference_frame_python(
         "sequence_emit_nanoseconds": 0,
         "sequence_callback_nanoseconds": 0,
         "sequence_replay_nanoseconds": 0,
+        "sequence_reduction_kernel_facet_nanoseconds": 0,
+        "sequence_reduction_kernel_core_nanoseconds": 0,
+        "sequence_reduction_kernel_local_reduction_nanoseconds": 0,
+        "sequence_reduction_kernel_merge_nanoseconds": 0,
         "sequence_candidate_pushes": 0,
         "sequence_candidate_pops": 0,
         "sequence_stale_candidate_skips": 0,
         "sequence_level_mismatch_skips": 0,
         "sequence_regular_pairs": 0,
         "sequence_criticals": 0,
+        "sequence_reduction_kernel_levels": 0,
+        "sequence_reduction_kernel_rounds": 0,
+        "sequence_reduction_kernel_facet_kernels": 0,
+        "sequence_reduction_kernel_reductions": 0,
+        "sequence_reduction_kernel_perforations": 0,
         "final_live_nonempty_annotations": full_reference_nonempty,
         "final_live_total_annotation_size": full_reference_total,
         "peak_live_nonempty_annotations": full_reference_nonempty,
@@ -4577,12 +4590,21 @@ def _empty_frame_metrics() -> dict[str, object]:
         "sequence_emit_nanoseconds": 0,
         "sequence_callback_nanoseconds": 0,
         "sequence_replay_nanoseconds": 0,
+        "sequence_reduction_kernel_facet_nanoseconds": 0,
+        "sequence_reduction_kernel_core_nanoseconds": 0,
+        "sequence_reduction_kernel_local_reduction_nanoseconds": 0,
+        "sequence_reduction_kernel_merge_nanoseconds": 0,
         "sequence_candidate_pushes": 0,
         "sequence_candidate_pops": 0,
         "sequence_stale_candidate_skips": 0,
         "sequence_level_mismatch_skips": 0,
         "sequence_regular_pairs": 0,
         "sequence_criticals": 0,
+        "sequence_reduction_kernel_levels": 0,
+        "sequence_reduction_kernel_rounds": 0,
+        "sequence_reduction_kernel_facet_kernels": 0,
+        "sequence_reduction_kernel_reductions": 0,
+        "sequence_reduction_kernel_perforations": 0,
         "final_live_nonempty_annotations": 0,
         "final_live_total_annotation_size": 0,
         "peak_live_nonempty_annotations": 0,

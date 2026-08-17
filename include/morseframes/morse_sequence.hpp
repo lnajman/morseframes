@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "morseframes/complex_view.hpp"
+#include "morseframes/reduction_kernel.hpp"
 
 #ifndef MORSE_ENABLE_SEQUENCE_BUILDER_CHECKS
 #define MORSE_ENABLE_SEQUENCE_BUILDER_CHECKS 0
@@ -46,12 +47,21 @@ struct MorseSequenceBuildMetrics {
   std::uint64_t emit_nanoseconds = 0;
   std::uint64_t callback_nanoseconds = 0;
   std::uint64_t replay_nanoseconds = 0;
+  std::uint64_t reduction_kernel_facet_nanoseconds = 0;
+  std::uint64_t reduction_kernel_core_nanoseconds = 0;
+  std::uint64_t reduction_kernel_local_reduction_nanoseconds = 0;
+  std::uint64_t reduction_kernel_merge_nanoseconds = 0;
   std::size_t candidate_pushes = 0;
   std::size_t candidate_pops = 0;
   std::size_t stale_candidate_skips = 0;
   std::size_t level_mismatch_skips = 0;
   std::size_t regular_pairs = 0;
   std::size_t criticals = 0;
+  std::size_t reduction_kernel_levels = 0;
+  std::size_t reduction_kernel_rounds = 0;
+  std::size_t reduction_kernel_facet_kernels = 0;
+  std::size_t reduction_kernel_reductions = 0;
+  std::size_t reduction_kernel_perforations = 0;
 };
 
 class MorseSequence {
@@ -1118,182 +1128,19 @@ class FSequenceBuilder {
     return build_flooding_with_step_callback(FloodingScheme::Maximal,
                                              std::forward<StepCallback>(on_step));
   }
-
   template <typename StepCallback>
   MorseSequence build_flooding_reduction_kernel_with_step_callback(
       StepCallback&& on_step) const {
     const std::size_t n = complex_.size();
     MorseSequence sequence(n);
     auto&& callback = on_step;
-
-    struct LevelEvent {
-      MorseStepType type = MorseStepType::Critical;
-      SimplexId sigma = kInvalidSimplex;
-      SimplexId tau = kInvalidSimplex;
-    };
-
-    auto is_face_of = [&](SimplexId face, SimplexId simplex) {
-      const auto& face_vertices = complex_.vertices(face);
-      const auto& simplex_vertices = complex_.vertices(simplex);
-      return std::includes(simplex_vertices.begin(), simplex_vertices.end(),
-                           face_vertices.begin(), face_vertices.end());
-    };
-
-    std::vector<std::uint8_t> active(n, 0);
-    std::vector<std::uint8_t> locally_removed(n, 0);
-    std::vector<std::uint8_t> protected_core(n, 0);
-    std::vector<std::uint8_t> round_removed(n, 0);
+    ReductionKernelWorkspace<ComplexView> workspace(complex_);
 
     for (LevelId level = 0; level < complex_.num_levels(); ++level) {
-      const auto& bucket = complex_.simplices_of_level(level);
-      std::vector<LevelEvent> decreasing_events;
-      decreasing_events.reserve(bucket.size());
-      std::size_t remaining = bucket.size();
-
-      for (SimplexId simplex : bucket) {
-        active[simplex] = 1;
-      }
-
-      auto active_facets = [&]() {
-        std::vector<SimplexId> facets;
-        for (SimplexId simplex : bucket) {
-          if (!active[simplex]) {
-            continue;
-          }
-          bool has_active_coface = false;
-          for (SimplexId coface : complex_.coboundary(simplex)) {
-            if (simplex_level(coface) == level && active[coface]) {
-              has_active_coface = true;
-              break;
-            }
-          }
-          if (!has_active_coface) {
-            facets.push_back(simplex);
-          }
-        }
-        return facets;
-      };
-
-      while (remaining > 0) {
-        bool kernel_round_changed = false;
-
-        do {
-          kernel_round_changed = false;
-          const auto facets = active_facets();
-          std::fill(round_removed.begin(), round_removed.end(), 0);
-          std::vector<LevelEvent> round_events;
-
-          for (SimplexId facet : facets) {
-            std::vector<SimplexId> cell;
-            for (SimplexId simplex : bucket) {
-              if (active[simplex] && is_face_of(simplex, facet)) {
-                cell.push_back(simplex);
-              }
-            }
-
-            std::fill(locally_removed.begin(), locally_removed.end(), 0);
-            std::fill(protected_core.begin(), protected_core.end(), 0);
-
-            // Proposition 1 identifies the core with the attachment: a face
-            // of this facet cell is protected exactly when another current
-            // facet contains it.
-            for (SimplexId simplex : cell) {
-              for (SimplexId other_facet : facets) {
-                if (other_facet != facet && is_face_of(simplex, other_facet)) {
-                  protected_core[simplex] = 1;
-                  break;
-                }
-              }
-            }
-
-            while (true) {
-              SimplexId reduction_sigma = kInvalidSimplex;
-              SimplexId reduction_tau = kInvalidSimplex;
-
-              // The bucket order is dimension/lexicographic, providing a
-              // deterministic choice when several local kernels exist.
-              for (SimplexId sigma : cell) {
-                if (locally_removed[sigma] || protected_core[sigma]) {
-                  continue;
-                }
-                SimplexId unique_coface = kInvalidSimplex;
-                std::size_t coface_count = 0;
-                for (SimplexId coface : complex_.coboundary(sigma)) {
-                  if (!active[coface] || locally_removed[coface] ||
-                      !is_face_of(coface, facet)) {
-                    continue;
-                  }
-                  unique_coface = coface;
-                  ++coface_count;
-                  if (coface_count > 1) {
-                    break;
-                  }
-                }
-                if (coface_count == 1 && !protected_core[unique_coface]) {
-                  reduction_sigma = sigma;
-                  reduction_tau = unique_coface;
-                  break;
-                }
-              }
-
-              if (reduction_sigma == kInvalidSimplex) {
-                break;
-              }
-              locally_removed[reduction_sigma] = 1;
-              locally_removed[reduction_tau] = 1;
-              round_events.push_back(LevelEvent{
-                  MorseStepType::RegularPair, reduction_sigma, reduction_tau});
-            }
-
-            for (SimplexId simplex : cell) {
-              if (!locally_removed[simplex]) {
-                continue;
-              }
-              if (round_removed[simplex]) {
-                throw std::logic_error(
-                    "Facet reduction kernels removed the same simplex twice.");
-              }
-              round_removed[simplex] = 1;
-            }
-          }
-
-          for (SimplexId simplex : bucket) {
-            if (!round_removed[simplex]) {
-              continue;
-            }
-            if (!active[simplex]) {
-              throw std::logic_error(
-                  "A reduction-kernel round removed an inactive simplex.");
-            }
-            active[simplex] = 0;
-            --remaining;
-            kernel_round_changed = true;
-          }
-          decreasing_events.insert(decreasing_events.end(),
-                                   round_events.begin(), round_events.end());
-        } while (kernel_round_changed);
-
-        if (remaining == 0) {
-          break;
-        }
-
-        const auto facets = active_facets();
-        if (facets.empty()) {
-          throw std::logic_error(
-              "A nonempty reduction-kernel section has no facet.");
-        }
-        // Facets inherit the bucket's deterministic dimension/lexicographic
-        // order.  A perforation is used only after kernel stability.
-        const SimplexId critical = facets.front();
-        decreasing_events.push_back(
-            LevelEvent{MorseStepType::Critical, critical, kInvalidSimplex});
-        active[critical] = 0;
-        --remaining;
-      }
-
-      for (std::size_t index = decreasing_events.size(); index > 0; --index) {
-        const auto& event = decreasing_events[index - 1];
-        if (event.type == MorseStepType::Critical) {
+      const auto events = workspace.compute_level(level);
+      for (std::size_t index = events.size(); index > 0; --index) {
+        const auto& event = events[index - 1];
+        if (event.type == ReductionKernelEventType::Perforation) {
           sequence.add_critical(event.sigma, level);
           if (sequence_metrics_ != nullptr) {
             ++sequence_metrics_->criticals;
@@ -1306,6 +1153,26 @@ class FSequenceBuilder {
         }
         callback(sequence, sequence.steps().back());
       }
+    }
+
+    if (sequence_metrics_ != nullptr) {
+      const auto& kernel_metrics = workspace.metrics();
+      sequence_metrics_->reduction_kernel_facet_nanoseconds =
+          kernel_metrics.facet_nanoseconds;
+      sequence_metrics_->reduction_kernel_core_nanoseconds =
+          kernel_metrics.core_nanoseconds;
+      sequence_metrics_->reduction_kernel_local_reduction_nanoseconds =
+          kernel_metrics.local_reduction_nanoseconds;
+      sequence_metrics_->reduction_kernel_merge_nanoseconds =
+          kernel_metrics.merge_nanoseconds;
+      sequence_metrics_->reduction_kernel_levels = kernel_metrics.levels;
+      sequence_metrics_->reduction_kernel_rounds = kernel_metrics.kernel_rounds;
+      sequence_metrics_->reduction_kernel_facet_kernels =
+          kernel_metrics.facet_kernels;
+      sequence_metrics_->reduction_kernel_reductions =
+          kernel_metrics.reductions;
+      sequence_metrics_->reduction_kernel_perforations =
+          kernel_metrics.perforations;
     }
 
     return sequence;

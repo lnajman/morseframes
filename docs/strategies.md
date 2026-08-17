@@ -213,6 +213,12 @@ This version is intentionally sequential. It establishes deterministic output
 and validation coverage before facet-level and level-level parallel execution
 are introduced.
 
+The mutable active-set computation lives in `ReductionKernelWorkspace`, behind
+the read-only `ComplexView` interface. Frame profiles report the number of
+processed levels, kernel rounds, facet kernels, reductions, and perforations,
+as well as time spent finding facets, protecting cores, computing local
+reductions, and merging a round.
+
 ## Flooding Variants
 
 Canonical names:

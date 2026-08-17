@@ -315,12 +315,30 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
   result["sequence_emit_nanoseconds"] = metrics.sequence_emit_nanoseconds;
   result["sequence_callback_nanoseconds"] = metrics.sequence_callback_nanoseconds;
   result["sequence_replay_nanoseconds"] = metrics.sequence_replay_nanoseconds;
+  result["sequence_reduction_kernel_facet_nanoseconds"] =
+      metrics.sequence_reduction_kernel_facet_nanoseconds;
+  result["sequence_reduction_kernel_core_nanoseconds"] =
+      metrics.sequence_reduction_kernel_core_nanoseconds;
+  result["sequence_reduction_kernel_local_reduction_nanoseconds"] =
+      metrics.sequence_reduction_kernel_local_reduction_nanoseconds;
+  result["sequence_reduction_kernel_merge_nanoseconds"] =
+      metrics.sequence_reduction_kernel_merge_nanoseconds;
   result["sequence_candidate_pushes"] = metrics.sequence_candidate_pushes;
   result["sequence_candidate_pops"] = metrics.sequence_candidate_pops;
   result["sequence_stale_candidate_skips"] = metrics.sequence_stale_candidate_skips;
   result["sequence_level_mismatch_skips"] = metrics.sequence_level_mismatch_skips;
   result["sequence_regular_pairs"] = metrics.sequence_regular_pairs;
   result["sequence_criticals"] = metrics.sequence_criticals;
+  result["sequence_reduction_kernel_levels"] =
+      metrics.sequence_reduction_kernel_levels;
+  result["sequence_reduction_kernel_rounds"] =
+      metrics.sequence_reduction_kernel_rounds;
+  result["sequence_reduction_kernel_facet_kernels"] =
+      metrics.sequence_reduction_kernel_facet_kernels;
+  result["sequence_reduction_kernel_reductions"] =
+      metrics.sequence_reduction_kernel_reductions;
+  result["sequence_reduction_kernel_perforations"] =
+      metrics.sequence_reduction_kernel_perforations;
   result["final_live_nonempty_annotations"] = metrics.final_live_nonempty_annotations;
   result["final_live_total_annotation_size"] = metrics.final_live_total_annotation_size;
   result["peak_live_nonempty_annotations"] = metrics.peak_live_nonempty_annotations;
@@ -1048,36 +1066,27 @@ nb::dict profile_morse_reference_frame_core(const PyFilteredComplex& complex,
   }
 
   const auto started = Clock::now();
+  morseframes::MorseReferenceFrameBuilder frame_builder(complex.complex, true);
   morseframes::MorseReferenceReductionInput input =
       normalized_algorithm == "plateau-greedy"
-          ? morseframes::MorseReferenceFrameBuilder(complex.complex)
-                .build_plateau_greedy_reduction_input()
+          ? frame_builder.build_plateau_greedy_reduction_input()
       : normalized_algorithm == "same-level-reduction"
-          ? morseframes::MorseReferenceFrameBuilder(complex.complex)
-                .build_same_level_reduction_reduction_input()
+          ? frame_builder.build_same_level_reduction_reduction_input()
       : normalized_algorithm == "f-max"
-          ? morseframes::MorseReferenceFrameBuilder(complex.complex)
-                .build_f_max_reduction_input()
+          ? frame_builder.build_f_max_reduction_input()
       : normalized_algorithm == "f-min"
-          ? morseframes::MorseReferenceFrameBuilder(complex.complex)
-                .build_f_min_reduction_input()
+          ? frame_builder.build_f_min_reduction_input()
       : normalized_algorithm == "flooding-max"
-          ? morseframes::MorseReferenceFrameBuilder(complex.complex)
-                .build_flooding_max_reduction_input()
+          ? frame_builder.build_flooding_max_reduction_input()
       : normalized_algorithm == "flooding-min"
-          ? morseframes::MorseReferenceFrameBuilder(complex.complex)
-                .build_flooding_min_reduction_input()
+          ? frame_builder.build_flooding_min_reduction_input()
       : normalized_algorithm == "flooding-reduction-kernel"
-          ? morseframes::MorseReferenceFrameBuilder(complex.complex)
-                .build_flooding_reduction_kernel_reduction_input()
+          ? frame_builder.build_flooding_reduction_kernel_reduction_input()
       : normalized_algorithm == "flooding-minmax"
-          ? morseframes::MorseReferenceFrameBuilder(complex.complex)
-                .build_flooding_minmax_reduction_input()
+          ? frame_builder.build_flooding_minmax_reduction_input()
       : normalized_algorithm == "flooding-maxmin"
-          ? morseframes::MorseReferenceFrameBuilder(complex.complex)
-                .build_flooding_maxmin_reduction_input()
-          : morseframes::MorseReferenceFrameBuilder(complex.complex)
-                .build_saturated_reduction_input();
+          ? frame_builder.build_flooding_maxmin_reduction_input()
+          : frame_builder.build_saturated_reduction_input();
   auto profile = morseframes::profile_morse_reference_reduction_input(complex.complex, input);
   const auto finished = Clock::now();
 

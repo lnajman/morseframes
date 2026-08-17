@@ -61,6 +61,7 @@ inline Morse_sequence_strategy from_kernel_strategy(morseframes::MorseSequenceSt
       return Morse_sequence_strategy::PLATEAU_GREEDY;
     case morseframes::MorseSequenceStrategy::Saturated:
     case morseframes::MorseSequenceStrategy::ProcessLowerStars:
+    case morseframes::MorseSequenceStrategy::ProcessLowerStarsParallel:
     case morseframes::MorseSequenceStrategy::FloodingMax:
     case morseframes::MorseSequenceStrategy::FloodingMin:
     case morseframes::MorseSequenceStrategy::FloodingReductionKernel:

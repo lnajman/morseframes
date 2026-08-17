@@ -27,6 +27,7 @@ The Python API accepts these canonical names:
 "saturated"
 "f-max"
 "process-lower-stars"
+"process-lower-stars-parallel"
 "f-min"
 "same-level-reduction"
 "plateau-greedy"
@@ -143,6 +144,19 @@ tie-broken.
 The strategy is available from the C++ and Python APIs but is not part of the
 default automatic strategy portfolio, because that portfolio accepts arbitrary
 filtered complexes.
+
+The parallel variant has canonical name:
+
+```python
+"process-lower-stars-parallel"
+```
+
+It computes disjoint lower-star kernels concurrently with the package's bounded
+executor, then replays their local events in increasing maximum-vertex order.
+Consequently it produces exactly the same deterministic sequence as
+`process-lower-stars`. In Python, `max_workers` limits the complete worker
+budget, including the calling thread. The pure-Python fallback accepts the same
+name and preserves the result but currently executes the kernels sequentially.
 
 ## F-Min
 

@@ -154,6 +154,14 @@ class PythonApiTest(unittest.TestCase):
         sequence = mp.compute_morse_sequence(
             complex_, algorithm="process-lower-stars"
         )
+        parallel_sequences = tuple(
+            mp.compute_morse_sequence(
+                complex_,
+                algorithm="process-lower-stars-parallel",
+                max_workers=workers,
+            )
+            for workers in (1, 2, 4)
+        )
         actual = tuple(
             (
                 step.type,
@@ -171,6 +179,18 @@ class PythonApiTest(unittest.TestCase):
                 (mp.CRITICAL, (0, 1), None),
             ),
         )
+        for parallel_sequence in parallel_sequences:
+            self.assertEqual(parallel_sequence.steps, sequence.steps)
+            self.assertEqual(
+                parallel_sequence.algorithm,
+                mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+            )
+        parallel_frame = mp.compute_morse_sequence_and_reference_map(
+            complex_,
+            algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+            max_workers=2,
+        )
+        self.assertEqual(parallel_frame.sequence.steps, sequence.steps)
         self.assertEqual(
             mp.compute_morse_persistence(
                 complex_, algorithm="process-lower-star"
@@ -179,6 +199,10 @@ class PythonApiTest(unittest.TestCase):
         )
         self.assertIn(
             mp.PROCESS_LOWER_STARS_SEQUENCE, mp.MORSE_SEQUENCE_ALGORITHMS
+        )
+        self.assertIn(
+            mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+            mp.MORSE_SEQUENCE_ALGORITHMS,
         )
         self.assertNotIn(
             mp.PROCESS_LOWER_STARS_SEQUENCE,
@@ -1259,10 +1283,16 @@ class PythonApiTest(unittest.TestCase):
                 sequence = mp.compute_morse_sequence(
                     complex_, algorithm=mp.PROCESS_LOWER_STARS_SEQUENCE
                 )
+                parallel_sequence = mp.compute_morse_sequence(
+                    complex_,
+                    algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+                    max_workers=4,
+                )
                 self.assertEqual(
                     tuple((step.type, step.sigma, step.tau) for step in sequence.steps),
                     process_lower_stars_oracle(complex_),
                 )
+                self.assertEqual(parallel_sequence.steps, sequence.steps)
                 self.assertEqual(
                     mp.compute_morse_persistence(complex_, sequence).finite_barcode(),
                     mp.compute_standard_persistence(complex_).finite_barcode(),

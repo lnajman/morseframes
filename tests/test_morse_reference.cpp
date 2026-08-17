@@ -732,12 +732,40 @@ void test_process_lower_stars_triangle_boundary() {
   assert(steps[3].type == morseframes::MorseStepType::Critical &&
          steps[3].sigma == e01);
 
+  morseframes::MorseSequenceBuildMetrics parallel_metrics;
+  const auto parallel_sequence =
+      FSequenceBuilder(complex, &parallel_metrics)
+          .build_process_lower_stars_parallel(2);
+  morseframes::validate_morse_sequence(complex, parallel_sequence);
+  assert(sequence.steps().size() == parallel_sequence.steps().size());
+  for (std::size_t index = 0; index < sequence.steps().size(); ++index) {
+    const auto& expected = sequence.steps()[index];
+    const auto& actual = parallel_sequence.steps()[index];
+    assert(expected.type == actual.type);
+    assert(expected.sigma == actual.sigma);
+    assert(expected.tau == actual.tau);
+    assert(expected.level == actual.level);
+  }
+  assert(parallel_metrics.process_lower_stars_executor_workers == 2);
+  assert(parallel_metrics.process_lower_stars_parallel_tasks == 2);
+  const auto single_worker_sequence =
+      FSequenceBuilder(complex).build_process_lower_stars_parallel(1);
+  assert(single_worker_sequence.steps().size() == sequence.steps().size());
+  for (std::size_t index = 0; index < sequence.steps().size(); ++index) {
+    assert(single_worker_sequence.steps()[index].type == steps[index].type);
+    assert(single_worker_sequence.steps()[index].sigma == steps[index].sigma);
+    assert(single_worker_sequence.steps()[index].tau == steps[index].tau);
+  }
+
   const auto diagram = morseframes::compute_morse_reference_persistence(
       complex, morseframes::MorseSequenceStrategy::ProcessLowerStars);
   assert_same_barcode(diagram,
                       morseframes::compute_standard_z2_persistence(complex));
   assert(morseframes::morse_sequence_strategy_from_name("process-lower-stars") ==
          morseframes::MorseSequenceStrategy::ProcessLowerStars);
+  assert(morseframes::morse_sequence_strategy_from_name(
+             "process-lower-stars-parallel") ==
+         morseframes::MorseSequenceStrategy::ProcessLowerStarsParallel);
 
   FilteredSimplicialComplex tied_vertices;
   add_simplex(tied_vertices, {0}, 0.0);

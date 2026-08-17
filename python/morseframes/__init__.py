@@ -54,6 +54,7 @@ SAME_LEVEL_REDUCTION_SEQUENCE = "same-level-reduction"
 COREDUCTION_SEQUENCE = SAME_LEVEL_REDUCTION_SEQUENCE
 F_MAX_SEQUENCE = "f-max"
 PROCESS_LOWER_STARS_SEQUENCE = "process-lower-stars"
+PROCESS_LOWER_STARS_PARALLEL_SEQUENCE = "process-lower-stars-parallel"
 F_MIN_SEQUENCE = "f-min"
 FLOODING_MAX_SEQUENCE = "flooding-max"
 FLOODING_MIN_SEQUENCE = "flooding-min"
@@ -71,6 +72,7 @@ MORSE_SEQUENCE_ALGORITHMS = (
     SAME_LEVEL_REDUCTION_SEQUENCE,
     F_MAX_SEQUENCE,
     PROCESS_LOWER_STARS_SEQUENCE,
+    PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
     F_MIN_SEQUENCE,
     FLOODING_MAX_SEQUENCE,
     FLOODING_MIN_SEQUENCE,
@@ -1178,7 +1180,10 @@ def compute_morse_sequence(
         return _compute_coreduction_morse_sequence_python(complex_, algorithm=algorithm)
     if algorithm in {F_MAX_SEQUENCE, F_MIN_SEQUENCE}:
         return _compute_paper_f_morse_sequence_python(complex_, algorithm=algorithm)
-    if algorithm == PROCESS_LOWER_STARS_SEQUENCE:
+    if algorithm in {
+        PROCESS_LOWER_STARS_SEQUENCE,
+        PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+    }:
         return _compute_process_lower_stars_morse_sequence_python(
             complex_, algorithm=algorithm
         )
@@ -2269,7 +2274,10 @@ def compute_morse_sequence_and_reference_map(
             sequence=sequence,
             _references=compute_reference_map(complex_, sequence, algorithm=algorithm),
         )
-    if algorithm == PROCESS_LOWER_STARS_SEQUENCE:
+    if algorithm in {
+        PROCESS_LOWER_STARS_SEQUENCE,
+        PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+    }:
         sequence = _compute_process_lower_stars_morse_sequence_python(
             complex_, algorithm=algorithm
         )
@@ -4941,6 +4949,9 @@ def _normalize_morse_sequence_algorithm(algorithm: str) -> str:
         "process-lower-star": PROCESS_LOWER_STARS_SEQUENCE,
         "lower-stars": PROCESS_LOWER_STARS_SEQUENCE,
         "lower-star": PROCESS_LOWER_STARS_SEQUENCE,
+        "process-lower-star-parallel": PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+        "parallel-lower-stars": PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+        "lower-stars-parallel": PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
         "paper-min": F_MIN_SEQUENCE,
         "min-s-f": F_MIN_SEQUENCE,
         "min-sf": F_MIN_SEQUENCE,
@@ -4993,9 +5004,12 @@ def _normalize_parallel_max_workers(
         raise TypeError("max_workers must be an integer or None.")
     if max_workers < 1:
         raise ValueError("max_workers must be positive.")
-    if algorithm != FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE:
+    if algorithm not in {
+        FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+        PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+    }:
         raise ValueError(
-            "max_workers is only valid for flooding-reduction-kernel-parallel."
+            "max_workers is only valid for a parallel Morse sequence strategy."
         )
     return max_workers
 
@@ -5562,6 +5576,7 @@ __all__ = [
     "FilteredComplexBuilder",
     "F_MAX_SEQUENCE",
     "PROCESS_LOWER_STARS_SEQUENCE",
+    "PROCESS_LOWER_STARS_PARALLEL_SEQUENCE",
     "F_MIN_SEQUENCE",
     "FLOODING_MAXMIN_SEQUENCE",
     "FLOODING_MAX_SEQUENCE",

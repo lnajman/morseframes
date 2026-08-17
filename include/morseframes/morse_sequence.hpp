@@ -78,6 +78,8 @@ struct MorseSequenceBuildMetrics {
   std::size_t reduction_kernel_essential_parallel_tasks = 0;
   std::size_t reduction_kernel_aggregation_rounds = 0;
   std::size_t reduction_kernel_aggregation_parallel_tasks = 0;
+  std::size_t process_lower_stars_executor_workers = 1;
+  std::size_t process_lower_stars_parallel_tasks = 0;
 };
 
 class MorseSequence {
@@ -332,6 +334,12 @@ class FSequenceBuilder {
   MorseSequence build_process_lower_stars() const {
     return build_process_lower_stars_with_step_callback(
         [](const MorseSequence&, const MorseStep&) {});
+  }
+
+  MorseSequence build_process_lower_stars_parallel(
+      std::size_t max_workers = 0) const {
+    return build_process_lower_stars_parallel_with_step_callback(
+        [](const MorseSequence&, const MorseStep&) {}, max_workers);
   }
 
   // Decreasing Min(S,F)-style dual construction.  Events are removed from the
@@ -979,6 +987,20 @@ class FSequenceBuilder {
   template <typename StepCallback>
   MorseSequence build_process_lower_stars_with_step_callback(
       StepCallback&& on_step) const {
+    return build_process_lower_stars_with_execution_options(
+        std::forward<StepCallback>(on_step), 1);
+  }
+
+  template <typename StepCallback>
+  MorseSequence build_process_lower_stars_parallel_with_step_callback(
+      StepCallback&& on_step, std::size_t max_workers = 0) const {
+    return build_process_lower_stars_with_execution_options(
+        std::forward<StepCallback>(on_step), max_workers);
+  }
+
+  template <typename StepCallback>
+  MorseSequence build_process_lower_stars_with_execution_options(
+      StepCallback&& on_step, std::size_t max_workers) const {
     const std::size_t n = complex_.size();
     MorseSequence sequence(n);
     auto&& callback = on_step;
@@ -1192,8 +1214,37 @@ class FSequenceBuilder {
       }
     };
 
-    for (std::size_t star_rank = 0; star_rank < vertex_order.size(); ++star_rank) {
-      process_lower_star(star_rank);
+    BoundedTaskExecutor executor(max_workers);
+    const std::size_t worker_count = executor.worker_count();
+    if (sequence_metrics_ != nullptr) {
+      sequence_metrics_->process_lower_stars_executor_workers = worker_count;
+    }
+    if (worker_count <= 1 || vertex_order.size() <= 1) {
+      for (std::size_t star_rank = 0; star_rank < vertex_order.size(); ++star_rank) {
+        process_lower_star(star_rank);
+      }
+    } else {
+      const std::size_t task_count = std::min(worker_count, vertex_order.size());
+      const std::size_t chunk_size =
+          (vertex_order.size() + task_count - 1) / task_count;
+      std::vector<std::future<void>> futures;
+      futures.reserve(task_count);
+      for (std::size_t first = 0; first < vertex_order.size();
+           first += chunk_size) {
+        const std::size_t last =
+            std::min(vertex_order.size(), first + chunk_size);
+        futures.push_back(executor.submit([first, last, &process_lower_star]() {
+          for (std::size_t star_rank = first; star_rank < last; ++star_rank) {
+            process_lower_star(star_rank);
+          }
+        }));
+      }
+      if (sequence_metrics_ != nullptr) {
+        sequence_metrics_->process_lower_stars_parallel_tasks = futures.size();
+      }
+      for (auto& future : futures) {
+        executor.get(future);
+      }
     }
 
     for (const auto& events : events_by_star) {

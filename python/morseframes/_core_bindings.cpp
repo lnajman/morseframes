@@ -504,6 +504,11 @@ std::string normalize_sequence_algorithm(std::string algorithm) {
       algorithm == "lower-star") {
     return "process-lower-stars";
   }
+  if (algorithm == "process-lower-star-parallel" ||
+      algorithm == "parallel-lower-stars" ||
+      algorithm == "lower-stars-parallel") {
+    return "process-lower-stars-parallel";
+  }
   if (algorithm == "f-min" ||
       algorithm == "paper-min" ||
       algorithm == "min-s-f" ||
@@ -550,6 +555,7 @@ bool is_implemented_sequence_algorithm(const std::string& algorithm) {
   return algorithm == "saturated" ||
          algorithm == "f-max" ||
          algorithm == "process-lower-stars" ||
+         algorithm == "process-lower-stars-parallel" ||
          algorithm == "f-min" ||
          algorithm == "plateau-greedy" ||
          algorithm == "same-level-reduction" ||
@@ -583,6 +589,11 @@ PyMorseSequence build_sequence(const PyFilteredComplex& complex,
   if (normalized == "process-lower-stars") {
     return PyMorseSequence{
         morseframes::FSequenceBuilder(complex.complex).build_process_lower_stars()};
+  }
+  if (normalized == "process-lower-stars-parallel") {
+    return PyMorseSequence{
+        morseframes::FSequenceBuilder(complex.complex)
+            .build_process_lower_stars_parallel(max_workers)};
   }
   if (normalized == "f-min") {
     return PyMorseSequence{morseframes::FSequenceBuilder(complex.complex).build_f_min()};
@@ -640,6 +651,11 @@ PyMorseReferenceFrame build_sequence_and_reference_map(const PyFilteredComplex& 
     return PyMorseReferenceFrame{
         morseframes::MorseReferenceFrameBuilder(complex.complex)
             .build_process_lower_stars()};
+  }
+  if (normalized == "process-lower-stars-parallel") {
+    return PyMorseReferenceFrame{
+        morseframes::MorseReferenceFrameBuilder(complex.complex)
+            .build_process_lower_stars_parallel(max_workers)};
   }
   if (normalized == "f-min") {
     return PyMorseReferenceFrame{
@@ -704,6 +720,9 @@ PyMorseCoreferenceFrame build_sequence_and_coreference_map(const PyFilteredCompl
           ? morseframes::FSequenceBuilder(complex.complex).build_f_max()
       : normalized == "process-lower-stars"
           ? morseframes::FSequenceBuilder(complex.complex).build_process_lower_stars()
+      : normalized == "process-lower-stars-parallel"
+          ? morseframes::FSequenceBuilder(complex.complex)
+                .build_process_lower_stars_parallel(max_workers)
       : normalized == "f-min"
           ? morseframes::FSequenceBuilder(complex.complex).build_f_min()
       : normalized == "flooding-max"
@@ -1011,6 +1030,9 @@ nb::dict benchmark_morse_reference_core(const PyFilteredComplex& complex,
         : normalized_algorithm == "process-lower-stars"
             ? morseframes::MorseReferenceFrameBuilder(complex.complex)
                   .build_process_lower_stars_reduction_input()
+        : normalized_algorithm == "process-lower-stars-parallel"
+            ? morseframes::MorseReferenceFrameBuilder(complex.complex)
+                  .build_process_lower_stars_parallel_reduction_input()
         : normalized_algorithm == "f-min"
             ? morseframes::MorseReferenceFrameBuilder(complex.complex)
                   .build_f_min_reduction_input()
@@ -1064,6 +1086,9 @@ nb::dict benchmark_morse_reference_core(const PyFilteredComplex& complex,
         : normalized_algorithm == "process-lower-stars"
             ? morseframes::FSequenceBuilder(complex.complex)
                   .build_process_lower_stars()
+        : normalized_algorithm == "process-lower-stars-parallel"
+            ? morseframes::FSequenceBuilder(complex.complex)
+                  .build_process_lower_stars_parallel()
         : normalized_algorithm == "f-min"
             ? morseframes::FSequenceBuilder(complex.complex).build_f_min()
         : normalized_algorithm == "flooding-max"
@@ -1146,6 +1171,8 @@ nb::dict profile_morse_reference_frame_core(const PyFilteredComplex& complex,
           ? frame_builder.build_f_max_reduction_input()
       : normalized_algorithm == "process-lower-stars"
           ? frame_builder.build_process_lower_stars_reduction_input()
+      : normalized_algorithm == "process-lower-stars-parallel"
+          ? frame_builder.build_process_lower_stars_parallel_reduction_input()
       : normalized_algorithm == "f-min"
           ? frame_builder.build_f_min_reduction_input()
       : normalized_algorithm == "flooding-max"

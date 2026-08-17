@@ -56,6 +56,7 @@ F_MAX_SEQUENCE = "f-max"
 F_MIN_SEQUENCE = "f-min"
 FLOODING_MAX_SEQUENCE = "flooding-max"
 FLOODING_MIN_SEQUENCE = "flooding-min"
+FLOODING_REDUCTION_KERNEL_SEQUENCE = "flooding-reduction-kernel"
 FLOODING_MINMAX_SEQUENCE = "flooding-minmax"
 FLOODING_MAXMIN_SEQUENCE = "flooding-maxmin"
 AUTO_MORSE_SEQUENCE_ALGORITHM = "auto"
@@ -68,6 +69,7 @@ MORSE_SEQUENCE_ALGORITHMS = (
     F_MIN_SEQUENCE,
     FLOODING_MAX_SEQUENCE,
     FLOODING_MIN_SEQUENCE,
+    FLOODING_REDUCTION_KERNEL_SEQUENCE,
     FLOODING_MINMAX_SEQUENCE,
     FLOODING_MAXMIN_SEQUENCE,
 )
@@ -78,6 +80,7 @@ DEFAULT_MORSE_ALGORITHM_PORTFOLIO = (
     SAME_LEVEL_REDUCTION_SEQUENCE,
     FLOODING_MAX_SEQUENCE,
     FLOODING_MIN_SEQUENCE,
+    FLOODING_REDUCTION_KERNEL_SEQUENCE,
     FLOODING_MINMAX_SEQUENCE,
     FLOODING_MAXMIN_SEQUENCE,
     PLATEAU_GREEDY_SEQUENCE,
@@ -1164,9 +1167,14 @@ def compute_morse_sequence(
     if algorithm in {
         FLOODING_MAX_SEQUENCE,
         FLOODING_MIN_SEQUENCE,
+        FLOODING_REDUCTION_KERNEL_SEQUENCE,
         FLOODING_MINMAX_SEQUENCE,
         FLOODING_MAXMIN_SEQUENCE,
     }:
+        if algorithm == FLOODING_REDUCTION_KERNEL_SEQUENCE:
+            return _compute_flooding_reduction_kernel_morse_sequence_python(
+                complex_, algorithm=algorithm
+            )
         return _compute_flooding_morse_sequence_python(complex_, algorithm=algorithm)
 
     n = complex_.size
@@ -1698,6 +1706,143 @@ def _compute_paper_f_morse_sequence_python(
     )
 
 
+def _compute_flooding_reduction_kernel_morse_sequence_python(
+    complex_: FilteredComplex,
+    *,
+    algorithm: str,
+) -> MorseSequence:
+    n = complex_.size
+    steps: list[MorseStep] = []
+    critical_simplices: list[int] = []
+    critical_index_of_simplex = [-1] * n
+    paired_with: list[int | None] = [None] * n
+    inserted = [False] * n
+    vertices = [set(complex_.vertices(simplex)) for simplex in range(n)]
+
+    def is_face_of(face: int, simplex: int) -> bool:
+        return vertices[face].issubset(vertices[simplex])
+
+    def emit_critical(simplex: int, level: int) -> None:
+        if inserted[simplex]:
+            raise RuntimeError("Tried to insert a reduction-kernel critical twice.")
+        for face in complex_.boundary(simplex):
+            if not inserted[face]:
+                raise RuntimeError("Reduction-kernel critical has a missing boundary face.")
+        critical_index_of_simplex[simplex] = len(critical_simplices)
+        critical_simplices.append(simplex)
+        steps.append(MorseStep(CRITICAL, simplex, None, level))
+        inserted[simplex] = True
+
+    def emit_pair(sigma: int, tau: int, level: int) -> None:
+        if inserted[sigma] or inserted[tau]:
+            raise RuntimeError("Tried to insert a reduction-kernel pair twice.")
+        for face in complex_.boundary(tau):
+            if face != sigma and not inserted[face]:
+                raise RuntimeError("Reduction-kernel pair has a missing boundary face.")
+        steps.append(MorseStep(REGULAR_PAIR, sigma, tau, level))
+        paired_with[sigma] = tau
+        paired_with[tau] = sigma
+        inserted[sigma] = True
+        inserted[tau] = True
+
+    for level in range(complex_.num_levels):
+        bucket = complex_.simplices_of_level(level)
+        active = {simplex for simplex in bucket}
+        decreasing_events: list[tuple[str, int, int | None]] = []
+
+        def facets() -> list[int]:
+            return [
+                simplex
+                for simplex in bucket
+                if simplex in active
+                and not any(
+                    coface in active and complex_.level(coface) == level
+                    for coface in complex_.coboundary(simplex)
+                )
+            ]
+
+        while active:
+            changed = True
+            while changed:
+                changed = False
+                current_facets = facets()
+                round_removed: set[int] = set()
+                round_events: list[tuple[str, int, int | None]] = []
+
+                for facet in current_facets:
+                    cell = [
+                        simplex
+                        for simplex in bucket
+                        if simplex in active and is_face_of(simplex, facet)
+                    ]
+                    protected = {
+                        simplex
+                        for simplex in cell
+                        if any(
+                            other != facet and is_face_of(simplex, other)
+                            for other in current_facets
+                        )
+                    }
+                    locally_removed: set[int] = set()
+
+                    while True:
+                        pair: tuple[int, int] | None = None
+                        for sigma in cell:
+                            if sigma in locally_removed or sigma in protected:
+                                continue
+                            cofaces = [
+                                coface
+                                for coface in complex_.coboundary(sigma)
+                                if coface in active
+                                and coface not in locally_removed
+                                and is_face_of(coface, facet)
+                            ]
+                            if len(cofaces) == 1 and cofaces[0] not in protected:
+                                pair = (sigma, cofaces[0])
+                                break
+                        if pair is None:
+                            break
+                        sigma, tau = pair
+                        locally_removed.update((sigma, tau))
+                        round_events.append((REGULAR_PAIR, sigma, tau))
+
+                    overlap = round_removed.intersection(locally_removed)
+                    if overlap:
+                        raise RuntimeError(
+                            "Facet reduction kernels removed the same simplex twice."
+                        )
+                    round_removed.update(locally_removed)
+
+                if round_removed:
+                    active.difference_update(round_removed)
+                    decreasing_events.extend(round_events)
+                    changed = True
+
+            if active:
+                current_facets = facets()
+                if not current_facets:
+                    raise RuntimeError("A nonempty reduction-kernel section has no facet.")
+                critical = current_facets[0]
+                decreasing_events.append((CRITICAL, critical, None))
+                active.remove(critical)
+
+        for kind, sigma, tau in reversed(decreasing_events):
+            if kind == CRITICAL:
+                emit_critical(sigma, level)
+            else:
+                if tau is None:
+                    raise RuntimeError("Reduction-kernel pair is missing its upper simplex.")
+                emit_pair(sigma, tau, level)
+
+    return MorseSequence(
+        steps=tuple(steps),
+        critical_simplices=tuple(critical_simplices),
+        critical_index_of_simplex=tuple(critical_index_of_simplex),
+        paired_with=tuple(paired_with),
+        algorithm=algorithm,
+    )
+
+
 def _compute_flooding_morse_sequence_python(
     complex_: FilteredComplex,
     *,
@@ -1951,10 +2096,17 @@ def compute_morse_sequence_and_reference_map(
     if algorithm in {
         FLOODING_MAX_SEQUENCE,
         FLOODING_MIN_SEQUENCE,
+        FLOODING_REDUCTION_KERNEL_SEQUENCE,
         FLOODING_MINMAX_SEQUENCE,
         FLOODING_MAXMIN_SEQUENCE,
     }:
-        sequence = _compute_flooding_morse_sequence_python(complex_, algorithm=algorithm)
+        sequence = (
+            _compute_flooding_reduction_kernel_morse_sequence_python(
+                complex_, algorithm=algorithm
+            )
+            if algorithm == FLOODING_REDUCTION_KERNEL_SEQUENCE
+            else _compute_flooding_morse_sequence_python(complex_, algorithm=algorithm)
+        )
         return MorseReferenceFrame(
             sequence=sequence,
             _references=compute_reference_map(complex_, sequence, algorithm=algorithm),
@@ -4563,6 +4715,8 @@ def _normalize_morse_sequence_algorithm(algorithm: str) -> str:
         "maximal-flooding": FLOODING_MAX_SEQUENCE,
         "flooding-minimal": FLOODING_MIN_SEQUENCE,
         "minimal-flooding": FLOODING_MIN_SEQUENCE,
+        "reduction-kernel": FLOODING_REDUCTION_KERNEL_SEQUENCE,
+        "parallel-reduction-kernel": FLOODING_REDUCTION_KERNEL_SEQUENCE,
         "flooding-minmax": FLOODING_MINMAX_SEQUENCE,
         "flooding-min-max": FLOODING_MINMAX_SEQUENCE,
         "min-max": FLOODING_MINMAX_SEQUENCE,
@@ -5128,6 +5282,7 @@ __all__ = [
     "FLOODING_MAX_SEQUENCE",
     "FLOODING_MINMAX_SEQUENCE",
     "FLOODING_MIN_SEQUENCE",
+    "FLOODING_REDUCTION_KERNEL_SEQUENCE",
     "PersistenceBenchmark",
     "MorseComplex",
     "MorseCoreferenceFrame",

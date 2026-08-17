@@ -30,6 +30,7 @@ The Python API accepts these canonical names:
 "plateau-greedy"
 "flooding-max"
 "flooding-min"
+"flooding-reduction-kernel"
 "flooding-minmax"
 "flooding-maxmin"
 ```
@@ -186,6 +187,31 @@ continue.
 
 This is experimental. It is meant to test whether local plateau information can
 reduce the number of critical simplexes or the later reducer work.
+
+## Flooding Reduction Kernel
+
+Canonical name:
+
+```python
+"flooding-reduction-kernel"
+```
+
+This strategy is the sequential reference implementation of the
+reduction-kernel algorithm. It processes one filtration section at a time. In
+each kernel round it computes the current facets, protects the core of every
+facet cell, greedily reduces each cell to a deterministic local kernel, and
+merges the independent local reductions. Kernel rounds repeat until stable;
+only then is one current facet perforated. Decreasing events are reversed to
+produce the increasing flooding sequence used by the rest of MorseFrames.
+
+The implementation uses Proposition 1's attachment characterization: a face of
+a facet cell belongs to its protected core exactly when it is contained in a
+different current facet. When several local kernels are possible, candidates
+are selected in the level bucket's dimension/lexicographic order.
+
+This version is intentionally sequential. It establishes deterministic output
+and validation coverage before facet-level and level-level parallel execution
+are introduced.
 
 ## Flooding Variants
 

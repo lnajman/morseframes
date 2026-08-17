@@ -212,6 +212,8 @@ PersistenceDiagram run_reference(FilteredSimplicialComplex& complex) {
   };
   check_flooding_sequence(FSequenceBuilder(complex).build_flooding_max());
   check_flooding_sequence(FSequenceBuilder(complex).build_flooding_min());
+  check_flooding_sequence(
+      FSequenceBuilder(complex).build_flooding_reduction_kernel());
   check_flooding_sequence(FSequenceBuilder(complex).build_flooding_minmax());
   check_flooding_sequence(FSequenceBuilder(complex).build_flooding_maxmin());
   check_flooding_sequence(FSequenceBuilder(complex).build_f_max());
@@ -823,6 +825,7 @@ void test_morse_reference_prime_field_persistence() {
   check_sequence(FSequenceBuilder(complex).build_f_min());
   check_sequence(FSequenceBuilder(complex).build_flooding_max());
   check_sequence(FSequenceBuilder(complex).build_flooding_min());
+  check_sequence(FSequenceBuilder(complex).build_flooding_reduction_kernel());
   check_sequence(FSequenceBuilder(complex).build_flooding_minmax());
   check_sequence(FSequenceBuilder(complex).build_flooding_maxmin());
 
@@ -869,6 +872,7 @@ void test_morse_coreference_prime_field_persistence() {
   check_sequence(FSequenceBuilder(complex).build_f_min());
   check_sequence(FSequenceBuilder(complex).build_flooding_max());
   check_sequence(FSequenceBuilder(complex).build_flooding_min());
+  check_sequence(FSequenceBuilder(complex).build_flooding_reduction_kernel());
   check_sequence(FSequenceBuilder(complex).build_flooding_minmax());
   check_sequence(FSequenceBuilder(complex).build_flooding_maxmin());
 
@@ -983,6 +987,31 @@ void test_lower_star_three_dimensional_pair() {
   assert(count_essential_dim(diagram, 0) == 1);
 }
 
+void test_flooding_reduction_kernel_on_shared_facets() {
+  FilteredSimplicialComplex complex;
+  const std::vector<double> values = {0.0, 0.0, 0.0, 0.0};
+  add_weighted_closure(complex, {0, 1, 2}, values);
+  add_weighted_closure(complex, {1, 2, 3}, values);
+  complex.finalize();
+
+  const auto sequence =
+      FSequenceBuilder(complex).build_flooding_reduction_kernel();
+  morseframes::validate_morse_sequence(complex, sequence);
+  assert(sequence.critical_simplices().size() == 1);
+
+  const auto strategy =
+      morseframes::morse_sequence_strategy_from_name("reduction-kernel");
+  assert(strategy ==
+         morseframes::MorseSequenceStrategy::FloodingReductionKernel);
+  assert(std::string(morseframes::morse_sequence_strategy_name(strategy)) ==
+         "flooding-reduction-kernel");
+
+  const auto result = morseframes::compute_morse_reference_persistence(
+      complex, strategy);
+  assert_same_barcode(result,
+                      morseframes::compute_standard_z2_persistence(complex));
+}
+
 void test_instrumentation_metrics() {
   FilteredSimplicialComplex complex;
   add_simplex(complex, {0}, 0.0);
@@ -1044,6 +1073,7 @@ int main() {
   test_same_level_filled_tetrahedron_is_contractible();
   test_lower_star_two_triangle_strip();
   test_lower_star_three_dimensional_pair();
+  test_flooding_reduction_kernel_on_shared_facets();
   test_instrumentation_metrics();
 
   std::cout << "All Morse persistence prototype tests passed.\n";

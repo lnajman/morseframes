@@ -201,12 +201,18 @@ class PythonApiTest(unittest.TestCase):
         flooding_maxmin_sequence = mp.compute_morse_sequence(complex_, algorithm="flooding-maxmin")
         flooding_max_sequence = mp.compute_morse_sequence(complex_, algorithm="flooding-maximal")
         flooding_min_sequence = mp.compute_morse_sequence(complex_, algorithm="minimal-flooding")
+        reduction_kernel_sequence = mp.compute_morse_sequence(
+            complex_, algorithm="reduction-kernel"
+        )
         f_max_sequence = mp.compute_morse_sequence(complex_, algorithm="paper-max")
         f_min_sequence = mp.compute_morse_sequence(complex_, algorithm="min-s-f")
         diagram = mp.compute_morse_persistence(complex_, algorithm="saturated")
         greedy_diagram = mp.compute_morse_persistence(complex_, algorithm="plateau-greedy")
         coreduction_diagram = mp.compute_morse_persistence(complex_, algorithm="same-level-reduction")
         flooding_diagram = mp.compute_morse_persistence(complex_, algorithm="flooding-minmax")
+        reduction_kernel_diagram = mp.compute_morse_persistence(
+            complex_, algorithm="flooding-reduction-kernel"
+        )
         f_max_diagram = mp.compute_morse_persistence(complex_, algorithm="f-max")
         f_min_diagram = mp.compute_morse_persistence(complex_, algorithm="f-min")
         result = mp.compute_persistence_adaptive(complex_, sequence_algorithm="saturated")
@@ -218,6 +224,10 @@ class PythonApiTest(unittest.TestCase):
         self.assertIn(mp.COREDUCTION_SEQUENCE, mp.MORSE_SEQUENCE_ALGORITHMS)
         self.assertIn(mp.FLOODING_MAX_SEQUENCE, mp.MORSE_SEQUENCE_ALGORITHMS)
         self.assertIn(mp.FLOODING_MIN_SEQUENCE, mp.MORSE_SEQUENCE_ALGORITHMS)
+        self.assertIn(
+            mp.FLOODING_REDUCTION_KERNEL_SEQUENCE,
+            mp.MORSE_SEQUENCE_ALGORITHMS,
+        )
         self.assertIn(mp.FLOODING_MINMAX_SEQUENCE, mp.MORSE_SEQUENCE_ALGORITHMS)
         self.assertIn(mp.FLOODING_MAXMIN_SEQUENCE, mp.MORSE_SEQUENCE_ALGORITHMS)
         self.assertIn(mp.FLOODING_MAX_SEQUENCE, mp.DEFAULT_MORSE_ALGORITHM_PORTFOLIO)
@@ -236,6 +246,10 @@ class PythonApiTest(unittest.TestCase):
         self.assertEqual(flooding_maxmin_sequence.algorithm, mp.FLOODING_MAXMIN_SEQUENCE)
         self.assertEqual(flooding_max_sequence.algorithm, mp.FLOODING_MAX_SEQUENCE)
         self.assertEqual(flooding_min_sequence.algorithm, mp.FLOODING_MIN_SEQUENCE)
+        self.assertEqual(
+            reduction_kernel_sequence.algorithm,
+            mp.FLOODING_REDUCTION_KERNEL_SEQUENCE,
+        )
         self.assertEqual(f_max_sequence.algorithm, mp.F_MAX_SEQUENCE)
         self.assertEqual(f_min_sequence.algorithm, mp.F_MIN_SEQUENCE)
         self.assertEqual(sequence.steps, alias_sequence.steps)
@@ -243,6 +257,9 @@ class PythonApiTest(unittest.TestCase):
         self.assertEqual(greedy_diagram.finite_barcode(), ((0, 0.0, 1.0),))
         self.assertEqual(coreduction_diagram.finite_barcode(), ((0, 0.0, 1.0),))
         self.assertEqual(flooding_diagram.finite_barcode(), ((0, 0.0, 1.0),))
+        self.assertEqual(
+            reduction_kernel_diagram.finite_barcode(), ((0, 0.0, 1.0),)
+        )
         self.assertEqual(f_max_diagram.finite_barcode(), ((0, 0.0, 1.0),))
         self.assertEqual(f_min_diagram.finite_barcode(), ((0, 0.0, 1.0),))
         self.assertEqual(result.sequence.algorithm, mp.SATURATED_SEQUENCE)

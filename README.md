@@ -28,7 +28,7 @@ The current codebase contains:
 
 - a header-only C++ core for filtered simplicial complexes;
 - several Morse sequence strategies, including saturated, F-Min, F-Max,
-  same-level reduction, plateau-greedy, and flooding variants;
+  same-level reduction, plateau-greedy, reduction-kernel, and flooding variants;
 - reference and coreference map construction;
 - Morse-reference and Morse-coreference persistence;
 - ordinary persistence for validation;

@@ -483,6 +483,10 @@ std::string normalize_sequence_algorithm(std::string algorithm) {
   if (algorithm == "flooding-minimal" || algorithm == "minimal-flooding") {
     return "flooding-min";
   }
+  if (algorithm == "reduction-kernel" ||
+      algorithm == "parallel-reduction-kernel") {
+    return "flooding-reduction-kernel";
+  }
   if (algorithm == "flooding" ||
       algorithm == "flooding-minmax" || algorithm == "flooding-min-max" ||
       algorithm == "min-max" || algorithm == "minmax") {
@@ -503,6 +507,7 @@ bool is_implemented_sequence_algorithm(const std::string& algorithm) {
          algorithm == "same-level-reduction" ||
          algorithm == "flooding-max" ||
          algorithm == "flooding-min" ||
+         algorithm == "flooding-reduction-kernel" ||
          algorithm == "flooding-minmax" ||
          algorithm == "flooding-maxmin";
 }
@@ -533,6 +538,11 @@ PyMorseSequence build_sequence(const PyFilteredComplex& complex,
   }
   if (normalized == "flooding-min") {
     return PyMorseSequence{morseframes::FSequenceBuilder(complex.complex).build_flooding_min()};
+  }
+  if (normalized == "flooding-reduction-kernel") {
+    return PyMorseSequence{
+        morseframes::FSequenceBuilder(complex.complex)
+            .build_flooding_reduction_kernel()};
   }
   if (normalized == "flooding-minmax") {
     return PyMorseSequence{morseframes::FSequenceBuilder(complex.complex).build_flooding_minmax()};
@@ -578,6 +588,11 @@ PyMorseReferenceFrame build_sequence_and_reference_map(const PyFilteredComplex& 
     return PyMorseReferenceFrame{
         morseframes::MorseReferenceFrameBuilder(complex.complex).build_flooding_min()};
   }
+  if (normalized == "flooding-reduction-kernel") {
+    return PyMorseReferenceFrame{
+        morseframes::MorseReferenceFrameBuilder(complex.complex)
+            .build_flooding_reduction_kernel()};
+  }
   if (normalized == "flooding-minmax") {
     return PyMorseReferenceFrame{
         morseframes::MorseReferenceFrameBuilder(complex.complex).build_flooding_minmax()};
@@ -622,6 +637,9 @@ PyMorseCoreferenceFrame build_sequence_and_coreference_map(const PyFilteredCompl
           ? morseframes::FSequenceBuilder(complex.complex).build_flooding_max()
       : normalized == "flooding-min"
           ? morseframes::FSequenceBuilder(complex.complex).build_flooding_min()
+      : normalized == "flooding-reduction-kernel"
+          ? morseframes::FSequenceBuilder(complex.complex)
+                .build_flooding_reduction_kernel()
       : normalized == "flooding-minmax"
           ? morseframes::FSequenceBuilder(complex.complex).build_flooding_minmax()
       : normalized == "flooding-maxmin"
@@ -923,6 +941,9 @@ nb::dict benchmark_morse_reference_core(const PyFilteredComplex& complex,
         : normalized_algorithm == "flooding-min"
             ? morseframes::MorseReferenceFrameBuilder(complex.complex)
                   .build_flooding_min_reduction_input()
+        : normalized_algorithm == "flooding-reduction-kernel"
+            ? morseframes::MorseReferenceFrameBuilder(complex.complex)
+                  .build_flooding_reduction_kernel_reduction_input()
         : normalized_algorithm == "flooding-minmax"
             ? morseframes::MorseReferenceFrameBuilder(complex.complex)
                   .build_flooding_minmax_reduction_input()
@@ -964,6 +985,9 @@ nb::dict benchmark_morse_reference_core(const PyFilteredComplex& complex,
             ? morseframes::FSequenceBuilder(complex.complex).build_flooding_max()
         : normalized_algorithm == "flooding-min"
             ? morseframes::FSequenceBuilder(complex.complex).build_flooding_min()
+        : normalized_algorithm == "flooding-reduction-kernel"
+            ? morseframes::FSequenceBuilder(complex.complex)
+                  .build_flooding_reduction_kernel()
         : normalized_algorithm == "flooding-minmax"
             ? morseframes::FSequenceBuilder(complex.complex).build_flooding_minmax()
         : normalized_algorithm == "flooding-maxmin"
@@ -1043,6 +1067,9 @@ nb::dict profile_morse_reference_frame_core(const PyFilteredComplex& complex,
       : normalized_algorithm == "flooding-min"
           ? morseframes::MorseReferenceFrameBuilder(complex.complex)
                 .build_flooding_min_reduction_input()
+      : normalized_algorithm == "flooding-reduction-kernel"
+          ? morseframes::MorseReferenceFrameBuilder(complex.complex)
+                .build_flooding_reduction_kernel_reduction_input()
       : normalized_algorithm == "flooding-minmax"
           ? morseframes::MorseReferenceFrameBuilder(complex.complex)
                 .build_flooding_minmax_reduction_input()

@@ -515,6 +515,18 @@ class MorseReferenceFrameBuilder {
     return MorseReferenceFrame{std::move(sequence), std::move(references)};
   }
 
+  MorseReferenceFrame build_flooding_reduction_kernel() const {
+    std::vector<Annotation> references(complex_.size());
+    Annotation reference_update_scratch;
+    auto sequence =
+        FSequenceBuilder(complex_).build_flooding_reduction_kernel_with_step_callback(
+            [&](const MorseSequence& sequence, const MorseStep& step) {
+              update_reference_for_step(sequence, step, references,
+                                        reference_update_scratch);
+            });
+    return MorseReferenceFrame{std::move(sequence), std::move(references)};
+  }
+
   MorseReferenceFrame build_flooding_minmax() const {
     std::vector<Annotation> references(complex_.size());
     Annotation reference_update_scratch;
@@ -586,6 +598,16 @@ class MorseReferenceFrameBuilder {
     return build_reduction_input_with([&](auto&& step_callback, auto* sequence_metrics) {
       return FSequenceBuilder(complex_, sequence_metrics).build_flooding_min_with_step_callback(
           std::forward<decltype(step_callback)>(step_callback));
+    });
+  }
+
+  MorseReferenceReductionInput
+  build_flooding_reduction_kernel_reduction_input() const {
+    return build_reduction_input_with([&](auto&& step_callback,
+                                          auto* sequence_metrics) {
+      return FSequenceBuilder(complex_, sequence_metrics)
+          .build_flooding_reduction_kernel_with_step_callback(
+              std::forward<decltype(step_callback)>(step_callback));
     });
   }
 

@@ -50,8 +50,10 @@ struct MorseSequenceBuildMetrics {
   std::uint64_t callback_nanoseconds = 0;
   std::uint64_t replay_nanoseconds = 0;
   std::uint64_t reduction_kernel_facet_nanoseconds = 0;
+  std::uint64_t reduction_kernel_essential_nanoseconds = 0;
   std::uint64_t reduction_kernel_core_nanoseconds = 0;
   std::uint64_t reduction_kernel_local_reduction_nanoseconds = 0;
+  std::uint64_t reduction_kernel_aggregation_nanoseconds = 0;
   std::uint64_t reduction_kernel_merge_nanoseconds = 0;
   std::size_t candidate_pushes = 0;
   std::size_t candidate_pops = 0;
@@ -69,6 +71,10 @@ struct MorseSequenceBuildMetrics {
   std::size_t reduction_kernel_parallel_level_batches = 0;
   std::size_t reduction_kernel_max_parallel_levels = 0;
   std::size_t reduction_kernel_executor_workers = 1;
+  std::size_t reduction_kernel_facet_discovery_parallel_tasks = 0;
+  std::size_t reduction_kernel_essential_parallel_tasks = 0;
+  std::size_t reduction_kernel_aggregation_rounds = 0;
+  std::size_t reduction_kernel_aggregation_parallel_tasks = 0;
 };
 
 class MorseSequence {
@@ -1229,10 +1235,14 @@ class FSequenceBuilder {
     if (sequence_metrics_ != nullptr) {
       sequence_metrics_->reduction_kernel_facet_nanoseconds =
           kernel_metrics.facet_nanoseconds;
+      sequence_metrics_->reduction_kernel_essential_nanoseconds =
+          kernel_metrics.essential_nanoseconds;
       sequence_metrics_->reduction_kernel_core_nanoseconds =
           kernel_metrics.core_nanoseconds;
       sequence_metrics_->reduction_kernel_local_reduction_nanoseconds =
           kernel_metrics.local_reduction_nanoseconds;
+      sequence_metrics_->reduction_kernel_aggregation_nanoseconds =
+          kernel_metrics.aggregation_nanoseconds;
       sequence_metrics_->reduction_kernel_merge_nanoseconds =
           kernel_metrics.merge_nanoseconds;
       sequence_metrics_->reduction_kernel_levels = kernel_metrics.levels;
@@ -1253,6 +1263,14 @@ class FSequenceBuilder {
           kernel_metrics.max_parallel_levels;
       sequence_metrics_->reduction_kernel_executor_workers =
           kernel_metrics.executor_workers;
+      sequence_metrics_->reduction_kernel_facet_discovery_parallel_tasks =
+          kernel_metrics.facet_discovery_parallel_tasks;
+      sequence_metrics_->reduction_kernel_essential_parallel_tasks =
+          kernel_metrics.essential_parallel_tasks;
+      sequence_metrics_->reduction_kernel_aggregation_rounds =
+          kernel_metrics.aggregation_rounds;
+      sequence_metrics_->reduction_kernel_aggregation_parallel_tasks =
+          kernel_metrics.aggregation_parallel_tasks;
     }
 
     return sequence;

@@ -210,26 +210,33 @@ a facet cell belongs to its protected core exactly when it is contained in a
 different current facet. When several local kernels are possible, candidates
 are selected in the level bucket's dimension/lexicographic order.
 
-This version is intentionally sequential. It establishes deterministic output
-and validation coverage before facet-level and level-level parallel execution
-are introduced.
+This version is intentionally sequential and serves as the deterministic
+reference for every parallel execution policy.
 
 The mutable active-set computation lives in `ReductionKernelWorkspace`, behind
 the read-only `ComplexView` interface. Frame profiles report the number of
 processed levels, kernel rounds, facet kernels, reductions, and perforations,
-as well as time spent finding facets, protecting cores, computing local
-reductions, and merging a round.
+as well as time spent finding facets, computing facet incidence, constructing
+cells, computing local reductions, aggregating facet results, and merging a
+round.
 
 The companion strategy `"flooding-reduction-kernel-parallel"` uses the same
 workspace and local-kernel routine. Facet cells in a round are evaluated in
 bounded batches against one immutable active-set snapshot. A reusable task pool
 is shared by level and facet work; waiting tasks cooperatively execute queued
 work, allowing nested parallelism without deadlock or repeated thread creation.
-The configured worker count is a strict global budget. Results are collected in
-facet order, and independent level streams are assembled in increasing level
-order, so the parallel and sequential strategies produce the same deterministic
-Morse sequence while implementing the two parallel dimensions of Algorithms 1
-and 2. The pure-Python fallback preserves the same semantics sequentially.
+The current facets are discovered in parallel in level-bucket chunks. Facet
+incidence for each active face is then computed in parallel once per round and
+saturated at two; incidence greater than one identifies the protected core
+directly, without rescanning every other facet inside every local kernel. Facet
+results are combined by an order-preserving binary tree.
+
+The configured worker count is a strict global budget. Independent level
+streams are assembled in increasing level order, and every tree node appends
+its right event stream after its left stream, so the parallel and sequential
+strategies produce the same deterministic Morse sequence while implementing
+the parallel phases of Algorithms 1 and 2. The pure-Python fallback preserves
+the same semantics sequentially.
 
 The native worker budget defaults to the available hardware concurrency and can
 be fixed for reproducible runs:

@@ -1086,6 +1086,9 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   assert(parallel_metrics.reduction_kernel_parallel_batches > 0);
   assert(parallel_metrics.reduction_kernel_max_parallel_facets == 2);
   assert(parallel_metrics.reduction_kernel_executor_workers == 2);
+  assert(parallel_metrics.reduction_kernel_facet_discovery_parallel_tasks > 0);
+  assert(parallel_metrics.reduction_kernel_essential_parallel_tasks > 0);
+  assert(parallel_metrics.reduction_kernel_aggregation_rounds > 0);
   const auto single_worker_sequence =
       FSequenceBuilder(complex).build_flooding_reduction_kernel_parallel(1);
   morseframes::validate_morse_sequence(complex, single_worker_sequence);
@@ -1119,6 +1122,29 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   morseframes::validate_morse_sequence(multilevel_complex,
                                        automatic_parallel_sequence);
   assert_same_sequence(multilevel_sequence, automatic_parallel_sequence);
+
+  FilteredSimplicialComplex four_facet_complex;
+  for (std::uint32_t edge = 0; edge < 4; ++edge) {
+    const std::uint32_t first = 2 * edge;
+    add_simplex(four_facet_complex, {first}, 0.0);
+    add_simplex(four_facet_complex, {first + 1}, 0.0);
+    add_simplex(four_facet_complex, {first, first + 1}, 0.0);
+  }
+  four_facet_complex.finalize();
+  const auto four_facet_sequence =
+      FSequenceBuilder(four_facet_complex).build_flooding_reduction_kernel();
+  morseframes::MorseSequenceBuildMetrics four_facet_parallel_metrics;
+  const auto four_facet_parallel_sequence =
+      FSequenceBuilder(four_facet_complex, &four_facet_parallel_metrics)
+          .build_flooding_reduction_kernel_parallel_with_step_callback(
+              [](const morseframes::MorseSequence&,
+                 const morseframes::MorseStep&) {},
+              4);
+  morseframes::validate_morse_sequence(four_facet_complex,
+                                       four_facet_parallel_sequence);
+  assert_same_sequence(four_facet_sequence, four_facet_parallel_sequence);
+  assert(four_facet_parallel_metrics
+             .reduction_kernel_aggregation_parallel_tasks > 0);
 
   const auto strategy =
       morseframes::morse_sequence_strategy_from_name("reduction-kernel");

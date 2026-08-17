@@ -317,10 +317,14 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
   result["sequence_replay_nanoseconds"] = metrics.sequence_replay_nanoseconds;
   result["sequence_reduction_kernel_facet_nanoseconds"] =
       metrics.sequence_reduction_kernel_facet_nanoseconds;
+  result["sequence_reduction_kernel_essential_nanoseconds"] =
+      metrics.sequence_reduction_kernel_essential_nanoseconds;
   result["sequence_reduction_kernel_core_nanoseconds"] =
       metrics.sequence_reduction_kernel_core_nanoseconds;
   result["sequence_reduction_kernel_local_reduction_nanoseconds"] =
       metrics.sequence_reduction_kernel_local_reduction_nanoseconds;
+  result["sequence_reduction_kernel_aggregation_nanoseconds"] =
+      metrics.sequence_reduction_kernel_aggregation_nanoseconds;
   result["sequence_reduction_kernel_merge_nanoseconds"] =
       metrics.sequence_reduction_kernel_merge_nanoseconds;
   result["sequence_candidate_pushes"] = metrics.sequence_candidate_pushes;
@@ -349,6 +353,14 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
       metrics.sequence_reduction_kernel_max_parallel_levels;
   result["sequence_reduction_kernel_executor_workers"] =
       metrics.sequence_reduction_kernel_executor_workers;
+  result["sequence_reduction_kernel_facet_discovery_parallel_tasks"] =
+      metrics.sequence_reduction_kernel_facet_discovery_parallel_tasks;
+  result["sequence_reduction_kernel_essential_parallel_tasks"] =
+      metrics.sequence_reduction_kernel_essential_parallel_tasks;
+  result["sequence_reduction_kernel_aggregation_rounds"] =
+      metrics.sequence_reduction_kernel_aggregation_rounds;
+  result["sequence_reduction_kernel_aggregation_parallel_tasks"] =
+      metrics.sequence_reduction_kernel_aggregation_parallel_tasks;
   result["final_live_nonempty_annotations"] = metrics.final_live_nonempty_annotations;
   result["final_live_total_annotation_size"] = metrics.final_live_total_annotation_size;
   result["peak_live_nonempty_annotations"] = metrics.peak_live_nonempty_annotations;

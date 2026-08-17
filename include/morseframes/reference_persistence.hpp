@@ -95,8 +95,10 @@ struct MorseReferenceFrameMetrics {
   std::uint64_t sequence_callback_nanoseconds = 0;
   std::uint64_t sequence_replay_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_facet_nanoseconds = 0;
+  std::uint64_t sequence_reduction_kernel_essential_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_core_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_local_reduction_nanoseconds = 0;
+  std::uint64_t sequence_reduction_kernel_aggregation_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_merge_nanoseconds = 0;
   std::size_t sequence_candidate_pushes = 0;
   std::size_t sequence_candidate_pops = 0;
@@ -114,6 +116,10 @@ struct MorseReferenceFrameMetrics {
   std::size_t sequence_reduction_kernel_parallel_level_batches = 0;
   std::size_t sequence_reduction_kernel_max_parallel_levels = 0;
   std::size_t sequence_reduction_kernel_executor_workers = 1;
+  std::size_t sequence_reduction_kernel_facet_discovery_parallel_tasks = 0;
+  std::size_t sequence_reduction_kernel_essential_parallel_tasks = 0;
+  std::size_t sequence_reduction_kernel_aggregation_rounds = 0;
+  std::size_t sequence_reduction_kernel_aggregation_parallel_tasks = 0;
   std::size_t final_live_nonempty_annotations = 0;
   std::size_t final_live_total_annotation_size = 0;
   std::size_t peak_live_nonempty_annotations = 0;
@@ -1038,10 +1044,14 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.replay_nanoseconds;
       frame_metrics.sequence_reduction_kernel_facet_nanoseconds =
           sequence_build_metrics.reduction_kernel_facet_nanoseconds;
+      frame_metrics.sequence_reduction_kernel_essential_nanoseconds =
+          sequence_build_metrics.reduction_kernel_essential_nanoseconds;
       frame_metrics.sequence_reduction_kernel_core_nanoseconds =
           sequence_build_metrics.reduction_kernel_core_nanoseconds;
       frame_metrics.sequence_reduction_kernel_local_reduction_nanoseconds =
           sequence_build_metrics.reduction_kernel_local_reduction_nanoseconds;
+      frame_metrics.sequence_reduction_kernel_aggregation_nanoseconds =
+          sequence_build_metrics.reduction_kernel_aggregation_nanoseconds;
       frame_metrics.sequence_reduction_kernel_merge_nanoseconds =
           sequence_build_metrics.reduction_kernel_merge_nanoseconds;
       frame_metrics.sequence_candidate_pushes =
@@ -1076,6 +1086,15 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.reduction_kernel_max_parallel_levels;
       frame_metrics.sequence_reduction_kernel_executor_workers =
           sequence_build_metrics.reduction_kernel_executor_workers;
+      frame_metrics.sequence_reduction_kernel_facet_discovery_parallel_tasks =
+          sequence_build_metrics
+              .reduction_kernel_facet_discovery_parallel_tasks;
+      frame_metrics.sequence_reduction_kernel_essential_parallel_tasks =
+          sequence_build_metrics.reduction_kernel_essential_parallel_tasks;
+      frame_metrics.sequence_reduction_kernel_aggregation_rounds =
+          sequence_build_metrics.reduction_kernel_aggregation_rounds;
+      frame_metrics.sequence_reduction_kernel_aggregation_parallel_tasks =
+          sequence_build_metrics.reduction_kernel_aggregation_parallel_tasks;
     }
 
     const auto pack_start =

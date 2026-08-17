@@ -365,6 +365,32 @@ class PythonApiTest(unittest.TestCase):
                 ],
                 1,
             )
+            self.assertIn(
+                "sequence_reduction_kernel_essential_nanoseconds",
+                parallel_kernel_profile.frame_metrics,
+            )
+            self.assertIn(
+                "sequence_reduction_kernel_aggregation_nanoseconds",
+                parallel_kernel_profile.frame_metrics,
+            )
+            if (
+                parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_executor_workers"
+                ]
+                > 1
+            ):
+                self.assertGreater(
+                    parallel_kernel_profile.frame_metrics[
+                        "sequence_reduction_kernel_facet_discovery_parallel_tasks"
+                    ],
+                    0,
+                )
+                self.assertGreater(
+                    parallel_kernel_profile.frame_metrics[
+                        "sequence_reduction_kernel_essential_parallel_tasks"
+                    ],
+                    0,
+                )
 
     def test_morse_sequence_algorithm_rejects_unknown_or_reserved_names(self):
         complex_ = edge_complex()
@@ -1173,6 +1199,19 @@ class PythonApiTest(unittest.TestCase):
                 complex_ = mp.FilteredComplex.from_simplices(filtration.items())
 
                 mp.assert_matches_standard(complex_)
+                sequential_kernel = mp.compute_morse_sequence(
+                    complex_, algorithm="flooding-reduction-kernel"
+                )
+                for workers in (1, 2, 4):
+                    parallel_kernel = mp.compute_morse_sequence(
+                        complex_,
+                        algorithm="flooding-reduction-kernel-parallel",
+                        max_workers=workers,
+                    )
+                    self.assertEqual(
+                        sequential_kernel.steps,
+                        parallel_kernel.steps,
+                    )
                 if _gudhi_available():
                     mp.assert_matches_gudhi(complex_)
 

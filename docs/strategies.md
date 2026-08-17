@@ -7,8 +7,9 @@ constructors should be easy to add.
 
 All strategies exposed here produce a simplex-wise Morse sequence compatible
 with the input filtration. Regular pairs are restricted to a single filtration
-level, so the methods work directly on complexes with plateaus. No lower-star
-refinement is required by the API.
+level. Most methods work directly on complexes with plateaus;
+`process-lower-stars` deliberately has the stricter classical lower-star input
+contract described below.
 
 A flooding sequence is an `F`-sequence whose order is globally nondecreasing
 with respect to the filtration: once a simplex of value `lambda` has appeared,
@@ -25,6 +26,7 @@ The Python API accepts these canonical names:
 ```python
 "saturated"
 "f-max"
+"process-lower-stars"
 "f-min"
 "same-level-reduction"
 "plateau-greedy"
@@ -109,6 +111,38 @@ otherwise add the next available critical seed.
 This is the implementation corresponding to the `Max(S,F)` style used in our
 experiments. It is a valid `F`-sequence constructor, but it is not necessarily a
 flooding construction.
+
+## ProcessLowerStars
+
+Canonical name:
+
+```python
+"process-lower-stars"
+```
+
+This is the simplicial ProcessLowerStars construction. It orders the vertices
+by increasing filtration value and partitions every simplex into the lower star
+of its unique maximum vertex. Each lower star is then processed independently
+with the forward one-missing-face expansion used by `f-max`. Candidate cells
+are ordered by the Robins key: the ranks of their vertices in decreasing order,
+compared lexicographically.
+
+The current implementation intentionally enforces the classical generic-input
+case:
+
+- every cell is a nonempty simplex;
+- vertex filtration values are injective; and
+- every simplex has the same filtration level as its maximum vertex.
+
+An attachment face of a lower star belongs to an earlier lower star and is
+treated as already inserted. Lower stars are processed in increasing maximum-
+vertex order, so the emitted result is a globally filtration-monotone Morse
+sequence. Invalid inputs raise an error instead of being silently refined or
+tie-broken.
+
+The strategy is available from the C++ and Python APIs but is not part of the
+default automatic strategy portfolio, because that portfolio accepts arbitrary
+filtered complexes.
 
 ## F-Min
 

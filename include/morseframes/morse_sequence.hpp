@@ -1,13 +1,16 @@
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstddef>
+#include <functional>
 #include <future>
 #include <limits>
 #include <memory>
 #include <queue>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -322,6 +325,13 @@ class FSequenceBuilder {
   // coreduction-like pairs before choosing the next seed.
   MorseSequence build_f_max() const {
     return build_f_max_with_step_callback([](const MorseSequence&, const MorseStep&) {});
+  }
+
+  // Simplicial ProcessLowerStars: partition by the unique maximal vertex and
+  // run the forward one-missing-face expansion independently in each star.
+  MorseSequence build_process_lower_stars() const {
+    return build_process_lower_stars_with_step_callback(
+        [](const MorseSequence&, const MorseStep&) {});
   }
 
   // Decreasing Min(S,F)-style dual construction.  Events are removed from the
@@ -960,6 +970,210 @@ class FSequenceBuilder {
       profile_add(&MorseSequenceBuildMetrics::candidate_loop_nanoseconds, scan_start);
       if (order_index < order.size()) {
         emit_critical(order[order_index]);
+      }
+    }
+
+    return sequence;
+  }
+
+  template <typename StepCallback>
+  MorseSequence build_process_lower_stars_with_step_callback(
+      StepCallback&& on_step) const {
+    const std::size_t n = complex_.size();
+    MorseSequence sequence(n);
+    auto&& callback = on_step;
+
+    std::vector<SimplexId> vertex_order;
+    vertex_order.reserve(n);
+    std::unordered_map<VertexId, SimplexId> vertex_simplex;
+    for (SimplexId simplex : complex_.filtration_order()) {
+      if (simplex_dimension(simplex) != 0) {
+        continue;
+      }
+      const auto& vertices = complex_.vertices(simplex);
+      if (vertices.size() != 1) {
+        throw std::invalid_argument(
+            "ProcessLowerStars requires zero-cells with one vertex.");
+      }
+      if (!vertex_simplex.emplace(vertices[0], simplex).second) {
+        throw std::invalid_argument(
+            "ProcessLowerStars requires unique vertex identifiers.");
+      }
+      if (!vertex_order.empty() &&
+          complex_.filtration(vertex_order.back()) ==
+              complex_.filtration(simplex)) {
+        throw std::invalid_argument(
+            "ProcessLowerStars requires injective vertex filtration values.");
+      }
+      vertex_order.push_back(simplex);
+    }
+    if (vertex_order.empty()) {
+      throw std::invalid_argument(
+          "ProcessLowerStars requires at least one zero-cell.");
+    }
+
+    std::unordered_map<VertexId, std::size_t> vertex_rank;
+    vertex_rank.reserve(vertex_order.size());
+    for (std::size_t rank = 0; rank < vertex_order.size(); ++rank) {
+      vertex_rank.emplace(complex_.vertices(vertex_order[rank])[0], rank);
+    }
+
+    std::vector<SimplexId> owner(n, kInvalidSimplex);
+    std::vector<std::vector<SimplexId>> owned(n);
+    std::vector<std::vector<std::size_t>> robins_key(n);
+    for (SimplexId simplex = 0; simplex < n; ++simplex) {
+      const auto& vertices = complex_.vertices(simplex);
+      if (vertices.empty()) {
+        throw std::invalid_argument(
+            "ProcessLowerStars does not support the empty simplex.");
+      }
+      auto& key = robins_key[simplex];
+      key.reserve(vertices.size());
+      SimplexId simplex_owner = kInvalidSimplex;
+      std::size_t owner_rank = 0;
+      for (VertexId vertex : vertices) {
+        const auto rank_it = vertex_rank.find(vertex);
+        const auto simplex_it = vertex_simplex.find(vertex);
+        if (rank_it == vertex_rank.end() || simplex_it == vertex_simplex.end()) {
+          throw std::invalid_argument(
+              "ProcessLowerStars found a cell with an unknown vertex.");
+        }
+        key.push_back(rank_it->second);
+        if (simplex_owner == kInvalidSimplex || rank_it->second > owner_rank) {
+          simplex_owner = simplex_it->second;
+          owner_rank = rank_it->second;
+        }
+      }
+      std::sort(key.begin(), key.end(), std::greater<std::size_t>());
+      if (complex_.level(simplex) != complex_.level(simplex_owner)) {
+        throw std::invalid_argument(
+            "ProcessLowerStars requires the max-vertex lower-star extension.");
+      }
+      owner[simplex] = simplex_owner;
+      owned[simplex_owner].push_back(simplex);
+    }
+
+    struct RobinsMinPriority {
+      const std::vector<std::vector<std::size_t>>* keys = nullptr;
+
+      bool operator()(SimplexId lhs, SimplexId rhs) const {
+        const auto& lhs_key = (*keys)[lhs];
+        const auto& rhs_key = (*keys)[rhs];
+        if (lhs_key != rhs_key) {
+          return std::lexicographical_compare(
+              rhs_key.begin(), rhs_key.end(), lhs_key.begin(), lhs_key.end());
+        }
+        return rhs < lhs;
+      }
+    };
+
+    std::vector<std::uint8_t> inserted(n, 0);
+    std::vector<std::uint32_t> local_boundary_count(n, 0);
+    std::vector<SimplexId> local_boundary_xor(n, 0);
+
+    for (SimplexId star_vertex : vertex_order) {
+      const auto& lower_star = owned[star_vertex];
+      RobinsMinPriority priority{&robins_key};
+      std::priority_queue<SimplexId, std::vector<SimplexId>, RobinsMinPriority>
+          pair_candidates(priority);
+      std::priority_queue<SimplexId, std::vector<SimplexId>, RobinsMinPriority>
+          zero_candidates(priority);
+      std::size_t remaining = lower_star.size();
+
+      auto enqueue = [&](SimplexId simplex) {
+        if (inserted[simplex] || owner[simplex] != star_vertex) {
+          return;
+        }
+        if (local_boundary_count[simplex] == 1) {
+          pair_candidates.push(simplex);
+        } else if (local_boundary_count[simplex] == 0) {
+          zero_candidates.push(simplex);
+        }
+      };
+
+      for (SimplexId simplex : lower_star) {
+        local_boundary_count[simplex] = 0;
+        local_boundary_xor[simplex] = 0;
+        for (SimplexId face : complex_.boundary(simplex)) {
+          if (owner[face] == star_vertex && !inserted[face]) {
+            ++local_boundary_count[simplex];
+            local_boundary_xor[simplex] ^= face;
+          } else if (!inserted[face]) {
+            throw std::logic_error(
+                "A lower-star attachment face was not inserted earlier.");
+          }
+        }
+        enqueue(simplex);
+      }
+
+      auto mark_inserted = [&](SimplexId simplex) {
+        if (inserted[simplex]) {
+          throw std::logic_error(
+              "ProcessLowerStars classified a simplex twice.");
+        }
+        inserted[simplex] = 1;
+        --remaining;
+        for (SimplexId coface : complex_.coboundary(simplex)) {
+          if (owner[coface] != star_vertex || inserted[coface]) {
+            continue;
+          }
+          if (local_boundary_count[coface] == 0) {
+            throw std::logic_error(
+                "ProcessLowerStars local boundary count underflow.");
+          }
+          --local_boundary_count[coface];
+          local_boundary_xor[coface] ^= simplex;
+          enqueue(coface);
+        }
+      };
+
+      while (remaining > 0) {
+        bool paired = false;
+        while (!pair_candidates.empty()) {
+          const SimplexId tau = pair_candidates.top();
+          pair_candidates.pop();
+          if (inserted[tau] || owner[tau] != star_vertex ||
+              local_boundary_count[tau] != 1) {
+            continue;
+          }
+          const SimplexId sigma = local_boundary_xor[tau];
+          if (sigma >= n || inserted[sigma] || owner[sigma] != star_vertex) {
+            continue;
+          }
+          sequence.add_regular_pair(sigma, tau, complex_.level(tau));
+          callback(sequence, sequence.steps().back());
+          mark_inserted(sigma);
+          mark_inserted(tau);
+          if (sequence_metrics_ != nullptr) {
+            ++sequence_metrics_->regular_pairs;
+          }
+          paired = true;
+          break;
+        }
+        if (paired) {
+          continue;
+        }
+
+        SimplexId critical = kInvalidSimplex;
+        while (!zero_candidates.empty()) {
+          const SimplexId candidate = zero_candidates.top();
+          zero_candidates.pop();
+          if (!inserted[candidate] && owner[candidate] == star_vertex &&
+              local_boundary_count[candidate] == 0) {
+            critical = candidate;
+            break;
+          }
+        }
+        if (critical == kInvalidSimplex) {
+          throw std::logic_error(
+              "ProcessLowerStars found no local expansion or critical step.");
+        }
+        sequence.add_critical(critical, complex_.level(critical));
+        callback(sequence, sequence.steps().back());
+        mark_inserted(critical);
+        if (sequence_metrics_ != nullptr) {
+          ++sequence_metrics_->criticals;
+        }
       }
     }
 

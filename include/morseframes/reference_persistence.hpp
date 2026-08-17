@@ -505,6 +505,18 @@ class MorseReferenceFrameBuilder {
     return MorseReferenceFrame{std::move(sequence), std::move(references)};
   }
 
+  MorseReferenceFrame build_process_lower_stars() const {
+    std::vector<Annotation> references(complex_.size());
+    Annotation reference_update_scratch;
+    auto sequence =
+        FSequenceBuilder(complex_).build_process_lower_stars_with_step_callback(
+            [&](const MorseSequence& sequence, const MorseStep& step) {
+              update_reference_for_step(sequence, step, references,
+                                        reference_update_scratch);
+            });
+    return MorseReferenceFrame{std::move(sequence), std::move(references)};
+  }
+
   MorseReferenceFrame build_f_min() const {
     std::vector<Annotation> references(complex_.size());
     Annotation reference_update_scratch;
@@ -613,6 +625,15 @@ class MorseReferenceFrameBuilder {
     return build_reduction_input_with([&](auto&& step_callback, auto* sequence_metrics) {
       return FSequenceBuilder(complex_, sequence_metrics).build_f_max_with_step_callback(
           std::forward<decltype(step_callback)>(step_callback));
+    });
+  }
+
+  MorseReferenceReductionInput build_process_lower_stars_reduction_input() const {
+    return build_reduction_input_with([&](auto&& step_callback,
+                                          auto* sequence_metrics) {
+      return FSequenceBuilder(complex_, sequence_metrics)
+          .build_process_lower_stars_with_step_callback(
+              std::forward<decltype(step_callback)>(step_callback));
     });
   }
 

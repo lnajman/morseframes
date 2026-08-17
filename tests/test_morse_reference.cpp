@@ -702,6 +702,70 @@ void test_f_sequence_builder_accepts_simplex_tree_view() {
   assert(frame.references == references);
 }
 
+void test_process_lower_stars_triangle_boundary() {
+  FilteredSimplicialComplex complex;
+  add_simplex(complex, {0}, 2.0);
+  add_simplex(complex, {1}, 1.0);
+  add_simplex(complex, {2}, 0.0);
+  add_simplex(complex, {0, 1}, 2.0);
+  add_simplex(complex, {0, 2}, 2.0);
+  add_simplex(complex, {1, 2}, 1.0);
+  complex.finalize();
+
+  const auto sequence = FSequenceBuilder(complex).build_process_lower_stars();
+  morseframes::validate_morse_sequence(complex, sequence);
+  assert(sequence.steps().size() == 4);
+
+  const auto v0 = complex.find_simplex({0});
+  const auto v1 = complex.find_simplex({1});
+  const auto v2 = complex.find_simplex({2});
+  const auto e01 = complex.find_simplex({0, 1});
+  const auto e02 = complex.find_simplex({0, 2});
+  const auto e12 = complex.find_simplex({1, 2});
+  const auto& steps = sequence.steps();
+  assert(steps[0].type == morseframes::MorseStepType::Critical &&
+         steps[0].sigma == v2);
+  assert(steps[1].type == morseframes::MorseStepType::RegularPair &&
+         steps[1].sigma == v1 && steps[1].tau == e12);
+  assert(steps[2].type == morseframes::MorseStepType::RegularPair &&
+         steps[2].sigma == v0 && steps[2].tau == e02);
+  assert(steps[3].type == morseframes::MorseStepType::Critical &&
+         steps[3].sigma == e01);
+
+  const auto diagram = morseframes::compute_morse_reference_persistence(
+      complex, morseframes::MorseSequenceStrategy::ProcessLowerStars);
+  assert_same_barcode(diagram,
+                      morseframes::compute_standard_z2_persistence(complex));
+  assert(morseframes::morse_sequence_strategy_from_name("process-lower-stars") ==
+         morseframes::MorseSequenceStrategy::ProcessLowerStars);
+
+  FilteredSimplicialComplex tied_vertices;
+  add_simplex(tied_vertices, {0}, 0.0);
+  add_simplex(tied_vertices, {1}, 0.0);
+  add_simplex(tied_vertices, {0, 1}, 0.0);
+  tied_vertices.finalize();
+  bool rejected_tie = false;
+  try {
+    (void)FSequenceBuilder(tied_vertices).build_process_lower_stars();
+  } catch (const std::invalid_argument&) {
+    rejected_tie = true;
+  }
+  assert(rejected_tie);
+
+  FilteredSimplicialComplex delayed_edge;
+  add_simplex(delayed_edge, {0}, 0.0);
+  add_simplex(delayed_edge, {1}, 1.0);
+  add_simplex(delayed_edge, {0, 1}, 2.0);
+  delayed_edge.finalize();
+  bool rejected_extension = false;
+  try {
+    (void)FSequenceBuilder(delayed_edge).build_process_lower_stars();
+  } catch (const std::invalid_argument&) {
+    rejected_extension = true;
+  }
+  assert(rejected_extension);
+}
+
 void test_one_vertex() {
   FilteredSimplicialComplex complex;
   add_simplex(complex, {0}, 0.0);
@@ -1221,6 +1285,7 @@ int main() {
   test_simplex_tree_builder_explicit_insert_can_be_nonclosed();
   test_filtered_complex_from_simplex_tree_adapter();
   test_f_sequence_builder_accepts_simplex_tree_view();
+  test_process_lower_stars_triangle_boundary();
   test_one_vertex();
   test_reducer_skips_initially_zero_boundaries();
   test_two_vertices_joined_by_later_edge();

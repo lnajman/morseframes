@@ -29,6 +29,19 @@ def filled_triangle_complex():
     )
 
 
+def injective_triangle_boundary_complex():
+    return mp.FilteredComplex.from_simplices(
+        [
+            ([0], 2.0),
+            ([1], 1.0),
+            ([2], 0.0),
+            ([0, 1], 2.0),
+            ([0, 2], 2.0),
+            ([1, 2], 1.0),
+        ]
+    )
+
+
 def plateau_complex():
     return mp.FilteredComplex.from_simplices(
         [
@@ -78,6 +91,54 @@ def _gudhi_available():
 
 
 class PythonApiTest(unittest.TestCase):
+    def test_process_lower_stars_exact_order_and_contract(self):
+        complex_ = injective_triangle_boundary_complex()
+        sequence = mp.compute_morse_sequence(
+            complex_, algorithm="process-lower-stars"
+        )
+        actual = tuple(
+            (
+                step.type,
+                complex_.vertices(step.sigma),
+                None if step.tau is None else complex_.vertices(step.tau),
+            )
+            for step in sequence.steps
+        )
+        self.assertEqual(
+            actual,
+            (
+                (mp.CRITICAL, (2,), None),
+                (mp.REGULAR_PAIR, (1,), (1, 2)),
+                (mp.REGULAR_PAIR, (0,), (0, 2)),
+                (mp.CRITICAL, (0, 1), None),
+            ),
+        )
+        self.assertEqual(
+            mp.compute_morse_persistence(
+                complex_, algorithm="process-lower-star"
+            ).finite_barcode(),
+            mp.compute_standard_persistence(complex_).finite_barcode(),
+        )
+        self.assertIn(
+            mp.PROCESS_LOWER_STARS_SEQUENCE, mp.MORSE_SEQUENCE_ALGORITHMS
+        )
+        self.assertNotIn(
+            mp.PROCESS_LOWER_STARS_SEQUENCE,
+            mp.DEFAULT_MORSE_ALGORITHM_PORTFOLIO,
+        )
+
+        tied = mp.FilteredComplex.from_simplices(
+            [([0], 0.0), ([1], 0.0), ([0, 1], 0.0)]
+        )
+        with self.assertRaisesRegex(ValueError, "injective vertex filtration"):
+            mp.compute_morse_sequence(tied, algorithm="process-lower-stars")
+
+        delayed = mp.FilteredComplex.from_simplices(
+            [([0], 0.0), ([1], 1.0), ([0, 1], 2.0)]
+        )
+        with self.assertRaisesRegex(ValueError, "max-vertex lower-star extension"):
+            mp.compute_morse_sequence(delayed, algorithm="process-lower-stars")
+
     def test_cpp_backend_is_stateful_when_available(self):
         if not mp.cpp_backend_available():
             self.skipTest("C++ backend is not built")
@@ -1118,6 +1179,36 @@ class PythonApiTest(unittest.TestCase):
                 mp.assert_matches_standard(complex_)
                 if _gudhi_available():
                     mp.assert_matches_gudhi(complex_)
+
+    def test_random_injective_process_lower_stars_matches_standard(self):
+        for seed in range(20):
+            with self.subTest(seed=seed):
+                rng = random.Random(1000 + seed)
+                n = rng.randint(3, 7)
+                facets = [[vertex] for vertex in range(n)]
+                for _ in range(rng.randint(1, 8)):
+                    size = rng.randint(2, min(4, n))
+                    facets.append(rng.sample(range(n), size))
+                order = list(range(n))
+                rng.shuffle(order)
+                vertex_values = {
+                    vertex: float(rank) for rank, vertex in enumerate(order)
+                }
+                complex_ = mp.FilteredComplex.from_lower_star(
+                    facets, vertex_values
+                )
+
+                sequence = mp.compute_morse_sequence(
+                    complex_, algorithm=mp.PROCESS_LOWER_STARS_SEQUENCE
+                )
+                self.assertEqual(
+                    mp.compute_morse_persistence(complex_, sequence).finite_barcode(),
+                    mp.compute_standard_persistence(complex_).finite_barcode(),
+                )
+                self.assertEqual(
+                    mp.compute_morse_persistence(complex_, sequence).essential_barcode(),
+                    mp.compute_standard_persistence(complex_).essential_barcode(),
+                )
 
     def test_random_graphs_match_oracles(self):
         for seed in range(20, 40):

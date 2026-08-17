@@ -12,6 +12,7 @@ enum class MorseSequenceStrategy {
   Saturated,
   SameLevelReduction,
   FMax,
+  ProcessLowerStars,
   FMin,
   PlateauGreedy,
   FloodingMax,
@@ -30,6 +31,8 @@ inline const char* morse_sequence_strategy_name(MorseSequenceStrategy strategy) 
       return "same-level-reduction";
     case MorseSequenceStrategy::FMax:
       return "f-max";
+    case MorseSequenceStrategy::ProcessLowerStars:
+      return "process-lower-stars";
     case MorseSequenceStrategy::FMin:
       return "f-min";
     case MorseSequenceStrategy::PlateauGreedy:
@@ -59,6 +62,9 @@ inline MorseSequenceStrategy morse_sequence_strategy_from_name(const std::string
   }
   if (strategy == "f-max") {
     return MorseSequenceStrategy::FMax;
+  }
+  if (strategy == "process-lower-stars" || strategy == "process-lower-star") {
+    return MorseSequenceStrategy::ProcessLowerStars;
   }
   if (strategy == "f-min") {
     return MorseSequenceStrategy::FMin;
@@ -104,6 +110,8 @@ MorseReferenceFrame build_morse_reference_frame(
       return builder.build_same_level_reduction();
     case MorseSequenceStrategy::FMax:
       return builder.build_f_max();
+    case MorseSequenceStrategy::ProcessLowerStars:
+      return builder.build_process_lower_stars();
     case MorseSequenceStrategy::FMin:
       return builder.build_f_min();
     case MorseSequenceStrategy::PlateauGreedy:
@@ -141,6 +149,8 @@ MorseReferenceReductionInput build_morse_reference_reduction_input(
       return builder.build_same_level_reduction_reduction_input();
     case MorseSequenceStrategy::FMax:
       return builder.build_f_max_reduction_input();
+    case MorseSequenceStrategy::ProcessLowerStars:
+      return builder.build_process_lower_stars_reduction_input();
     case MorseSequenceStrategy::FMin:
       return builder.build_f_min_reduction_input();
     case MorseSequenceStrategy::PlateauGreedy:

@@ -53,6 +53,7 @@ PLATEAU_GREEDY_SEQUENCE = "plateau-greedy"
 SAME_LEVEL_REDUCTION_SEQUENCE = "same-level-reduction"
 COREDUCTION_SEQUENCE = SAME_LEVEL_REDUCTION_SEQUENCE
 F_MAX_SEQUENCE = "f-max"
+PROCESS_LOWER_STARS_SEQUENCE = "process-lower-stars"
 F_MIN_SEQUENCE = "f-min"
 FLOODING_MAX_SEQUENCE = "flooding-max"
 FLOODING_MIN_SEQUENCE = "flooding-min"
@@ -69,6 +70,7 @@ MORSE_SEQUENCE_ALGORITHMS = (
     PLATEAU_GREEDY_SEQUENCE,
     SAME_LEVEL_REDUCTION_SEQUENCE,
     F_MAX_SEQUENCE,
+    PROCESS_LOWER_STARS_SEQUENCE,
     F_MIN_SEQUENCE,
     FLOODING_MAX_SEQUENCE,
     FLOODING_MIN_SEQUENCE,
@@ -1176,6 +1178,10 @@ def compute_morse_sequence(
         return _compute_coreduction_morse_sequence_python(complex_, algorithm=algorithm)
     if algorithm in {F_MAX_SEQUENCE, F_MIN_SEQUENCE}:
         return _compute_paper_f_morse_sequence_python(complex_, algorithm=algorithm)
+    if algorithm == PROCESS_LOWER_STARS_SEQUENCE:
+        return _compute_process_lower_stars_morse_sequence_python(
+            complex_, algorithm=algorithm
+        )
     if algorithm in {
         FLOODING_MAX_SEQUENCE,
         FLOODING_MIN_SEQUENCE,
@@ -1528,6 +1534,156 @@ def _compute_coreduction_morse_sequence_python(
 
         for sigma, tau in reversed(collapse_pairs):
             emit_pair(sigma, tau, level)
+
+    return MorseSequence(
+        steps=tuple(steps),
+        critical_simplices=tuple(critical_simplices),
+        critical_index_of_simplex=tuple(critical_index_of_simplex),
+        paired_with=tuple(paired_with),
+        algorithm=algorithm,
+    )
+
+
+def _compute_process_lower_stars_morse_sequence_python(
+    complex_: FilteredComplex,
+    *,
+    algorithm: str,
+) -> MorseSequence:
+    """Run Robins' simplicial lower-star algorithm with injective vertex data."""
+    n = complex_.size
+    vertex_order = tuple(
+        simplex
+        for simplex in complex_.filtration_order
+        if complex_.dimension(simplex) == 0
+    )
+    if not vertex_order:
+        raise ValueError("ProcessLowerStars requires at least one zero-cell.")
+
+    vertex_simplex: dict[int, int] = {}
+    for index, simplex in enumerate(vertex_order):
+        vertices = complex_.vertices(simplex)
+        if len(vertices) != 1:
+            raise ValueError("ProcessLowerStars requires zero-cells with one vertex.")
+        vertex = vertices[0]
+        if vertex in vertex_simplex:
+            raise ValueError("ProcessLowerStars requires unique vertex identifiers.")
+        vertex_simplex[vertex] = simplex
+        if index and complex_.filtration(vertex_order[index - 1]) == complex_.filtration(simplex):
+            raise ValueError(
+                "ProcessLowerStars requires injective vertex filtration values."
+            )
+
+    vertex_rank = {
+        complex_.vertices(simplex)[0]: rank
+        for rank, simplex in enumerate(vertex_order)
+    }
+    owner = [-1] * n
+    owned: list[list[int]] = [[] for _ in range(n)]
+    robins_key: list[tuple[int, ...]] = [()] * n
+    for simplex in range(n):
+        vertices = complex_.vertices(simplex)
+        if not vertices:
+            raise ValueError("ProcessLowerStars does not support the empty simplex.")
+        try:
+            ranks = tuple(sorted((vertex_rank[vertex] for vertex in vertices), reverse=True))
+        except KeyError as error:
+            raise ValueError(
+                "ProcessLowerStars found a simplex with an unknown vertex."
+            ) from error
+        simplex_owner = vertex_order[ranks[0]]
+        if complex_.level(simplex) != complex_.level(simplex_owner):
+            raise ValueError(
+                "ProcessLowerStars requires the max-vertex lower-star extension."
+            )
+        owner[simplex] = simplex_owner
+        owned[simplex_owner].append(simplex)
+        robins_key[simplex] = ranks
+
+    steps: list[MorseStep] = []
+    critical_simplices: list[int] = []
+    critical_index_of_simplex = [-1] * n
+    paired_with: list[int | None] = [None] * n
+    inserted = [False] * n
+    local_boundary_count = [0] * n
+    local_boundary_xor = [0] * n
+
+    def emit_critical(simplex: int) -> None:
+        critical_index_of_simplex[simplex] = len(critical_simplices)
+        critical_simplices.append(simplex)
+        steps.append(MorseStep(CRITICAL, simplex, None, complex_.level(simplex)))
+
+    def emit_pair(sigma: int, tau: int) -> None:
+        paired_with[sigma] = tau
+        paired_with[tau] = sigma
+        steps.append(MorseStep(REGULAR_PAIR, sigma, tau, complex_.level(tau)))
+
+    for star_vertex in vertex_order:
+        pair_candidates: list[tuple[tuple[int, ...], int]] = []
+        zero_candidates: list[tuple[tuple[int, ...], int]] = []
+        remaining = len(owned[star_vertex])
+
+        def enqueue(simplex: int) -> None:
+            if inserted[simplex] or owner[simplex] != star_vertex:
+                return
+            item = (robins_key[simplex], simplex)
+            if local_boundary_count[simplex] == 1:
+                heapq.heappush(pair_candidates, item)
+            elif local_boundary_count[simplex] == 0:
+                heapq.heappush(zero_candidates, item)
+
+        for simplex in owned[star_vertex]:
+            count = 0
+            boundary_xor = 0
+            for face in complex_.boundary(simplex):
+                if owner[face] == star_vertex and not inserted[face]:
+                    count += 1
+                    boundary_xor ^= face
+                elif not inserted[face]:
+                    raise RuntimeError(
+                        "A lower-star attachment face was not inserted earlier."
+                    )
+            local_boundary_count[simplex] = count
+            local_boundary_xor[simplex] = boundary_xor
+            enqueue(simplex)
+
+        def mark_inserted(simplex: int) -> None:
+            nonlocal remaining
+            if inserted[simplex]:
+                raise RuntimeError("ProcessLowerStars classified a simplex twice.")
+            inserted[simplex] = True
+            remaining -= 1
+            for coface in complex_.coboundary(simplex):
+                if owner[coface] != star_vertex or inserted[coface]:
+                    continue
+                if local_boundary_count[coface] == 0:
+                    raise RuntimeError("ProcessLowerStars local boundary count underflow.")
+                local_boundary_count[coface] -= 1
+                local_boundary_xor[coface] ^= simplex
+                enqueue(coface)
+
+        while remaining:
+            while pair_candidates:
+                _, tau = heapq.heappop(pair_candidates)
+                if inserted[tau] or local_boundary_count[tau] != 1:
+                    continue
+                sigma = local_boundary_xor[tau]
+                if inserted[sigma] or owner[sigma] != star_vertex:
+                    continue
+                emit_pair(sigma, tau)
+                mark_inserted(sigma)
+                mark_inserted(tau)
+                break
+            else:
+                while zero_candidates:
+                    _, critical = heapq.heappop(zero_candidates)
+                    if not inserted[critical] and local_boundary_count[critical] == 0:
+                        break
+                else:
+                    raise RuntimeError(
+                        "ProcessLowerStars found no local expansion or critical step."
+                    )
+                emit_critical(critical)
+                mark_inserted(critical)
 
     return MorseSequence(
         steps=tuple(steps),
@@ -2109,6 +2265,14 @@ def compute_morse_sequence_and_reference_map(
         )
     if algorithm in {F_MAX_SEQUENCE, F_MIN_SEQUENCE}:
         sequence = _compute_paper_f_morse_sequence_python(complex_, algorithm=algorithm)
+        return MorseReferenceFrame(
+            sequence=sequence,
+            _references=compute_reference_map(complex_, sequence, algorithm=algorithm),
+        )
+    if algorithm == PROCESS_LOWER_STARS_SEQUENCE:
+        sequence = _compute_process_lower_stars_morse_sequence_python(
+            complex_, algorithm=algorithm
+        )
         return MorseReferenceFrame(
             sequence=sequence,
             _references=compute_reference_map(complex_, sequence, algorithm=algorithm),
@@ -4774,6 +4938,9 @@ def _normalize_morse_sequence_algorithm(algorithm: str) -> str:
         "max-s-f": F_MAX_SEQUENCE,
         "max-sf": F_MAX_SEQUENCE,
         "maximal-f-sequence": F_MAX_SEQUENCE,
+        "process-lower-star": PROCESS_LOWER_STARS_SEQUENCE,
+        "lower-stars": PROCESS_LOWER_STARS_SEQUENCE,
+        "lower-star": PROCESS_LOWER_STARS_SEQUENCE,
         "paper-min": F_MIN_SEQUENCE,
         "min-s-f": F_MIN_SEQUENCE,
         "min-sf": F_MIN_SEQUENCE,
@@ -5394,6 +5561,7 @@ __all__ = [
     "FilteredComplex",
     "FilteredComplexBuilder",
     "F_MAX_SEQUENCE",
+    "PROCESS_LOWER_STARS_SEQUENCE",
     "F_MIN_SEQUENCE",
     "FLOODING_MAXMIN_SEQUENCE",
     "FLOODING_MAX_SEQUENCE",

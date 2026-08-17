@@ -8,7 +8,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,15 +120,24 @@ def _barcode(diagram: mf.PersistenceDiagram) -> tuple[object, object]:
     return diagram.finite_barcode(), diagram.essential_barcode()
 
 
-def validate_case(case: dict[str, Any], workers: Sequence[int]) -> dict[str, object]:
+def validate_case(
+    case: dict[str, Any],
+    workers: Sequence[int],
+    *,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, object]:
     """Validate one case and return its compact report record."""
 
     name = str(case["name"])
     complex_ = build_complex(case)
+    if progress is not None:
+        progress(f"{name}: sequential sequence")
     sequential = mf.compute_morse_sequence(
         complex_, algorithm=SEQUENTIAL_ALGORITHM
     )
     expected_signature = _step_signature(complex_, sequential)
+    if progress is not None:
+        progress(f"{name}: persistence oracle")
     standard_barcode = _barcode(mf.compute_standard_persistence(complex_))
     sequential_barcode = _barcode(
         mf.compute_morse_persistence(complex_, sequence=sequential)
@@ -140,6 +149,8 @@ def validate_case(case: dict[str, Any], workers: Sequence[int]) -> dict[str, obj
         )
 
     for worker_count in workers:
+        if progress is not None:
+            progress(f"{name}: parallel sequence with workers={worker_count}")
         parallel = mf.compute_morse_sequence(
             complex_, algorithm=PARALLEL_ALGORITHM, max_workers=worker_count
         )
@@ -189,7 +200,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         cases = load_corpus(args.corpus)
-        results = [validate_case(case, args.workers) for case in cases]
+        progress = None if args.json else lambda message: print(message, flush=True)
+        results = [
+            validate_case(case, args.workers, progress=progress) for case in cases
+        ]
     except (AssertionError, TypeError, ValueError) as exc:
         print(f"reduction-kernel corpus validation failed: {exc}", file=sys.stderr)
         return 1

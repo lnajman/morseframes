@@ -45,12 +45,14 @@ jobs:
 
       - name: Validate reduction-kernel corpus with native backend
         run: python tools/validate_reduction_kernel_corpus.py
+        timeout-minutes: 3
 
       - name: Test pure-Python fallback
         run: MORSEFRAMES_DISABLE_CPP_BACKEND=1 python -m unittest discover -s python/tests -p "test_*.py"
 
       - name: Validate reduction-kernel corpus with pure-Python fallback
         run: MORSEFRAMES_DISABLE_CPP_BACKEND=1 python tools/validate_reduction_kernel_corpus.py
+        timeout-minutes: 3
 
       - name: Run Python quickstart
         run: python python/examples/quickstart.py

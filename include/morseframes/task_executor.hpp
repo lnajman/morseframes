@@ -60,6 +60,14 @@ class BoundedTaskExecutor {
       }
       tasks_.emplace_back([this, task]() {
         (*task)();
+        // Synchronize completion with the mutex used by get(). Without this
+        // handshake, a future can become ready and notify after get() checks
+        // its predicate but before the condition-variable wait begins,
+        // leaving the waiter asleep with no later notification.
+        {
+          std::lock_guard<std::mutex> completion_lock(mutex_);
+          ++completed_tasks_;
+        }
         activity_.notify_all();
       });
     }
@@ -75,8 +83,10 @@ class BoundedTaskExecutor {
         continue;
       }
       std::unique_lock<std::mutex> lock(mutex_);
-      activity_.wait(lock, [this, &future]() {
+      const std::size_t observed_completions = completed_tasks_;
+      activity_.wait(lock, [this, &future, observed_completions]() {
         return stopping_ || !tasks_.empty() ||
+               completed_tasks_ != observed_completions ||
                future.wait_for(std::chrono::seconds(0)) ==
                    std::future_status::ready;
       });
@@ -128,6 +138,7 @@ class BoundedTaskExecutor {
   std::deque<std::function<void()>> tasks_;
   std::mutex mutex_;
   std::condition_variable activity_;
+  std::size_t completed_tasks_ = 0;
   bool stopping_ = false;
 };
 

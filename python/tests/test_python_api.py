@@ -191,6 +191,36 @@ class PythonApiTest(unittest.TestCase):
             max_workers=2,
         )
         self.assertEqual(parallel_frame.sequence.steps, sequence.steps)
+        parallel_profile = mp.profile_morse_reference_frame(
+            complex_, algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE
+        )
+        for metric in (
+            "sequence_process_lower_stars_count",
+            "sequence_process_lower_stars_max_star_size",
+            "sequence_process_lower_stars_executor_workers",
+            "sequence_process_lower_stars_parallel_tasks",
+            "sequence_process_lower_stars_min_task_load",
+            "sequence_process_lower_stars_max_task_load",
+        ):
+            self.assertIn(metric, parallel_profile.frame_metrics)
+        self.assertEqual(
+            parallel_profile.frame_metrics["sequence_process_lower_stars_count"],
+            3,
+        )
+        self.assertEqual(
+            parallel_profile.frame_metrics[
+                "sequence_process_lower_stars_max_star_size"
+            ],
+            3,
+        )
+        self.assertGreaterEqual(
+            parallel_profile.frame_metrics[
+                "sequence_process_lower_stars_max_task_load"
+            ],
+            parallel_profile.frame_metrics[
+                "sequence_process_lower_stars_min_task_load"
+            ],
+        )
         self.assertEqual(
             mp.compute_morse_persistence(
                 complex_, algorithm="process-lower-star"

@@ -8,6 +8,7 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <queue>
 #include <stdexcept>
 #include <unordered_map>
@@ -78,8 +79,12 @@ struct MorseSequenceBuildMetrics {
   std::size_t reduction_kernel_essential_parallel_tasks = 0;
   std::size_t reduction_kernel_aggregation_rounds = 0;
   std::size_t reduction_kernel_aggregation_parallel_tasks = 0;
+  std::size_t process_lower_stars_count = 0;
+  std::size_t process_lower_stars_max_star_size = 0;
   std::size_t process_lower_stars_executor_workers = 1;
   std::size_t process_lower_stars_parallel_tasks = 0;
+  std::size_t process_lower_stars_min_task_load = 0;
+  std::size_t process_lower_stars_max_task_load = 0;
 };
 
 class MorseSequence {
@@ -1217,30 +1222,59 @@ class FSequenceBuilder {
     BoundedTaskExecutor executor(max_workers);
     const std::size_t worker_count = executor.worker_count();
     if (sequence_metrics_ != nullptr) {
+      sequence_metrics_->process_lower_stars_count = vertex_order.size();
+      for (SimplexId star_vertex : vertex_order) {
+        sequence_metrics_->process_lower_stars_max_star_size = std::max(
+            sequence_metrics_->process_lower_stars_max_star_size,
+            owned[star_vertex].size());
+      }
       sequence_metrics_->process_lower_stars_executor_workers = worker_count;
     }
     if (worker_count <= 1 || vertex_order.size() <= 1) {
       for (std::size_t star_rank = 0; star_rank < vertex_order.size(); ++star_rank) {
         process_lower_star(star_rank);
       }
+      if (sequence_metrics_ != nullptr) {
+        sequence_metrics_->process_lower_stars_min_task_load = n;
+        sequence_metrics_->process_lower_stars_max_task_load = n;
+      }
     } else {
       const std::size_t task_count = std::min(worker_count, vertex_order.size());
-      const std::size_t chunk_size =
-          (vertex_order.size() + task_count - 1) / task_count;
+      std::vector<std::size_t> star_ranks(vertex_order.size());
+      std::iota(star_ranks.begin(), star_ranks.end(), 0);
+      std::sort(star_ranks.begin(), star_ranks.end(),
+                [&](std::size_t lhs, std::size_t rhs) {
+                  const std::size_t lhs_size = owned[vertex_order[lhs]].size();
+                  const std::size_t rhs_size = owned[vertex_order[rhs]].size();
+                  return lhs_size != rhs_size ? lhs_size > rhs_size : lhs < rhs;
+                });
+
+      std::vector<std::vector<std::size_t>> task_stars(task_count);
+      std::vector<std::size_t> task_loads(task_count, 0);
+      for (std::size_t star_rank : star_ranks) {
+        const auto lightest =
+            std::min_element(task_loads.begin(), task_loads.end());
+        const std::size_t task_index =
+            static_cast<std::size_t>(lightest - task_loads.begin());
+        task_stars[task_index].push_back(star_rank);
+        task_loads[task_index] += owned[vertex_order[star_rank]].size();
+      }
+
       std::vector<std::future<void>> futures;
       futures.reserve(task_count);
-      for (std::size_t first = 0; first < vertex_order.size();
-           first += chunk_size) {
-        const std::size_t last =
-            std::min(vertex_order.size(), first + chunk_size);
-        futures.push_back(executor.submit([first, last, &process_lower_star]() {
-          for (std::size_t star_rank = first; star_rank < last; ++star_rank) {
+      for (const auto& task : task_stars) {
+        futures.push_back(executor.submit([task, &process_lower_star]() {
+          for (std::size_t star_rank : task) {
             process_lower_star(star_rank);
           }
         }));
       }
       if (sequence_metrics_ != nullptr) {
         sequence_metrics_->process_lower_stars_parallel_tasks = futures.size();
+        sequence_metrics_->process_lower_stars_min_task_load =
+            *std::min_element(task_loads.begin(), task_loads.end());
+        sequence_metrics_->process_lower_stars_max_task_load =
+            *std::max_element(task_loads.begin(), task_loads.end());
       }
       for (auto& future : futures) {
         executor.get(future);

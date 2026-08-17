@@ -361,6 +361,18 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
       metrics.sequence_reduction_kernel_aggregation_rounds;
   result["sequence_reduction_kernel_aggregation_parallel_tasks"] =
       metrics.sequence_reduction_kernel_aggregation_parallel_tasks;
+  result["sequence_process_lower_stars_count"] =
+      metrics.sequence_process_lower_stars_count;
+  result["sequence_process_lower_stars_max_star_size"] =
+      metrics.sequence_process_lower_stars_max_star_size;
+  result["sequence_process_lower_stars_executor_workers"] =
+      metrics.sequence_process_lower_stars_executor_workers;
+  result["sequence_process_lower_stars_parallel_tasks"] =
+      metrics.sequence_process_lower_stars_parallel_tasks;
+  result["sequence_process_lower_stars_min_task_load"] =
+      metrics.sequence_process_lower_stars_min_task_load;
+  result["sequence_process_lower_stars_max_task_load"] =
+      metrics.sequence_process_lower_stars_max_task_load;
   result["final_live_nonempty_annotations"] = metrics.final_live_nonempty_annotations;
   result["final_live_total_annotation_size"] = metrics.final_live_total_annotation_size;
   result["peak_live_nonempty_annotations"] = metrics.peak_live_nonempty_annotations;

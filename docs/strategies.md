@@ -152,7 +152,11 @@ The parallel variant has canonical name:
 ```
 
 It computes disjoint lower-star kernels concurrently with the package's bounded
-executor, then replays their local events in increasing maximum-vertex order.
+executor. Lower stars are assigned greedily from largest to smallest, using
+their simplex cardinality as a deterministic work estimate, so workers receive
+more even loads than with equal vertex-count chunks. Profile metrics report the
+number and maximum size of lower stars plus the minimum and maximum scheduled
+task loads. Local events are then replayed in increasing maximum-vertex order.
 Consequently it produces exactly the same deterministic sequence as
 `process-lower-stars`. In Python, `max_workers` limits the complete worker
 budget, including the calling thread. The pure-Python fallback accepts the same

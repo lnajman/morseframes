@@ -748,6 +748,10 @@ void test_process_lower_stars_triangle_boundary() {
   }
   assert(parallel_metrics.process_lower_stars_executor_workers == 2);
   assert(parallel_metrics.process_lower_stars_parallel_tasks == 2);
+  assert(parallel_metrics.process_lower_stars_count == 3);
+  assert(parallel_metrics.process_lower_stars_max_star_size == 3);
+  assert(parallel_metrics.process_lower_stars_min_task_load == 3);
+  assert(parallel_metrics.process_lower_stars_max_task_load == 3);
   const auto single_worker_sequence =
       FSequenceBuilder(complex).build_process_lower_stars_parallel(1);
   assert(single_worker_sequence.steps().size() == sequence.steps().size());

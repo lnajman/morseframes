@@ -4701,6 +4701,12 @@ def _profile_morse_reference_frame_python(
         "sequence_reduction_kernel_essential_parallel_tasks": 0,
         "sequence_reduction_kernel_aggregation_rounds": 0,
         "sequence_reduction_kernel_aggregation_parallel_tasks": 0,
+        "sequence_process_lower_stars_count": 0,
+        "sequence_process_lower_stars_max_star_size": 0,
+        "sequence_process_lower_stars_executor_workers": 1,
+        "sequence_process_lower_stars_parallel_tasks": 0,
+        "sequence_process_lower_stars_min_task_load": 0,
+        "sequence_process_lower_stars_max_task_load": 0,
         "final_live_nonempty_annotations": full_reference_nonempty,
         "final_live_total_annotation_size": full_reference_total,
         "peak_live_nonempty_annotations": full_reference_nonempty,
@@ -4708,6 +4714,27 @@ def _profile_morse_reference_frame_python(
         "released_annotations": 0,
         "released_total_annotation_size": 0,
     }
+    if algorithm in {
+        PROCESS_LOWER_STARS_SEQUENCE,
+        PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+    }:
+        vertex_order = tuple(
+            simplex
+            for simplex in complex_.filtration_order
+            if complex_.dimension(simplex) == 0
+        )
+        vertex_rank = {
+            complex_.vertices(simplex)[0]: rank
+            for rank, simplex in enumerate(vertex_order)
+        }
+        star_sizes = [0] * len(vertex_order)
+        for simplex in range(complex_.size):
+            owner_rank = max(vertex_rank[vertex] for vertex in complex_.vertices(simplex))
+            star_sizes[owner_rank] += 1
+        frame_metrics["sequence_process_lower_stars_count"] = len(star_sizes)
+        frame_metrics["sequence_process_lower_stars_max_star_size"] = max(star_sizes)
+        frame_metrics["sequence_process_lower_stars_min_task_load"] = complex_.size
+        frame_metrics["sequence_process_lower_stars_max_task_load"] = complex_.size
     metrics = _empty_reducer_metrics()
     metrics["working_set_size"] = len(working_set)
     metrics["critical_count"] = len(sequence.critical_simplices)
@@ -4830,6 +4857,12 @@ def _empty_frame_metrics() -> dict[str, object]:
         "sequence_reduction_kernel_essential_parallel_tasks": 0,
         "sequence_reduction_kernel_aggregation_rounds": 0,
         "sequence_reduction_kernel_aggregation_parallel_tasks": 0,
+        "sequence_process_lower_stars_count": 0,
+        "sequence_process_lower_stars_max_star_size": 0,
+        "sequence_process_lower_stars_executor_workers": 1,
+        "sequence_process_lower_stars_parallel_tasks": 0,
+        "sequence_process_lower_stars_min_task_load": 0,
+        "sequence_process_lower_stars_max_task_load": 0,
         "final_live_nonempty_annotations": 0,
         "final_live_total_annotation_size": 0,
         "peak_live_nonempty_annotations": 0,

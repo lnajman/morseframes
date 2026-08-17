@@ -343,6 +343,10 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
       metrics.sequence_reduction_kernel_parallel_batches;
   result["sequence_reduction_kernel_max_parallel_facets"] =
       metrics.sequence_reduction_kernel_max_parallel_facets;
+  result["sequence_reduction_kernel_parallel_level_batches"] =
+      metrics.sequence_reduction_kernel_parallel_level_batches;
+  result["sequence_reduction_kernel_max_parallel_levels"] =
+      metrics.sequence_reduction_kernel_max_parallel_levels;
   result["final_live_nonempty_annotations"] = metrics.final_live_nonempty_annotations;
   result["final_live_total_annotation_size"] = metrics.final_live_total_annotation_size;
   result["peak_live_nonempty_annotations"] = metrics.peak_live_nonempty_annotations;

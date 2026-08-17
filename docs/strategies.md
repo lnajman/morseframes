@@ -225,8 +225,12 @@ workspace and local-kernel routine. Facet cells in a round are evaluated in
 bounded asynchronous batches against one immutable active-set snapshot. Results
 are collected and merged in the original facet order, so the parallel and
 sequential strategies produce the same deterministic Morse sequence. The
-pure-Python fallback preserves those semantics sequentially; native C++ enables
-the facet executor.
+native builder also evaluates independent filtration levels concurrently and
+assembles their event streams in increasing level order, implementing the two
+parallel dimensions of Algorithms 1 and 2. One global worker budget is split
+between level and facet tasks, and each facet coordinator counts toward that
+budget to avoid nested oversubscription. The pure-Python fallback preserves the
+same semantics sequentially.
 
 ## Flooding Variants
 

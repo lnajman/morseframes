@@ -326,6 +326,22 @@ class PythonApiTest(unittest.TestCase):
             self.assertGreater(
                 kernel_profile.frame_metrics["sequence_reduction_kernel_rounds"], 0
             )
+            parallel_kernel_profile = mp.profile_morse_reference_frame(
+                complex_,
+                algorithm="flooding-reduction-kernel-parallel",
+            )
+            self.assertEqual(
+                parallel_kernel_profile.sequence_algorithm,
+                mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+            )
+            self.assertIn(
+                "sequence_reduction_kernel_parallel_level_batches",
+                parallel_kernel_profile.frame_metrics,
+            )
+            self.assertIn(
+                "sequence_reduction_kernel_max_parallel_levels",
+                parallel_kernel_profile.frame_metrics,
+            )
 
     def test_morse_sequence_algorithm_rejects_unknown_or_reserved_names(self):
         complex_ = edge_complex()

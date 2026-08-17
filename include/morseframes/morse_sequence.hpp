@@ -3,9 +3,11 @@
 #include <chrono>
 #include <cstdint>
 #include <cstddef>
+#include <future>
 #include <limits>
 #include <queue>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -64,6 +66,8 @@ struct MorseSequenceBuildMetrics {
   std::size_t reduction_kernel_perforations = 0;
   std::size_t reduction_kernel_parallel_batches = 0;
   std::size_t reduction_kernel_max_parallel_facets = 0;
+  std::size_t reduction_kernel_parallel_level_batches = 0;
+  std::size_t reduction_kernel_max_parallel_levels = 0;
 };
 
 class MorseSequence {
@@ -1160,10 +1164,61 @@ class FSequenceBuilder {
     const std::size_t n = complex_.size();
     MorseSequence sequence(n);
     auto&& callback = on_step;
-    ReductionKernelWorkspace<ComplexView> workspace(complex_, options);
+    const std::size_t num_levels = complex_.num_levels();
+    std::size_t workers = options.max_workers;
+    if (workers == 0) {
+      workers =
+          std::max<std::size_t>(1, std::thread::hardware_concurrency());
+    }
 
-    for (LevelId level = 0; level < complex_.num_levels(); ++level) {
-      const auto events = workspace.compute_level(level);
+    // Split one global budget between the independent level tasks of
+    // Algorithm 2 and the facet tasks of Algorithm 1. A square-root split
+    // enables both dimensions when at least four workers are available.
+    std::size_t level_workers = 1;
+    if (options.policy == ReductionKernelExecutionPolicy::Parallel) {
+      while (level_workers < num_levels &&
+             level_workers + 1 <= workers / (level_workers + 1)) {
+        ++level_workers;
+      }
+    }
+    ReductionKernelExecutionOptions facet_options = options;
+    facet_options.max_workers = std::max<std::size_t>(1, workers / level_workers);
+    ReductionKernelWorkspace<ComplexView> workspace(complex_, facet_options);
+    std::vector<ReductionKernelLevelResult> level_results(num_levels);
+    ReductionKernelMetrics kernel_metrics;
+
+    if (level_workers == 1 || num_levels <= 1) {
+      for (LevelId level = 0; level < num_levels; ++level) {
+        level_results[level] = workspace.compute_level_isolated(level);
+      }
+    } else {
+      for (std::size_t first = 0; first < num_levels;
+           first += level_workers) {
+        const std::size_t count =
+            std::min(level_workers, num_levels - first);
+        ++kernel_metrics.parallel_level_batches;
+        kernel_metrics.max_parallel_levels =
+            std::max(kernel_metrics.max_parallel_levels, count);
+        std::vector<std::future<ReductionKernelLevelResult>> futures;
+        futures.reserve(count);
+        for (std::size_t offset = 0; offset < count; ++offset) {
+          const LevelId level = static_cast<LevelId>(first + offset);
+          futures.push_back(std::async(
+              std::launch::async, [level, &workspace]() {
+                return workspace.compute_level_isolated(level);
+              }));
+        }
+        for (std::size_t offset = 0; offset < count; ++offset) {
+          level_results[first + offset] = futures[offset].get();
+        }
+      }
+    }
+
+    for (LevelId level = 0; level < num_levels; ++level) {
+      auto& level_result = level_results[level];
+      ReductionKernelWorkspace<ComplexView>::accumulate_metrics(
+          kernel_metrics, level_result.metrics);
+      const auto& events = level_result.events;
       for (std::size_t index = events.size(); index > 0; --index) {
         const auto& event = events[index - 1];
         if (event.type == ReductionKernelEventType::Perforation) {
@@ -1182,7 +1237,6 @@ class FSequenceBuilder {
     }
 
     if (sequence_metrics_ != nullptr) {
-      const auto& kernel_metrics = workspace.metrics();
       sequence_metrics_->reduction_kernel_facet_nanoseconds =
           kernel_metrics.facet_nanoseconds;
       sequence_metrics_->reduction_kernel_core_nanoseconds =
@@ -1203,6 +1257,10 @@ class FSequenceBuilder {
           kernel_metrics.parallel_batches;
       sequence_metrics_->reduction_kernel_max_parallel_facets =
           kernel_metrics.max_parallel_facets;
+      sequence_metrics_->reduction_kernel_parallel_level_batches =
+          kernel_metrics.parallel_level_batches;
+      sequence_metrics_->reduction_kernel_max_parallel_levels =
+          kernel_metrics.max_parallel_levels;
     }
 
     return sequence;

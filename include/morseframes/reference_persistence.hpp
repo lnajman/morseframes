@@ -111,6 +111,8 @@ struct MorseReferenceFrameMetrics {
   std::size_t sequence_reduction_kernel_perforations = 0;
   std::size_t sequence_reduction_kernel_parallel_batches = 0;
   std::size_t sequence_reduction_kernel_max_parallel_facets = 0;
+  std::size_t sequence_reduction_kernel_parallel_level_batches = 0;
+  std::size_t sequence_reduction_kernel_max_parallel_levels = 0;
   std::size_t final_live_nonempty_annotations = 0;
   std::size_t final_live_total_annotation_size = 0;
   std::size_t peak_live_nonempty_annotations = 0;
@@ -1063,6 +1065,10 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.reduction_kernel_parallel_batches;
       frame_metrics.sequence_reduction_kernel_max_parallel_facets =
           sequence_build_metrics.reduction_kernel_max_parallel_facets;
+      frame_metrics.sequence_reduction_kernel_parallel_level_batches =
+          sequence_build_metrics.reduction_kernel_parallel_level_batches;
+      frame_metrics.sequence_reduction_kernel_max_parallel_levels =
+          sequence_build_metrics.reduction_kernel_max_parallel_levels;
     }
 
     const auto pack_start =

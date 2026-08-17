@@ -988,6 +988,20 @@ void test_lower_star_three_dimensional_pair() {
 }
 
 void test_flooding_reduction_kernel_on_shared_facets() {
+  const auto assert_same_sequence = [](const auto& expected_sequence,
+                                       const auto& actual_sequence) {
+    assert(expected_sequence.steps().size() == actual_sequence.steps().size());
+    for (std::size_t index = 0; index < expected_sequence.steps().size();
+         ++index) {
+      const auto& expected = expected_sequence.steps()[index];
+      const auto& actual = actual_sequence.steps()[index];
+      assert(expected.type == actual.type);
+      assert(expected.sigma == actual.sigma);
+      assert(expected.tau == actual.tau);
+      assert(expected.level == actual.level);
+    }
+  };
+
   FilteredSimplicialComplex complex;
   const std::vector<double> values = {0.0, 0.0, 0.0, 0.0};
   add_weighted_closure(complex, {0, 1, 2}, values);
@@ -1007,17 +1021,31 @@ void test_flooding_reduction_kernel_on_shared_facets() {
                  const morseframes::MorseStep&) {},
               2);
   morseframes::validate_morse_sequence(complex, parallel_sequence);
-  assert(sequence.steps().size() == parallel_sequence.steps().size());
-  for (std::size_t index = 0; index < sequence.steps().size(); ++index) {
-    const auto& expected = sequence.steps()[index];
-    const auto& actual = parallel_sequence.steps()[index];
-    assert(expected.type == actual.type);
-    assert(expected.sigma == actual.sigma);
-    assert(expected.tau == actual.tau);
-    assert(expected.level == actual.level);
-  }
+  assert_same_sequence(sequence, parallel_sequence);
   assert(parallel_metrics.reduction_kernel_parallel_batches > 0);
   assert(parallel_metrics.reduction_kernel_max_parallel_facets == 2);
+
+  FilteredSimplicialComplex multilevel_complex;
+  const std::vector<double> multilevel_values = {0.0, 1.0, 2.0, 3.0};
+  add_weighted_closure(multilevel_complex, {0, 1, 2}, multilevel_values);
+  add_weighted_closure(multilevel_complex, {1, 2, 3}, multilevel_values);
+  multilevel_complex.finalize();
+  const auto multilevel_sequence =
+      FSequenceBuilder(multilevel_complex).build_flooding_reduction_kernel();
+  morseframes::MorseSequenceBuildMetrics multilevel_parallel_metrics;
+  const auto multilevel_parallel_sequence =
+      FSequenceBuilder(multilevel_complex, &multilevel_parallel_metrics)
+          .build_flooding_reduction_kernel_parallel_with_step_callback(
+              [](const morseframes::MorseSequence&,
+                 const morseframes::MorseStep&) {},
+              4);
+  morseframes::validate_morse_sequence(multilevel_complex,
+                                       multilevel_parallel_sequence);
+  assert_same_sequence(multilevel_sequence, multilevel_parallel_sequence);
+  assert(multilevel_parallel_metrics
+             .reduction_kernel_parallel_level_batches > 0);
+  assert(multilevel_parallel_metrics.reduction_kernel_max_parallel_levels ==
+         2);
 
   const auto strategy =
       morseframes::morse_sequence_strategy_from_name("reduction-kernel");

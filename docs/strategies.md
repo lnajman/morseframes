@@ -222,15 +222,25 @@ reductions, and merging a round.
 
 The companion strategy `"flooding-reduction-kernel-parallel"` uses the same
 workspace and local-kernel routine. Facet cells in a round are evaluated in
-bounded asynchronous batches against one immutable active-set snapshot. Results
-are collected and merged in the original facet order, so the parallel and
-sequential strategies produce the same deterministic Morse sequence. The
-native builder also evaluates independent filtration levels concurrently and
-assembles their event streams in increasing level order, implementing the two
-parallel dimensions of Algorithms 1 and 2. One global worker budget is split
-between level and facet tasks, and each facet coordinator counts toward that
-budget to avoid nested oversubscription. The pure-Python fallback preserves the
-same semantics sequentially.
+bounded batches against one immutable active-set snapshot. A reusable task pool
+is shared by level and facet work; waiting tasks cooperatively execute queued
+work, allowing nested parallelism without deadlock or repeated thread creation.
+The configured worker count is a strict global budget. Results are collected in
+facet order, and independent level streams are assembled in increasing level
+order, so the parallel and sequential strategies produce the same deterministic
+Morse sequence while implementing the two parallel dimensions of Algorithms 1
+and 2. The pure-Python fallback preserves the same semantics sequentially.
+
+The native worker budget defaults to the available hardware concurrency and can
+be fixed for reproducible runs:
+
+```python
+sequence = compute_morse_sequence(
+    complex_,
+    algorithm="flooding-reduction-kernel-parallel",
+    max_workers=4,
+)
+```
 
 ## Flooding Variants
 

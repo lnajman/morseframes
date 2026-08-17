@@ -1,9 +1,12 @@
 #include <algorithm>
+#include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <initializer_list>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -27,6 +30,64 @@ using morseframes::FSequenceBuilder;
 using morseframes::PersistenceDiagram;
 
 constexpr double kEps = 1e-12;
+
+void test_bounded_task_executor() {
+  morseframes::BoundedTaskExecutor executor(3);
+  assert(executor.worker_count() == 3);
+
+  std::atomic<int> active{0};
+  std::atomic<int> peak{0};
+  std::vector<std::future<int>> futures;
+  for (int value = 0; value < 18; ++value) {
+    futures.push_back(executor.submit([value, &active, &peak]() {
+      const int current = active.fetch_add(1) + 1;
+      int observed = peak.load();
+      while (observed < current &&
+             !peak.compare_exchange_weak(observed, current)) {
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      active.fetch_sub(1);
+      return value * value;
+    }));
+  }
+  for (int value = 0; value < 18; ++value) {
+    assert(executor.get(futures[value]) == value * value);
+  }
+  assert(peak.load() > 1);
+  assert(peak.load() <= 3);
+
+  auto nested = executor.submit([&executor]() {
+    std::vector<std::future<int>> inner;
+    for (int value = 1; value <= 8; ++value) {
+      inner.push_back(executor.submit([value]() { return value; }));
+    }
+    int total = 0;
+    for (auto& future : inner) {
+      total += executor.get(future);
+    }
+    return total;
+  });
+  assert(executor.get(nested) == 36);
+
+  auto failure = executor.submit([]() -> int {
+    throw std::runtime_error("executor failure");
+  });
+  bool propagated = false;
+  try {
+    (void)executor.get(failure);
+  } catch (const std::runtime_error&) {
+    propagated = true;
+  }
+  assert(propagated);
+
+  morseframes::BoundedTaskExecutor single_worker_executor(1);
+  auto single_worker_nested = single_worker_executor.submit(
+      [&single_worker_executor]() {
+        auto inner = single_worker_executor.submit([]() { return 17; });
+        return single_worker_executor.get(inner);
+      });
+  assert(single_worker_executor.get(single_worker_nested) == 17);
+}
 
 bool close(double lhs, double rhs) {
   return std::fabs(lhs - rhs) <= kEps;
@@ -1024,6 +1085,11 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   assert_same_sequence(sequence, parallel_sequence);
   assert(parallel_metrics.reduction_kernel_parallel_batches > 0);
   assert(parallel_metrics.reduction_kernel_max_parallel_facets == 2);
+  assert(parallel_metrics.reduction_kernel_executor_workers == 2);
+  const auto single_worker_sequence =
+      FSequenceBuilder(complex).build_flooding_reduction_kernel_parallel(1);
+  morseframes::validate_morse_sequence(complex, single_worker_sequence);
+  assert_same_sequence(sequence, single_worker_sequence);
 
   FilteredSimplicialComplex multilevel_complex;
   const std::vector<double> multilevel_values = {0.0, 1.0, 2.0, 3.0};
@@ -1045,7 +1111,14 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   assert(multilevel_parallel_metrics
              .reduction_kernel_parallel_level_batches > 0);
   assert(multilevel_parallel_metrics.reduction_kernel_max_parallel_levels ==
-         2);
+         std::min<std::size_t>(multilevel_complex.num_levels(), 4));
+  assert(multilevel_parallel_metrics.reduction_kernel_executor_workers == 4);
+  const auto automatic_parallel_sequence =
+      FSequenceBuilder(multilevel_complex)
+          .build_flooding_reduction_kernel_parallel();
+  morseframes::validate_morse_sequence(multilevel_complex,
+                                       automatic_parallel_sequence);
+  assert_same_sequence(multilevel_sequence, automatic_parallel_sequence);
 
   const auto strategy =
       morseframes::morse_sequence_strategy_from_name("reduction-kernel");
@@ -1112,6 +1185,7 @@ void test_instrumentation_metrics() {
 }  // namespace
 
 int main() {
+  test_bounded_task_executor();
   test_boundary_and_coboundary();
   test_inverse_annotation_store();
   test_field_annotation_store();

@@ -207,6 +207,14 @@ class PythonApiTest(unittest.TestCase):
         parallel_reduction_kernel_sequence = mp.compute_morse_sequence(
             complex_, algorithm="reduction-kernel-parallel"
         )
+        bounded_parallel_sequences = tuple(
+            mp.compute_morse_sequence(
+                complex_,
+                algorithm="reduction-kernel-parallel",
+                max_workers=workers,
+            )
+            for workers in (1, 2, 4)
+        )
         f_max_sequence = mp.compute_morse_sequence(complex_, algorithm="paper-max")
         f_min_sequence = mp.compute_morse_sequence(complex_, algorithm="min-s-f")
         diagram = mp.compute_morse_persistence(complex_, algorithm="saturated")
@@ -265,6 +273,15 @@ class PythonApiTest(unittest.TestCase):
             reduction_kernel_sequence.steps,
             parallel_reduction_kernel_sequence.steps,
         )
+        for bounded_sequence in bounded_parallel_sequences:
+            self.assertEqual(reduction_kernel_sequence.steps, bounded_sequence.steps)
+
+        bounded_frame = mp.compute_morse_sequence_and_reference_map(
+            complex_,
+            algorithm="reduction-kernel-parallel",
+            max_workers=2,
+        )
+        self.assertEqual(reduction_kernel_sequence.steps, bounded_frame.sequence.steps)
         self.assertEqual(f_max_sequence.algorithm, mp.F_MAX_SEQUENCE)
         self.assertEqual(f_min_sequence.algorithm, mp.F_MIN_SEQUENCE)
         self.assertEqual(sequence.steps, alias_sequence.steps)
@@ -342,6 +359,12 @@ class PythonApiTest(unittest.TestCase):
                 "sequence_reduction_kernel_max_parallel_levels",
                 parallel_kernel_profile.frame_metrics,
             )
+            self.assertGreaterEqual(
+                parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_executor_workers"
+                ],
+                1,
+            )
 
     def test_morse_sequence_algorithm_rejects_unknown_or_reserved_names(self):
         complex_ = edge_complex()
@@ -350,6 +373,18 @@ class PythonApiTest(unittest.TestCase):
             mp.compute_morse_sequence(complex_, algorithm="not-an-algorithm")
         with self.assertRaises(NotImplementedError):
             mp.compute_morse_sequence(complex_, algorithm="stack-flooding")
+        with self.assertRaises(ValueError):
+            mp.compute_morse_sequence(
+                complex_, algorithm="saturated", max_workers=2
+            )
+        with self.assertRaises(ValueError):
+            mp.compute_morse_sequence(
+                complex_, algorithm="reduction-kernel-parallel", max_workers=0
+            )
+        with self.assertRaises(TypeError):
+            mp.compute_morse_sequence(
+                complex_, algorithm="reduction-kernel-parallel", max_workers=True
+            )
 
     def test_fused_morse_reference_frame_matches_separate_construction(self):
         complex_ = plateau_complex()

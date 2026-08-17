@@ -1161,9 +1161,13 @@ def compute_morse_sequence(
     complex_: FilteredComplex,
     *,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    max_workers: int | None = None,
 ) -> MorseSequence:
     algorithm = _normalize_morse_sequence_algorithm(algorithm)
-    cpp_sequence = _compute_cpp_sequence(complex_, algorithm)
+    native_max_workers = _normalize_parallel_max_workers(algorithm, max_workers)
+    cpp_sequence = _compute_cpp_sequence(
+        complex_, algorithm, max_workers=native_max_workers
+    )
     if cpp_sequence is not None:
         return _sequence_from_cpp_sequence(complex_, cpp_sequence, algorithm=algorithm)
     if algorithm == PLATEAU_GREEDY_SEQUENCE:
@@ -2078,9 +2082,13 @@ def compute_morse_sequence_and_reference_map(
     complex_: FilteredComplex,
     *,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    max_workers: int | None = None,
 ) -> MorseReferenceFrame:
     algorithm = _normalize_morse_sequence_algorithm(algorithm)
-    cpp_frame = _compute_cpp_reference_frame(complex_, algorithm)
+    native_max_workers = _normalize_parallel_max_workers(algorithm, max_workers)
+    cpp_frame = _compute_cpp_reference_frame(
+        complex_, algorithm, max_workers=native_max_workers
+    )
     if cpp_frame is not None:
         cpp_sequence = cpp_frame.sequence
         return MorseReferenceFrame(
@@ -2135,9 +2143,13 @@ def compute_morse_sequence_and_coreference_map(
     complex_: FilteredComplex,
     *,
     algorithm: str = COREDUCTION_SEQUENCE,
+    max_workers: int | None = None,
 ) -> MorseCoreferenceFrame:
     algorithm = _normalize_morse_sequence_algorithm(algorithm)
-    cpp_frame = _compute_cpp_coreference_frame(complex_, algorithm)
+    native_max_workers = _normalize_parallel_max_workers(algorithm, max_workers)
+    cpp_frame = _compute_cpp_coreference_frame(
+        complex_, algorithm, max_workers=native_max_workers
+    )
     if cpp_frame is not None:
         cpp_sequence = cpp_frame.sequence
         return MorseCoreferenceFrame(
@@ -2145,7 +2157,9 @@ def compute_morse_sequence_and_coreference_map(
             _cpp_frame=cpp_frame,
         )
 
-    sequence = compute_morse_sequence(complex_, algorithm=algorithm)
+    sequence = compute_morse_sequence(
+        complex_, algorithm=algorithm, max_workers=max_workers
+    )
     return MorseCoreferenceFrame(
         sequence=sequence,
         _coreferences=compute_coreference_map(complex_, sequence, algorithm=algorithm),
@@ -3453,11 +3467,14 @@ def cpp_compute_morse_sequence(
     cpp_complex: object,
     *,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    max_workers: int | None = None,
 ) -> object:
     _require_cpp_backend()
+    normalized_algorithm = _normalize_morse_sequence_algorithm(algorithm)
     return _core_compute_morse_sequence(
         cpp_complex,
-        _normalize_morse_sequence_algorithm(algorithm),
+        normalized_algorithm,
+        _normalize_parallel_max_workers(normalized_algorithm, max_workers),
     )
 
 
@@ -4505,6 +4522,7 @@ def _profile_morse_reference_frame_python(
         "sequence_reduction_kernel_max_parallel_facets": 0,
         "sequence_reduction_kernel_parallel_level_batches": 0,
         "sequence_reduction_kernel_max_parallel_levels": 0,
+        "sequence_reduction_kernel_executor_workers": 1,
         "final_live_nonempty_annotations": full_reference_nonempty,
         "final_live_total_annotation_size": full_reference_total,
         "peak_live_nonempty_annotations": full_reference_nonempty,
@@ -4627,6 +4645,7 @@ def _empty_frame_metrics() -> dict[str, object]:
         "sequence_reduction_kernel_max_parallel_facets": 0,
         "sequence_reduction_kernel_parallel_level_batches": 0,
         "sequence_reduction_kernel_max_parallel_levels": 0,
+        "sequence_reduction_kernel_executor_workers": 1,
         "final_live_nonempty_annotations": 0,
         "final_live_total_annotation_size": 0,
         "peak_live_nonempty_annotations": 0,
@@ -4786,6 +4805,22 @@ def _normalize_morse_sequence_algorithm(algorithm: str) -> str:
     )
 
 
+def _normalize_parallel_max_workers(
+    algorithm: str, max_workers: int | None
+) -> int:
+    if max_workers is None:
+        return 0
+    if isinstance(max_workers, bool) or not isinstance(max_workers, int):
+        raise TypeError("max_workers must be an integer or None.")
+    if max_workers < 1:
+        raise ValueError("max_workers must be positive.")
+    if algorithm != FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE:
+        raise ValueError(
+            "max_workers is only valid for flooding-reduction-kernel-parallel."
+        )
+    return max_workers
+
+
 def _normalize_morse_algorithm_portfolio(
     algorithms: Iterable[str] | str | None,
 ) -> tuple[str, ...]:
@@ -4830,46 +4865,71 @@ def _normalize_morse_selection_mode(selection_mode: str) -> str:
     raise ValueError(f"Unknown Morse selection mode {selection_mode!r}. Supported modes: {supported}.")
 
 
-def _core_compute_morse_sequence(cpp_complex: object, algorithm: str) -> object:
+def _core_compute_morse_sequence(
+    cpp_complex: object, algorithm: str, max_workers: int = 0
+) -> object:
     try:
-        return _morse_core.compute_morse_sequence(cpp_complex, algorithm)
+        return _morse_core.compute_morse_sequence(
+            cpp_complex, algorithm, max_workers
+        )
     except TypeError:
-        if algorithm != SATURATED_SEQUENCE:
+        if max_workers != 0:
             raise
-        return _morse_core.compute_morse_sequence(cpp_complex)
+        try:
+            return _morse_core.compute_morse_sequence(cpp_complex, algorithm)
+        except TypeError:
+            if algorithm != SATURATED_SEQUENCE:
+                raise
+            return _morse_core.compute_morse_sequence(cpp_complex)
 
 
 def _compute_cpp_sequence(
     complex_: FilteredComplex,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    *,
+    max_workers: int = 0,
 ) -> object | None:
     if _morse_core is None or complex_._cpp is None:
         return None
-    return _core_compute_morse_sequence(complex_._cpp, algorithm)
+    return _core_compute_morse_sequence(complex_._cpp, algorithm, max_workers)
 
 
 def _compute_cpp_reference_frame(
     complex_: FilteredComplex,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    *,
+    max_workers: int = 0,
 ) -> object | None:
     if _morse_core is None or complex_._cpp is None:
         return None
     builder = getattr(_morse_core, "compute_morse_sequence_and_reference_map_object", None)
     if builder is None:
         return None
-    return builder(complex_._cpp, algorithm)
+    try:
+        return builder(complex_._cpp, algorithm, max_workers)
+    except TypeError:
+        if max_workers != 0:
+            raise
+        return builder(complex_._cpp, algorithm)
 
 
 def _compute_cpp_coreference_frame(
     complex_: FilteredComplex,
     algorithm: str = COREDUCTION_SEQUENCE,
+    *,
+    max_workers: int = 0,
 ) -> object | None:
     if _morse_core is None or complex_._cpp is None:
         return None
     builder = getattr(_morse_core, "compute_morse_sequence_and_coreference_map_object", None)
     if builder is None:
         return None
-    return builder(complex_._cpp, algorithm)
+    try:
+        return builder(complex_._cpp, algorithm, max_workers)
+    except TypeError:
+        if max_workers != 0:
+            raise
+        return builder(complex_._cpp, algorithm)
 
 
 def _cpp_sequence_for(

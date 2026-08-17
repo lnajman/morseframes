@@ -113,6 +113,7 @@ struct MorseReferenceFrameMetrics {
   std::size_t sequence_reduction_kernel_max_parallel_facets = 0;
   std::size_t sequence_reduction_kernel_parallel_level_batches = 0;
   std::size_t sequence_reduction_kernel_max_parallel_levels = 0;
+  std::size_t sequence_reduction_kernel_executor_workers = 1;
   std::size_t final_live_nonempty_annotations = 0;
   std::size_t final_live_total_annotation_size = 0;
   std::size_t peak_live_nonempty_annotations = 0;
@@ -540,7 +541,8 @@ class MorseReferenceFrameBuilder {
     return MorseReferenceFrame{std::move(sequence), std::move(references)};
   }
 
-  MorseReferenceFrame build_flooding_reduction_kernel_parallel() const {
+  MorseReferenceFrame build_flooding_reduction_kernel_parallel(
+      std::size_t max_workers = 0) const {
     std::vector<Annotation> references(complex_.size());
     Annotation reference_update_scratch;
     auto sequence = FSequenceBuilder(complex_)
@@ -550,7 +552,8 @@ class MorseReferenceFrameBuilder {
                               update_reference_for_step(
                                   sequence, step, references,
                                   reference_update_scratch);
-                            });
+                            },
+                            max_workers);
     return MorseReferenceFrame{std::move(sequence), std::move(references)};
   }
 
@@ -639,12 +642,14 @@ class MorseReferenceFrameBuilder {
   }
 
   MorseReferenceReductionInput
-  build_flooding_reduction_kernel_parallel_reduction_input() const {
+  build_flooding_reduction_kernel_parallel_reduction_input(
+      std::size_t max_workers = 0) const {
     return build_reduction_input_with([&](auto&& step_callback,
                                           auto* sequence_metrics) {
       return FSequenceBuilder(complex_, sequence_metrics)
           .build_flooding_reduction_kernel_parallel_with_step_callback(
-              std::forward<decltype(step_callback)>(step_callback));
+              std::forward<decltype(step_callback)>(step_callback),
+              max_workers);
     });
   }
 
@@ -1069,6 +1074,8 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.reduction_kernel_parallel_level_batches;
       frame_metrics.sequence_reduction_kernel_max_parallel_levels =
           sequence_build_metrics.reduction_kernel_max_parallel_levels;
+      frame_metrics.sequence_reduction_kernel_executor_workers =
+          sequence_build_metrics.reduction_kernel_executor_workers;
     }
 
     const auto pack_start =

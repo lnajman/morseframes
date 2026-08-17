@@ -347,6 +347,8 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
       metrics.sequence_reduction_kernel_parallel_level_batches;
   result["sequence_reduction_kernel_max_parallel_levels"] =
       metrics.sequence_reduction_kernel_max_parallel_levels;
+  result["sequence_reduction_kernel_executor_workers"] =
+      metrics.sequence_reduction_kernel_executor_workers;
   result["final_live_nonempty_annotations"] = metrics.final_live_nonempty_annotations;
   result["final_live_total_annotation_size"] = metrics.final_live_total_annotation_size;
   result["peak_live_nonempty_annotations"] = metrics.peak_live_nonempty_annotations;
@@ -543,7 +545,8 @@ bool is_implemented_sequence_algorithm(const std::string& algorithm) {
 }
 
 PyMorseSequence build_sequence(const PyFilteredComplex& complex,
-                               const std::string& algorithm) {
+                               const std::string& algorithm,
+                               std::size_t max_workers) {
   require_finalized(complex);
   const std::string normalized = normalize_sequence_algorithm(algorithm);
   if (normalized == "flooding" || normalized == "stack-flooding") {
@@ -577,7 +580,7 @@ PyMorseSequence build_sequence(const PyFilteredComplex& complex,
   if (normalized == "flooding-reduction-kernel-parallel") {
     return PyMorseSequence{
         morseframes::FSequenceBuilder(complex.complex)
-            .build_flooding_reduction_kernel_parallel()};
+            .build_flooding_reduction_kernel_parallel(max_workers)};
   }
   if (normalized == "flooding-minmax") {
     return PyMorseSequence{morseframes::FSequenceBuilder(complex.complex).build_flooding_minmax()};
@@ -592,7 +595,8 @@ PyMorseSequence build_sequence(const PyFilteredComplex& complex,
 }
 
 PyMorseReferenceFrame build_sequence_and_reference_map(const PyFilteredComplex& complex,
-                                                       const std::string& algorithm) {
+                                                       const std::string& algorithm,
+                                                       std::size_t max_workers) {
   require_finalized(complex);
   const std::string normalized = normalize_sequence_algorithm(algorithm);
   if (normalized == "flooding" || normalized == "stack-flooding") {
@@ -631,7 +635,7 @@ PyMorseReferenceFrame build_sequence_and_reference_map(const PyFilteredComplex& 
   if (normalized == "flooding-reduction-kernel-parallel") {
     return PyMorseReferenceFrame{
         morseframes::MorseReferenceFrameBuilder(complex.complex)
-            .build_flooding_reduction_kernel_parallel()};
+            .build_flooding_reduction_kernel_parallel(max_workers)};
   }
   if (normalized == "flooding-minmax") {
     return PyMorseReferenceFrame{
@@ -649,7 +653,8 @@ PyMorseReferenceFrame build_sequence_and_reference_map(const PyFilteredComplex& 
 }
 
 PyMorseCoreferenceFrame build_sequence_and_coreference_map(const PyFilteredComplex& complex,
-                                                           const std::string& algorithm) {
+                                                           const std::string& algorithm,
+                                                           std::size_t max_workers) {
   require_finalized(complex);
   const std::string normalized = normalize_sequence_algorithm(algorithm);
   if (normalized == "flooding" || normalized == "stack-flooding") {
@@ -682,7 +687,7 @@ PyMorseCoreferenceFrame build_sequence_and_coreference_map(const PyFilteredCompl
                 .build_flooding_reduction_kernel()
       : normalized == "flooding-reduction-kernel-parallel"
           ? morseframes::FSequenceBuilder(complex.complex)
-                .build_flooding_reduction_kernel_parallel()
+                .build_flooding_reduction_kernel_parallel(max_workers)
       : normalized == "flooding-minmax"
           ? morseframes::FSequenceBuilder(complex.complex).build_flooding_minmax()
       : normalized == "flooding-maxmin"
@@ -1394,15 +1399,18 @@ NB_MODULE(_morse_core, m) {
   m.def("compute_morse_sequence",
         &build_sequence,
         nb::arg("complex"),
-        nb::arg("algorithm") = "saturated");
+        nb::arg("algorithm") = "saturated",
+        nb::arg("max_workers") = 0);
   m.def("compute_morse_sequence_and_reference_map_object",
         &build_sequence_and_reference_map,
         nb::arg("complex"),
-        nb::arg("algorithm") = "saturated");
+        nb::arg("algorithm") = "saturated",
+        nb::arg("max_workers") = 0);
   m.def("compute_morse_sequence_and_coreference_map_object",
         &build_sequence_and_coreference_map,
         nb::arg("complex"),
-        nb::arg("algorithm") = "same-level-reduction");
+        nb::arg("algorithm") = "same-level-reduction",
+        nb::arg("max_workers") = 0);
   m.def("compute_reference_map_object",
         &compute_reference_map_object,
         nb::arg("complex"),

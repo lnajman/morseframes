@@ -5,9 +5,9 @@
 #include <cstddef>
 #include <future>
 #include <limits>
+#include <memory>
 #include <queue>
 #include <stdexcept>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -68,6 +68,7 @@ struct MorseSequenceBuildMetrics {
   std::size_t reduction_kernel_max_parallel_facets = 0;
   std::size_t reduction_kernel_parallel_level_batches = 0;
   std::size_t reduction_kernel_max_parallel_levels = 0;
+  std::size_t reduction_kernel_executor_workers = 1;
 };
 
 class MorseSequence {
@@ -1165,27 +1166,17 @@ class FSequenceBuilder {
     MorseSequence sequence(n);
     auto&& callback = on_step;
     const std::size_t num_levels = complex_.num_levels();
-    std::size_t workers = options.max_workers;
-    if (workers == 0) {
-      workers =
-          std::max<std::size_t>(1, std::thread::hardware_concurrency());
-    }
-
-    // Split one global budget between the independent level tasks of
-    // Algorithm 2 and the facet tasks of Algorithm 1. A square-root split
-    // enables both dimensions when at least four workers are available.
-    std::size_t level_workers = 1;
+    std::shared_ptr<BoundedTaskExecutor> executor;
     if (options.policy == ReductionKernelExecutionPolicy::Parallel) {
-      while (level_workers < num_levels &&
-             level_workers + 1 <= workers / (level_workers + 1)) {
-        ++level_workers;
-      }
+      executor = std::make_shared<BoundedTaskExecutor>(options.max_workers);
     }
-    ReductionKernelExecutionOptions facet_options = options;
-    facet_options.max_workers = std::max<std::size_t>(1, workers / level_workers);
-    ReductionKernelWorkspace<ComplexView> workspace(complex_, facet_options);
+    const std::size_t workers =
+        executor == nullptr ? 1 : executor->worker_count();
+    const std::size_t level_workers = std::min(num_levels, workers);
+    ReductionKernelWorkspace<ComplexView> workspace(complex_, options, executor);
     std::vector<ReductionKernelLevelResult> level_results(num_levels);
     ReductionKernelMetrics kernel_metrics;
+    kernel_metrics.executor_workers = workers;
 
     if (level_workers == 1 || num_levels <= 1) {
       for (LevelId level = 0; level < num_levels; ++level) {
@@ -1203,13 +1194,12 @@ class FSequenceBuilder {
         futures.reserve(count);
         for (std::size_t offset = 0; offset < count; ++offset) {
           const LevelId level = static_cast<LevelId>(first + offset);
-          futures.push_back(std::async(
-              std::launch::async, [level, &workspace]() {
-                return workspace.compute_level_isolated(level);
-              }));
+          futures.push_back(executor->submit([level, &workspace]() {
+            return workspace.compute_level_isolated(level);
+          }));
         }
         for (std::size_t offset = 0; offset < count; ++offset) {
-          level_results[first + offset] = futures[offset].get();
+          level_results[first + offset] = executor->get(futures[offset]);
         }
       }
     }
@@ -1261,6 +1251,8 @@ class FSequenceBuilder {
           kernel_metrics.parallel_level_batches;
       sequence_metrics_->reduction_kernel_max_parallel_levels =
           kernel_metrics.max_parallel_levels;
+      sequence_metrics_->reduction_kernel_executor_workers =
+          kernel_metrics.executor_workers;
     }
 
     return sequence;

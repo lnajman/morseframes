@@ -5,13 +5,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <future>
+#include <memory>
 #include <stdexcept>
-#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "morseframes/complex_view.hpp"
+#include "morseframes/task_executor.hpp"
 
 namespace morseframes {
 
@@ -51,6 +52,7 @@ struct ReductionKernelMetrics {
   std::size_t max_parallel_facets = 0;
   std::size_t parallel_level_batches = 0;
   std::size_t max_parallel_levels = 0;
+  std::size_t executor_workers = 1;
 };
 
 struct ReductionKernelLevelResult {
@@ -85,11 +87,19 @@ class ReductionKernelWorkspace {
  public:
   explicit ReductionKernelWorkspace(
       const ComplexView& complex,
-      ReductionKernelExecutionOptions options = {})
+      ReductionKernelExecutionOptions options = {},
+      std::shared_ptr<BoundedTaskExecutor> executor = {})
       : complex_(complex),
         options_(options),
+        executor_(std::move(executor)),
         active_(complex.size(), 0),
-        round_removed_(complex.size(), 0) {}
+        round_removed_(complex.size(), 0) {
+    if (options_.policy == ReductionKernelExecutionPolicy::Parallel &&
+        executor_ == nullptr) {
+      executor_ =
+          std::make_shared<BoundedTaskExecutor>(options_.max_workers);
+    }
+  }
 
   const ReductionKernelMetrics& metrics() const { return metrics_; }
 
@@ -107,6 +117,8 @@ class ReductionKernelWorkspace {
     ReductionKernelLevelResult result;
     auto& events = result.events;
     auto& metrics = result.metrics;
+    metrics.executor_workers =
+        executor_ == nullptr ? 1 : executor_->worker_count();
     events.reserve(bucket.size());
     std::size_t remaining = bucket.size();
     ++metrics.levels;
@@ -215,6 +227,8 @@ class ReductionKernelWorkspace {
     destination.max_parallel_levels =
         std::max(destination.max_parallel_levels,
                  source.max_parallel_levels);
+    destination.executor_workers =
+        std::max(destination.executor_workers, source.executor_workers);
   }
 
  private:
@@ -326,10 +340,8 @@ class ReductionKernelWorkspace {
     std::vector<FacetKernelResult> results;
     results.reserve(facets.size());
 
-    std::size_t workers = options_.max_workers;
-    if (workers == 0) {
-      workers = std::max<std::size_t>(1, std::thread::hardware_concurrency());
-    }
+    const std::size_t workers =
+        executor_ == nullptr ? 1 : executor_->worker_count();
     if (options_.policy == ReductionKernelExecutionPolicy::Sequential ||
         workers <= 1 || facets.size() <= 1) {
       for (SimplexId facet : facets) {
@@ -338,26 +350,22 @@ class ReductionKernelWorkspace {
       return results;
     }
 
-    workers = std::min(workers, facets.size());
     for (std::size_t first = 0; first < facets.size(); first += workers) {
       const std::size_t count = std::min(workers, facets.size() - first);
       ++metrics.parallel_batches;
       metrics.max_parallel_facets =
           std::max(metrics.max_parallel_facets, count);
       std::vector<std::future<FacetKernelResult>> futures;
-      futures.reserve(count - 1);
-      for (std::size_t offset = 1; offset < count; ++offset) {
+      futures.reserve(count);
+      for (std::size_t offset = 0; offset < count; ++offset) {
         const SimplexId facet = facets[first + offset];
-        futures.push_back(std::async(
-            std::launch::async,
+        futures.push_back(executor_->submit(
             [this, level, facet, &facets, &bucket]() {
               return compute_facet_kernel(level, facet, facets, bucket);
             }));
       }
-      results.push_back(
-          compute_facet_kernel(level, facets[first], facets, bucket));
       for (auto& future : futures) {
-        results.push_back(future.get());
+        results.push_back(executor_->get(future));
       }
     }
     return results;
@@ -365,6 +373,7 @@ class ReductionKernelWorkspace {
 
   const ComplexView& complex_;
   ReductionKernelExecutionOptions options_;
+  std::shared_ptr<BoundedTaskExecutor> executor_;
   std::vector<std::uint8_t> active_;
   std::vector<std::uint8_t> round_removed_;
   ReductionKernelMetrics metrics_;

@@ -173,7 +173,9 @@ volumes. The timed path calls only `profile_morse_sequence`: it does not build a
 reference map, a reduction plan, or a persistence diagram. Parallel sequences
 are constructed once outside the timing loop and must agree exactly with their
 sequential counterpart. Critical simplices are recorded by dimension and
-compared with F-Max.
+compared with F-Max. ReductionKernel uses its default uncached path here, which
+is the honest comparison for one gradient; repeated-gradient cache reuse is
+measured separately below.
 
 ```sh
 PYTHONPATH=python python3 tools/benchmark_gradient_strategies.py \
@@ -196,17 +198,19 @@ MPLCONFIGDIR=../work/matplotlib-cache \
 The run contains 21 complexes and 231 measured rows. All parallel gradients
 match their sequential counterpart exactly, and all five approaches have zero
 critical-count difference from F-Max in every case. In 2D, sequential
-ProcessLowerStars and ReductionKernel take median times of 6.04 and 1.71 times
-the F-Max time. At eight workers these ratios fall to 3.65 and 1.04, so the
-parallel ReductionKernel is the faster of the two. In 3D, the corresponding
-sequential ratios are 4.66 and 1.64; at eight workers they fall to 1.80 and
-0.51. ReductionKernel is therefore the faster parallel method in both
-dimensions and is faster than F-Max over the aggregate 3D corpus. At grid
-sizes 12 and 16 it reaches 0.42 and 0.36 times the F-Max time, respectively.
-ReductionKernel scales from one to eight workers by 1.57-fold in 2D and
-3.25-fold in 3D, versus 1.65-fold and 2.58-fold for ProcessLowerStars. The
-lower 2D ReductionKernel speedup reflects its substantially faster one-worker
-implementation rather than a regression in eight-worker time.
+ProcessLowerStars and ReductionKernel take median times of 6.19 and 1.45 times
+the F-Max time. At eight workers these ratios fall to 3.47 and 0.99, so the
+parallel ReductionKernel is the faster of the two and is effectively tied with
+F-Max. Four workers give the best aggregate 2D ReductionKernel ratio, 0.90;
+additional scheduling overhead outweighs useful work at eight workers. In 3D,
+the corresponding sequential ratios are 4.71 and 1.41; at eight workers they
+fall to 1.69 and 0.49. ReductionKernel is therefore the faster parallel method
+in both dimensions and is about twice as fast as F-Max over the aggregate 3D
+corpus. At grid sizes 12 and 16 it reaches 0.39 and 0.33 times the F-Max time,
+respectively. ReductionKernel scales from one to eight workers by 1.40-fold in
+2D and 2.99-fold in 3D, versus 1.66-fold and 2.80-fold for ProcessLowerStars.
+The lower 2D ReductionKernel scaling reflects saturation at four workers, not
+a regression in absolute performance relative to F-Max.
 
 The profiler times an uninstrumented construction and collects detailed phase
 counters in a separate diagnostic run. This prevents high-frequency timing

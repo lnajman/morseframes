@@ -196,15 +196,15 @@ MPLCONFIGDIR=../work/matplotlib-cache \
 The run contains 21 complexes and 231 measured rows. All parallel gradients
 match their sequential counterpart exactly, and all five approaches have zero
 critical-count difference from F-Max in every case. In 2D, sequential
-ProcessLowerStars and ReductionKernel take median times of 6.37 and 1.83 times
-the F-Max time. At eight workers these ratios fall to 3.59 and 1.04, so the
+ProcessLowerStars and ReductionKernel take median times of 6.04 and 1.71 times
+the F-Max time. At eight workers these ratios fall to 3.65 and 1.04, so the
 parallel ReductionKernel is the faster of the two. In 3D, the corresponding
-sequential ratios are 4.60 and 1.76; at eight workers they fall to 1.72 and
-0.57. ReductionKernel is therefore the faster parallel method in both
+sequential ratios are 4.66 and 1.64; at eight workers they fall to 1.80 and
+0.51. ReductionKernel is therefore the faster parallel method in both
 dimensions and is faster than F-Max over the aggregate 3D corpus. At grid
-sizes 12 and 16 it reaches 0.47 and 0.44 times the F-Max time, respectively.
-ReductionKernel scales from one to eight workers by 1.63-fold in 2D and
-3.09-fold in 3D, versus 1.75-fold and 2.72-fold for ProcessLowerStars. The
+sizes 12 and 16 it reaches 0.42 and 0.36 times the F-Max time, respectively.
+ReductionKernel scales from one to eight workers by 1.57-fold in 2D and
+3.25-fold in 3D, versus 1.65-fold and 2.58-fold for ProcessLowerStars. The
 lower 2D ReductionKernel speedup reflects its substantially faster one-worker
 implementation rather than a regression in eight-worker time.
 
@@ -240,6 +240,14 @@ In a seven-repeat paired comparison against the initial 24-byte,
 value-initialized arena, the compact uninitialized representation improves
 median eight-worker time by 6.5 percent in 2D and 5.9 percent in 3D. Its
 one-worker improvements are 1.3 and 2.8 percent, respectively.
+The ordinary construction path now instantiates a compile-time metrics-free
+kernel: clocks, diagnostic counters, per-facet diagnostic arrays, and the
+per-level metrics vector remain available to the separate profiling run but
+are absent from timed gradient construction. In a seven-repeat paired run over
+all 105 ReductionKernel configurations, this lowers median time by 7.7 percent
+and wins 89 comparisons. Median improvements are 7.7 percent sequentially and
+15.2 percent at eight workers in 2D, and 5.9 and 6.4 percent, respectively, in
+3D. The few regressions are concentrated in the smallest sub-millisecond cases.
 
 ![Gradient-only strategy comparison](gradient_strategy_comparison.svg)
 
@@ -378,10 +386,10 @@ MPLCONFIGDIR=../work/matplotlib-cache \
 ```
 
 Across the nine cases, eight-worker ProcessLowerStars reaches a median
-gradient-construction speedup of 2.64, versus 3.00 for the reduction kernel.
-The corresponding median construction times are 1.47 ms and 0.51 ms, so the
+gradient-construction speedup of 2.61, versus 3.09 for the reduction kernel.
+The corresponding median construction times are 1.39 ms and 0.45 ms, so the
 optimized ReductionKernel is now faster in absolute time. Median eight-worker
-efficiencies are 0.33 and 0.37, respectively.
+efficiencies are 0.33 and 0.39, respectively.
 
 ![Tetrahedral worker scaling](tetrahedral_worker_scaling.svg)
 
@@ -412,14 +420,14 @@ python3 tools/render_tetrahedral_phase_profile.py \
   --table-output docs/tetrahedral_phase_profile_table.tex
 ```
 
-Across the twelve cases, eight-worker ProcessLowerStars reaches a 2.59-fold
-gradient-construction speedup; ReductionKernel reaches 3.10-fold. Their median
-eight-worker construction times are 3.20 ms and 0.95 ms, respectively. At
-eight workers, ProcessLowerStars spends 32.5 percent in global setup, 31.9
-percent in parallel local-star processing, 3.1 percent in ordered replay, and
-5.1 percent in builder initialization. ReductionKernel spends 82.8 percent of
-its diagnostic wall time processing levels; setup and replay account for 12.4
-and 3.9 percent. The CSV now also records kernel rounds, facet kernels, facet
+Across the twelve cases, eight-worker ProcessLowerStars reaches a 2.78-fold
+gradient-construction speedup; ReductionKernel reaches 3.33-fold. Their median
+eight-worker construction times are 3.22 ms and 0.90 ms, respectively. At
+eight workers, ProcessLowerStars spends 34.4 percent in global setup, 37.0
+percent in parallel local-star processing, 2.5 percent in ordered replay, and
+4.9 percent in builder initialization. ReductionKernel spends 81.9 percent of
+its diagnostic wall time processing levels; setup and replay account for 14.0
+and 3.8 percent. The CSV now also records kernel rounds, facet kernels, facet
 discovery scans, cached-cell visits, local candidate scans, coboundary scans,
 membership tests, and inline-buffer overflows. All measured triangular and
 tetrahedral kernels report zero inline-buffer overflows. For the `n=16`

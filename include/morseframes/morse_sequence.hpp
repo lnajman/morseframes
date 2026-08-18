@@ -1626,7 +1626,8 @@ class FSequenceBuilder {
     auto* level_events =
         reinterpret_cast<ReductionKernelEvent*>(event_arena.get());
     std::vector<std::size_t> level_event_counts(num_levels, 0);
-    std::vector<ReductionKernelMetrics> level_metrics(num_levels);
+    std::vector<ReductionKernelMetrics> level_metrics(
+        options.collect_metrics ? num_levels : 0);
     ReductionKernelMetrics kernel_metrics;
     kernel_metrics.executor_workers = workers;
     profile_add(&MorseSequenceBuildMetrics::reduction_kernel_setup_nanoseconds,
@@ -1635,10 +1636,17 @@ class FSequenceBuilder {
     const auto level_start = profile_start();
     if (level_workers == 1 || num_levels <= 1) {
       for (LevelId level = 0; level < num_levels; ++level) {
-        level_metrics[level] = workspace.compute_level_isolated_into(
-            level, 0, level_events + event_offsets[level],
-            event_offsets[level + 1] - event_offsets[level],
-            level_event_counts[level]);
+        if (options.collect_metrics) {
+          level_metrics[level] = workspace.compute_level_isolated_into(
+              level, 0, level_events + event_offsets[level],
+              event_offsets[level + 1] - event_offsets[level],
+              level_event_counts[level]);
+        } else {
+          workspace.compute_level_isolated_into_unprofiled(
+              level, 0, level_events + event_offsets[level],
+              event_offsets[level + 1] - event_offsets[level],
+              level_event_counts[level]);
+        }
       }
     } else {
       // Levels own disjoint workspace entries. Long-lived tasks dynamically
@@ -1648,24 +1656,34 @@ class FSequenceBuilder {
       // uses the intra-level parallel algorithm.
       const std::size_t task_count = std::min(level_workers, num_levels);
       std::atomic<LevelId> next_level{0};
-      ++kernel_metrics.parallel_level_batches;
-      kernel_metrics.max_parallel_levels = task_count;
+      if (options.collect_metrics) {
+        ++kernel_metrics.parallel_level_batches;
+        kernel_metrics.max_parallel_levels = task_count;
+      }
       std::vector<std::future<void>> futures;
       futures.reserve(task_count);
       for (std::size_t task = 0; task < task_count; ++task) {
         futures.push_back(executor->submit(
             [task, &next_level, num_levels, &workspace, &event_offsets,
-             level_events, &level_event_counts, &level_metrics]() {
+             level_events, &level_event_counts, &level_metrics,
+             collect_metrics = options.collect_metrics]() {
               while (true) {
                 const LevelId level = next_level.fetch_add(
                     1, std::memory_order_relaxed);
                 if (level >= num_levels) {
                   return;
                 }
-                level_metrics[level] = workspace.compute_level_isolated_into(
-                    level, task, level_events + event_offsets[level],
-                    event_offsets[level + 1] - event_offsets[level],
-                    level_event_counts[level], false);
+                if (collect_metrics) {
+                  level_metrics[level] = workspace.compute_level_isolated_into(
+                      level, task, level_events + event_offsets[level],
+                      event_offsets[level + 1] - event_offsets[level],
+                      level_event_counts[level], false);
+                } else {
+                  workspace.compute_level_isolated_into_unprofiled(
+                      level, task, level_events + event_offsets[level],
+                      event_offsets[level + 1] - event_offsets[level],
+                      level_event_counts[level], false);
+                }
               }
             }));
       }
@@ -1679,8 +1697,10 @@ class FSequenceBuilder {
 
     const auto replay_start = profile_start();
     for (LevelId level = 0; level < num_levels; ++level) {
-      ReductionKernelWorkspace<ComplexView>::accumulate_metrics(
-          kernel_metrics, level_metrics[level]);
+      if (options.collect_metrics) {
+        ReductionKernelWorkspace<ComplexView>::accumulate_metrics(
+            kernel_metrics, level_metrics[level]);
+      }
       const std::size_t first = event_offsets[level];
       for (std::size_t index = level_event_counts[level]; index > 0; --index) {
         const auto& event = level_events[first + index - 1];

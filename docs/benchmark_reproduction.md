@@ -119,6 +119,36 @@ replacing it, make sure the backend check above prints `True`; otherwise the CSV
 will contain `cpp_backend=False` rows and the timing will describe the
 pure-Python fallback instead of the optimized C++ backend.
 
+## ProcessLowerStars Scaling
+
+The focused ProcessLowerStars runner constructs two controlled simplicial
+families. The balanced family gives every anchor vertex the same triangle-fan
+workload. The skewed family keeps the same number of simplices but concentrates
+most of that work in one lower star. All vertex values are injective and every
+simplex uses the exact max-vertex lower-star extension.
+
+```sh
+PYTHONPATH=python python3 tools/benchmark_process_lower_stars.py \
+  --anchors 16 \
+  --balanced-fan 8 \
+  --light-fan 2 \
+  --heavy-fan 98 \
+  --workers 1 2 4 8 \
+  --repeats 5 \
+  --warmups 1 \
+  --format csv \
+  --output ../work/process_lower_stars_scaling.csv
+```
+
+The parameters above give both families the same total fan size and therefore
+the same simplex count: `16 * 8 = 98 + 15 * 2`. This isolates load imbalance
+from input size. Each parallel row is checked against the sequential algorithm
+for the exact Morse-step sequence and against ordinary persistence for the
+barcode. The output records estimated task loads, critical counts by dimension,
+construction and downstream persistence times, speedup, and parallel
+efficiency. A `cpp_backend=False` row is a correctness run of the sequential
+fallback, not a parallel-performance measurement.
+
 ## Roadmap and External Data
 
 The benchmark runner also has Roadmap and CAM-style families:

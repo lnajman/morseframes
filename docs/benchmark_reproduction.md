@@ -203,13 +203,12 @@ The initial Apple M1 Max run covers nine cases (three sizes by three seeds).
 ProcessLowerStars, reduction kernels, both eight-worker versions, F-Max, F-Min,
 and Saturated produce the same critical count in every case. Same-level
 reduction produces a median of 3.95 times as many critical simplices. Relative
-to F-Max, median end-to-end time is 2.44 times as large for sequential
+to F-Max, median end-to-end time is 2.35 times as large for sequential
 ProcessLowerStars and 2.39 times as large for sequential reduction kernels.
-Eight-worker ProcessLowerStars improves to 1.57 times the F-Max time, whereas
-the current eight-worker reduction-kernel implementation grows to 8.22 times
-the F-Max time. Its unchanged structural counters, together with thousands of
-small parallel batches, point to parallel overhead rather than a different
-Morse complex.
+Eight-worker ProcessLowerStars improves to 1.58 times the F-Max time, while
+the optimized eight-worker reduction kernel reaches 1.12 times the F-Max time.
+The structural counters are unchanged: the runtime improvement comes from
+coarse scheduling rather than a different Morse complex.
 
 ![Simplicial strategy comparison](simplicial_strategy_comparison.svg)
 
@@ -218,6 +217,42 @@ The grid-size aggregates are generated in
 operation and scheduling counters in `docs/reduction_kernel_metrics_table.tex`.
 This is a MorseFrames-internal comparison; it does not replace the planned
 external benchmark against Robins' ProcessLowerStars implementation.
+
+## Reduction-Kernel Scaling
+
+The optimized parallel scheduler assigns one load-balanced group of filtration
+levels to each worker. It disables nested facet tasks while multiple levels are
+running concurrently, avoiding thousands of tasks whose individual levels
+contain only a handful of simplices. A single large plateau still uses the
+facet-parallel reduction-kernel path.
+
+```sh
+PYTHONPATH=python python3 tools/benchmark_reduction_kernel_scaling.py \
+  --sizes 16 32 64 \
+  --seeds 0 1 2 \
+  --workers 1 2 4 8 \
+  --repeats 5 \
+  --warmups 1 \
+  --format csv \
+  --output ../work/reduction_kernel_scaling.csv
+
+MPLCONFIGDIR=../work/matplotlib-cache \
+  python3 tools/render_reduction_kernel_scaling.py \
+  --input ../work/reduction_kernel_scaling.csv \
+  --figure-output docs/reduction_kernel_scaling.svg \
+  --table-output docs/reduction_kernel_scaling_table.tex
+```
+
+Across the same nine terrains, median construction speedup relative to one
+worker is 1.64x, 2.35x, and 2.96x at two, four, and eight workers. Median
+end-to-end speedup reaches 2.00x at eight workers. Every worker count is checked
+for the exact sequential reduction-kernel sequence and the standard barcode.
+The multilevel rows now use one coarse level batch and no nested facet batches.
+
+![Reduction-kernel scaling](reduction_kernel_scaling.svg)
+
+The grid-size aggregates are generated in
+`docs/reduction_kernel_scaling_table.tex`.
 
 ## Roadmap and External Data
 

@@ -231,7 +231,7 @@ def render_kernel_table(rows: list[dict[str, str]], output: Path) -> None:
         r"\toprule",
         (
             r"Grid & Strategy & Levels & Rounds & Facet kernels & Reductions & "
-            r"Perforations & Level batches & Facet batches & Max facets \\"
+            r"Perforations & Level batches & Facet batches & Max levels \\"
         ),
         r"\midrule",
     ]
@@ -253,7 +253,7 @@ def render_kernel_table(rows: list[dict[str, str]], output: Path) -> None:
                         f'{median(int(row["reduction_kernel_perforations"]) for row in group):.0f}',
                         f'{median(int(row["reduction_kernel_parallel_level_batches"]) for row in group):.0f}',
                         f'{median(int(row["reduction_kernel_parallel_batches"]) for row in group):.0f}',
-                        f'{median(int(row["reduction_kernel_max_parallel_facets"]) for row in group):.0f}',
+                        f'{median(int(row["reduction_kernel_max_parallel_levels"]) for row in group):.0f}',
                     )
                 )
                 + r" \\"

@@ -1209,6 +1209,13 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   assert_same_sequence(multilevel_sequence, multilevel_parallel_sequence);
   assert(multilevel_parallel_metrics
              .reduction_kernel_parallel_level_batches > 0);
+  assert(multilevel_parallel_metrics
+             .reduction_kernel_facet_discovery_parallel_tasks == 0);
+  assert(multilevel_parallel_metrics
+             .reduction_kernel_essential_parallel_tasks == 0);
+  assert(multilevel_parallel_metrics.reduction_kernel_parallel_batches == 0);
+  assert(multilevel_parallel_metrics
+             .reduction_kernel_aggregation_parallel_tasks == 0);
   assert(multilevel_parallel_metrics.reduction_kernel_max_parallel_levels ==
          std::min<std::size_t>(multilevel_complex.num_levels(), 4));
   assert(multilevel_parallel_metrics.reduction_kernel_executor_workers == 4);

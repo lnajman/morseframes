@@ -73,7 +73,10 @@ class SimplicialStrategyBenchmarkRow:
     reduction_kernel_parallel_level_batches: int
     reduction_kernel_max_parallel_levels: int
     reduction_kernel_executor_workers: int
+    reduction_kernel_facet_discovery_parallel_tasks: int
+    reduction_kernel_essential_parallel_tasks: int
     reduction_kernel_aggregation_rounds: int
+    reduction_kernel_aggregation_parallel_tasks: int
     reduction_kernel_cumulative_facet_seconds: float
     reduction_kernel_cumulative_essential_seconds: float
     reduction_kernel_cumulative_core_seconds: float
@@ -372,8 +375,17 @@ def benchmark_terrain(
                 reduction_kernel_executor_workers=_metric_int(
                     kernel_metrics, "executor_workers"
                 ),
+                reduction_kernel_facet_discovery_parallel_tasks=_metric_int(
+                    kernel_metrics, "facet_discovery_parallel_tasks"
+                ),
+                reduction_kernel_essential_parallel_tasks=_metric_int(
+                    kernel_metrics, "essential_parallel_tasks"
+                ),
                 reduction_kernel_aggregation_rounds=_metric_int(
                     kernel_metrics, "aggregation_rounds"
+                ),
+                reduction_kernel_aggregation_parallel_tasks=_metric_int(
+                    kernel_metrics, "aggregation_parallel_tasks"
                 ),
                 reduction_kernel_cumulative_facet_seconds=_metric_seconds(
                     kernel_metrics, "facet"

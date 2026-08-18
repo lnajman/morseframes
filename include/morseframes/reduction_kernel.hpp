@@ -120,7 +120,8 @@ class ReductionKernelWorkspace {
   // Each level owns disjoint entries of active_ and round_removed_. This
   // isolated form therefore supports Algorithm 2 level tasks without sharing
   // event buffers or counters between workers.
-  ReductionKernelLevelResult compute_level_isolated(LevelId level) {
+  ReductionKernelLevelResult compute_level_isolated(
+      LevelId level, bool allow_intra_level_parallelism = true) {
     const auto& bucket = complex_.simplices_of_level(level);
     ReductionKernelLevelResult result;
     auto& events = result.events;
@@ -142,22 +143,27 @@ class ReductionKernelWorkspace {
         ++metrics.kernel_rounds;
         kernel_round_changed = false;
         const auto facet_start = Clock::now();
-        const auto facets = active_facets(level, bucket, metrics);
+        const auto facets = active_facets(
+            level, bucket, metrics, allow_intra_level_parallelism);
         metrics.facet_nanoseconds +=
             elapsed_nanoseconds(facet_start, Clock::now());
         metrics.facet_kernels += facets.size();
         const auto essential_start = Clock::now();
-        compute_facet_incidence(facets, bucket, metrics);
+        compute_facet_incidence(
+            facets, bucket, metrics, allow_intra_level_parallelism);
         metrics.essential_nanoseconds +=
             elapsed_nanoseconds(essential_start, Clock::now());
         for (SimplexId simplex : bucket) {
           round_removed_[simplex] = 0;
         }
 
-        auto facet_results = execute_facets(level, facets, bucket, metrics);
+        auto facet_results = execute_facets(
+            level, facets, bucket, metrics, allow_intra_level_parallelism);
         const auto aggregation_start = Clock::now();
         auto round_result =
-            aggregate_facet_results(std::move(facet_results), metrics);
+            aggregate_facet_results(
+                std::move(facet_results), metrics,
+                allow_intra_level_parallelism);
         metrics.aggregation_nanoseconds +=
             elapsed_nanoseconds(aggregation_start, Clock::now());
         metrics.core_nanoseconds += round_result.core_nanoseconds;
@@ -202,7 +208,8 @@ class ReductionKernelWorkspace {
       }
 
       const auto facet_start = Clock::now();
-      const auto facets = active_facets(level, bucket, metrics);
+      const auto facets = active_facets(
+          level, bucket, metrics, allow_intra_level_parallelism);
       metrics.facet_nanoseconds +=
           elapsed_nanoseconds(facet_start, Clock::now());
       if (facets.empty()) {
@@ -262,10 +269,12 @@ class ReductionKernelWorkspace {
 
   template <typename Function>
   std::size_t parallel_for_indices(std::size_t count,
-                                   Function&& function) const {
+                                   Function&& function,
+                                   bool allow_parallelism) const {
     const std::size_t workers =
         executor_ == nullptr ? 1 : executor_->worker_count();
-    if (options_.policy == ReductionKernelExecutionPolicy::Sequential ||
+    if (!allow_parallelism ||
+        options_.policy == ReductionKernelExecutionPolicy::Sequential ||
         workers <= 1 || count <= 1) {
       for (std::size_t index = 0; index < count; ++index) {
         function(index);
@@ -293,7 +302,8 @@ class ReductionKernelWorkspace {
 
   std::vector<SimplexId> active_facets(
       LevelId level, const std::vector<SimplexId>& bucket,
-      ReductionKernelMetrics& metrics) const {
+      ReductionKernelMetrics& metrics,
+      bool allow_parallelism) const {
     std::vector<std::uint8_t> facet_flags(bucket.size(), 0);
     metrics.facet_discovery_parallel_tasks += parallel_for_indices(
         bucket.size(), [this, level, &bucket, &facet_flags](std::size_t index) {
@@ -307,7 +317,7 @@ class ReductionKernelWorkspace {
             }
           }
           facet_flags[index] = 1;
-        });
+        }, allow_parallelism);
 
     std::vector<SimplexId> facets;
     for (std::size_t index = 0; index < bucket.size(); ++index) {
@@ -320,7 +330,8 @@ class ReductionKernelWorkspace {
 
   void compute_facet_incidence(const std::vector<SimplexId>& facets,
                                const std::vector<SimplexId>& bucket,
-                               ReductionKernelMetrics& metrics) {
+                               ReductionKernelMetrics& metrics,
+                               bool allow_parallelism) {
     metrics.essential_parallel_tasks += parallel_for_indices(
         bucket.size(), [this, &facets, &bucket](std::size_t index) {
           const SimplexId simplex = bucket[index];
@@ -336,7 +347,7 @@ class ReductionKernelWorkspace {
             }
           }
           facet_incidence_[simplex] = incidence;
-        });
+        }, allow_parallelism);
   }
 
   FacetKernelResult compute_facet_kernel(
@@ -404,13 +415,15 @@ class ReductionKernelWorkspace {
   std::vector<FacetKernelResult> execute_facets(
       LevelId level, const std::vector<SimplexId>& facets,
       const std::vector<SimplexId>& bucket,
-      ReductionKernelMetrics& metrics) const {
+      ReductionKernelMetrics& metrics,
+      bool allow_parallelism) const {
     std::vector<FacetKernelResult> results;
     results.reserve(facets.size());
 
     const std::size_t workers =
         executor_ == nullptr ? 1 : executor_->worker_count();
-    if (options_.policy == ReductionKernelExecutionPolicy::Sequential ||
+    if (!allow_parallelism ||
+        options_.policy == ReductionKernelExecutionPolicy::Sequential ||
         workers <= 1 || facets.size() <= 1) {
       for (SimplexId facet : facets) {
         results.push_back(compute_facet_kernel(level, facet, bucket));
@@ -453,7 +466,8 @@ class ReductionKernelWorkspace {
 
   FacetKernelResult aggregate_facet_results(
       std::vector<FacetKernelResult> results,
-      ReductionKernelMetrics& metrics) const {
+      ReductionKernelMetrics& metrics,
+      bool allow_parallelism) const {
     while (results.size() > 1) {
       ++metrics.aggregation_rounds;
       const std::size_t pair_count = results.size() / 2;
@@ -461,6 +475,7 @@ class ReductionKernelWorkspace {
       next.reserve((results.size() + 1) / 2);
 
       const bool parallel =
+          allow_parallelism &&
           options_.policy == ReductionKernelExecutionPolicy::Parallel &&
           executor_ != nullptr && executor_->worker_count() > 1 &&
           pair_count > 1;

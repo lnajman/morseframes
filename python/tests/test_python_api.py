@@ -585,18 +585,21 @@ class PythonApiTest(unittest.TestCase):
                 ]
                 > 1
             ):
-                self.assertGreater(
-                    parallel_kernel_profile.frame_metrics[
-                        "sequence_reduction_kernel_facet_discovery_parallel_tasks"
-                    ],
-                    0,
-                )
-                self.assertGreater(
-                    parallel_kernel_profile.frame_metrics[
-                        "sequence_reduction_kernel_essential_parallel_tasks"
-                    ],
-                    0,
-                )
+                level_batches = parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_parallel_level_batches"
+                ]
+                facet_tasks = parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_facet_discovery_parallel_tasks"
+                ]
+                essential_tasks = parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_essential_parallel_tasks"
+                ]
+                self.assertTrue(level_batches > 0 or facet_tasks > 0)
+                if level_batches > 0:
+                    self.assertEqual(facet_tasks, 0)
+                    self.assertEqual(essential_tasks, 0)
+                else:
+                    self.assertGreater(essential_tasks, 0)
 
     def test_morse_sequence_algorithm_rejects_unknown_or_reserved_names(self):
         complex_ = edge_complex()

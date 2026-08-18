@@ -1525,24 +1525,43 @@ class FSequenceBuilder {
         level_results[level] = workspace.compute_level_isolated(level);
       }
     } else {
-      for (std::size_t first = 0; first < num_levels;
-           first += level_workers) {
-        const std::size_t count =
-            std::min(level_workers, num_levels - first);
-        ++kernel_metrics.parallel_level_batches;
-        kernel_metrics.max_parallel_levels =
-            std::max(kernel_metrics.max_parallel_levels, count);
-        std::vector<std::future<ReductionKernelLevelResult>> futures;
-        futures.reserve(count);
-        for (std::size_t offset = 0; offset < count; ++offset) {
-          const LevelId level = static_cast<LevelId>(first + offset);
-          futures.push_back(executor->submit([level, &workspace]() {
-            return workspace.compute_level_isolated(level);
-          }));
-        }
-        for (std::size_t offset = 0; offset < count; ++offset) {
-          level_results[first + offset] = executor->get(futures[offset]);
-        }
+      // Levels own disjoint workspace entries. Greedily balance them into one
+      // task per worker so injective filtrations do not create one task per
+      // tiny lower-star level. Nested facet tasks are disabled on this path; a
+      // single large plateau still uses the intra-level parallel algorithm.
+      const std::size_t task_count = std::min(level_workers, num_levels);
+      std::vector<LevelId> levels(num_levels);
+      std::iota(levels.begin(), levels.end(), 0);
+      std::sort(levels.begin(), levels.end(), [&](LevelId lhs, LevelId rhs) {
+        const std::size_t lhs_size = complex_.simplices_of_level(lhs).size();
+        const std::size_t rhs_size = complex_.simplices_of_level(rhs).size();
+        return lhs_size != rhs_size ? lhs_size > rhs_size : lhs < rhs;
+      });
+      std::vector<std::vector<LevelId>> task_levels(task_count);
+      std::vector<std::size_t> task_loads(task_count, 0);
+      for (LevelId level : levels) {
+        const auto lightest =
+            std::min_element(task_loads.begin(), task_loads.end());
+        const std::size_t task_index =
+            static_cast<std::size_t>(lightest - task_loads.begin());
+        task_levels[task_index].push_back(level);
+        task_loads[task_index] += complex_.simplices_of_level(level).size();
+      }
+      ++kernel_metrics.parallel_level_batches;
+      kernel_metrics.max_parallel_levels = task_count;
+      std::vector<std::future<void>> futures;
+      futures.reserve(task_count);
+      for (const auto& task : task_levels) {
+        futures.push_back(executor->submit(
+            [task, &workspace, &level_results]() {
+              for (LevelId level : task) {
+                level_results[level] =
+                    workspace.compute_level_isolated(level, false);
+              }
+            }));
+      }
+      for (auto& future : futures) {
+        executor->get(future);
       }
     }
 

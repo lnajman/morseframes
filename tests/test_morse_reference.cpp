@@ -1252,8 +1252,9 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   morseframes::validate_morse_sequence(four_facet_complex,
                                        four_facet_parallel_sequence);
   assert_same_sequence(four_facet_sequence, four_facet_parallel_sequence);
+  assert(four_facet_parallel_metrics.reduction_kernel_aggregation_rounds > 0);
   assert(four_facet_parallel_metrics
-             .reduction_kernel_aggregation_parallel_tasks > 0);
+             .reduction_kernel_aggregation_parallel_tasks == 0);
 
   const auto strategy =
       morseframes::morse_sequence_strategy_from_name("reduction-kernel");

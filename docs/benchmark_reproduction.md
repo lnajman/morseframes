@@ -130,9 +130,8 @@ simplex uses the exact max-vertex lower-star extension.
 ```sh
 PYTHONPATH=python python3 tools/benchmark_process_lower_stars.py \
   --anchors 16 \
-  --balanced-fan 8 \
+  --balanced-fans 8 32 128 \
   --light-fan 2 \
-  --heavy-fan 98 \
   --workers 1 2 4 8 \
   --repeats 5 \
   --warmups 1 \
@@ -140,14 +139,30 @@ PYTHONPATH=python python3 tools/benchmark_process_lower_stars.py \
   --output ../work/process_lower_stars_scaling.csv
 ```
 
-The parameters above give both families the same total fan size and therefore
-the same simplex count: `16 * 8 = 98 + 15 * 2`. This isolates load imbalance
-from input size. Each parallel row is checked against the sequential algorithm
+For each scale, the heavy fan is selected automatically so both families have
+the same total fan size and therefore the same simplex count. For example,
+`16 * 8 = 98 + 15 * 2`. This isolates load imbalance from input size. Each
+parallel row is checked against the sequential algorithm
 for the exact Morse-step sequence and against ordinary persistence for the
 barcode. The output records estimated task loads, critical counts by dimension,
 construction and downstream persistence times, speedup, and parallel
 efficiency. A `cpp_backend=False` row is a correctness run of the sequential
 fallback, not a parallel-performance measurement.
+
+The first controlled run on an Apple M1 Max (10 CPU cores), using seven
+measured repetitions after one warm-up, is shown below. At 12,304 simplices the
+balanced case reaches 1.81x sequence speedup and 1.60x end-to-end speedup. The
+matched skewed case reaches only 1.19x and 1.13x, respectively, while its
+estimated eight-worker load ratio rises to 6.79. The two cases have identical
+critical counts `(2048, 2032, 0)`, so this gap is attributable to scheduling
+imbalance rather than a different Morse complex.
+
+![ProcessLowerStars scaling](process_lower_stars_scaling.svg)
+
+The exact paper-ready values are generated in
+`docs/process_lower_stars_scaling_table.tex`. These measurements are a local
+scheduler study, not yet the comparison with Robins' implementation; that
+external benchmark remains a separate stage.
 
 ## Roadmap and External Data
 

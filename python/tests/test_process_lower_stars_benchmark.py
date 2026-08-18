@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import benchmark_process_lower_stars as bench  # noqa: E402
+import render_process_lower_stars_scaling as render  # noqa: E402
 
 
 class ProcessLowerStarsBenchmarkTest(unittest.TestCase):
@@ -68,6 +69,28 @@ class ProcessLowerStarsBenchmarkTest(unittest.TestCase):
         self.assertIn("critical_simplices_by_dimension", serialized[0])
         self.assertIn("sequence_seconds_per_eliminated_simplex", serialized[0])
         self.assertIn("sequence_speedup_vs_sequential", serialized[0])
+
+        table_path = ROOT / "build" / "test_process_lower_stars_scaling_table.tex"
+        table_path.parent.mkdir(parents=True, exist_ok=True)
+        render.render_table(serialized, table_path)
+        table = table_path.read_text()
+        self.assertIn("Critical (by dim.)", table)
+        self.assertIn("Balanced", table)
+
+    def test_multi_scale_cli_computes_matched_heavy_fans(self):
+        args = bench.parse_args(
+            [
+                "--anchors",
+                "4",
+                "--balanced-fans",
+                "2",
+                "5",
+                "--light-fan",
+                "1",
+            ]
+        )
+        self.assertEqual(args.balanced_fans, [2, 5])
+        self.assertIsNone(args.heavy_fan)
 
 
 if __name__ == "__main__":

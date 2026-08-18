@@ -356,8 +356,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--anchors", type=int, default=16)
     parser.add_argument("--balanced-fan", type=int, default=8)
+    parser.add_argument("--balanced-fans", type=int, nargs="+")
     parser.add_argument("--light-fan", type=int, default=2)
-    parser.add_argument("--heavy-fan", type=int, default=98)
+    parser.add_argument("--heavy-fan", type=int)
     parser.add_argument("--workers", type=int, nargs="+", default=(1, 2, 4, 8))
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmups", type=int, default=1)
@@ -368,10 +369,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    cases = (
-        make_balanced_case(args.anchors, args.balanced_fan),
-        make_skewed_case(args.anchors, args.light_fan, args.heavy_fan),
-    )
+    balanced_fans = tuple(args.balanced_fans or (args.balanced_fan,))
+    if args.heavy_fan is not None and len(balanced_fans) != 1:
+        raise ValueError("--heavy-fan can only be used with one balanced fan size.")
+    cases: list[LowerStarCase] = []
+    for balanced_fan in balanced_fans:
+        heavy_fan = (
+            args.heavy_fan
+            if args.heavy_fan is not None
+            else args.anchors * balanced_fan
+            - (args.anchors - 1) * args.light_fan
+        )
+        cases.extend(
+            (
+                make_balanced_case(args.anchors, balanced_fan),
+                make_skewed_case(args.anchors, args.light_fan, heavy_fan),
+            )
+        )
     rows = [
         row
         for case in cases

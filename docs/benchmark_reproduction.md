@@ -261,6 +261,11 @@ The metrics-free sequential path consumes each facet result immediately and
 retains only its compact reduction events for the coordinator merge. Removing
 the array of large intermediate facet-result objects lowers cached median time
 by a further 4.9 percent in 2D and 7.7 percent in 3D.
+Metrics-free facet results are separately specialized to contain only the
+inline event buffer; diagnostic counters exist only in the instrumented type.
+Across two confirmation runs this lowers default uncached median time by 3.2
+percent in 2D and 4.7 percent in 3D, while cached time remains neutral in 2D
+and improves by 1.9 percent in 3D.
 
 ### Reusable ReductionKernel Topology Cache
 
@@ -282,10 +287,10 @@ PYTHONPATH=python python3 tools/benchmark_reduction_kernel_cache.py \
 
 Across all 21 cases, every cached gradient exactly matches its uncached
 counterpart and every cached run is faster. Median sequential speedup is
-1.43-fold on terrains and 1.66-fold on tetrahedral volumes. Median cache build
-costs are 0.24 ms and 1.49 ms, with median allocated footprints of 0.27 MiB and
+1.43-fold on terrains and 1.62-fold on tetrahedral volumes. Median cache build
+costs are 0.23 ms and 1.45 ms, with median allocated footprints of 0.27 MiB and
 1.65 MiB, respectively. The build cost is recovered after median counts of
-1.48 terrain gradients and 1.23 volume gradients. The largest `n=16` volume
+1.57 terrain gradients and 1.34 volume gradients. The largest `n=16` volume
 cache occupies 5.80 MiB. Multiworker ReductionKernel deliberately retains
 worker-local topology construction because shared-cache access did not improve
 its wall time.

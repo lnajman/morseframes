@@ -282,6 +282,8 @@ The ordinary metrics-free sequential path consumes facet results immediately,
 keeping only their compact event stream for conflict checking and merging.
 Diagnostic and parallel executions retain explicit facet results for phase
 accounting and concurrent result collection.
+The metrics-free result type omits all diagnostic fields at compile time;
+parallel metrics-free collection therefore also moves smaller result objects.
 
 For repeated sequential gradients on an owning `FilteredComplex`, callers may
 invoke `complex_.prepare_reduction_kernel_cache()` once. ReductionKernel then

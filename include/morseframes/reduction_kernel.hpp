@@ -161,8 +161,9 @@ class ReductionKernelWorkspace {
     bool using_overflow_ = false;
   };
 
-  struct FacetKernelResult {
-    InlineVector<ReductionKernelEvent, kInlineEventCapacity> events;
+  struct EmptyFacetKernelDiagnostics {};
+
+  struct FacetKernelDiagnostics {
     std::uint64_t core_nanoseconds = 0;
     std::uint64_t local_reduction_nanoseconds = 0;
     std::size_t facet_cell_visits = 0;
@@ -172,6 +173,16 @@ class ReductionKernelWorkspace {
     std::size_t inline_cell_overflows = 0;
     std::size_t inline_event_overflows = 0;
   };
+
+  template <bool CollectMetrics>
+  struct FacetKernelResult
+      : std::conditional_t<CollectMetrics, FacetKernelDiagnostics,
+                           EmptyFacetKernelDiagnostics> {
+    InlineVector<ReductionKernelEvent, kInlineEventCapacity> events;
+  };
+
+  static_assert(sizeof(FacetKernelResult<false>) <
+                sizeof(FacetKernelResult<true>));
 
   struct LevelCells {
     bool enabled = false;
@@ -199,6 +210,7 @@ class ReductionKernelWorkspace {
         active_simplices.reserve(bucket_size);
       }
       facet_results.clear();
+      diagnostic_facet_results.clear();
       round_events.clear();
       if (round_events.capacity() < bucket_size) {
         round_events.reserve(bucket_size);
@@ -219,7 +231,8 @@ class ReductionKernelWorkspace {
     std::vector<std::size_t> coboundary_visits;
     std::vector<SimplexId> facets;
     std::vector<SimplexId> active_simplices;
-    std::vector<FacetKernelResult> facet_results;
+    std::vector<FacetKernelResult<false>> facet_results;
+    std::vector<FacetKernelResult<true>> diagnostic_facet_results;
     std::vector<ReductionKernelEvent> round_events;
     LevelCells level_cells;
     std::vector<std::uint8_t> included;
@@ -442,7 +455,7 @@ class ReductionKernelWorkspace {
         profile_add<CollectMetrics>(metrics.essential_nanoseconds,
                                     essential_start);
         scratch.round_events.clear();
-        auto record_facet_events = [&](const FacetKernelResult& result) {
+        auto record_facet_events = [&](const auto& result) {
           for (std::size_t index = 0; index < result.events.size(); ++index) {
             const auto& event = result.events[index];
             if (event.is_perforation()) {
@@ -484,7 +497,7 @@ class ReductionKernelWorkspace {
         } else {
           const auto& facet_results = execute_facets<true>(
               level, facets, scratch.active_simplices, level_cells,
-              scratch.facet_results, metrics,
+              scratch.diagnostic_facet_results, metrics,
               allow_intra_level_parallelism);
           const auto aggregation_start = profile_start<true>();
           if (facet_results.size() > 1) {
@@ -893,11 +906,11 @@ class ReductionKernelWorkspace {
   }
 
   template <bool CollectMetrics>
-  FacetKernelResult compute_facet_kernel(
+  FacetKernelResult<CollectMetrics> compute_facet_kernel(
       LevelId level, SimplexId facet,
       const std::vector<SimplexId>& bucket,
       const LevelCells& level_cells) const {
-    FacetKernelResult result;
+    FacetKernelResult<CollectMetrics> result;
     const auto core_start = profile_start<CollectMetrics>();
     InlineVector<SimplexId, kInlineCellCapacity> cell;
     if (level_cells.enabled) {
@@ -1015,11 +1028,11 @@ class ReductionKernelWorkspace {
   }
 
   template <bool CollectMetrics>
-  const std::vector<FacetKernelResult>& execute_facets(
+  const std::vector<FacetKernelResult<CollectMetrics>>& execute_facets(
       LevelId level, const std::vector<SimplexId>& facets,
       const std::vector<SimplexId>& bucket,
       const LevelCells& level_cells,
-      std::vector<FacetKernelResult>& results,
+      std::vector<FacetKernelResult<CollectMetrics>>& results,
       ReductionKernelMetrics& metrics,
       bool allow_parallelism) const {
     results.clear();
@@ -1047,7 +1060,7 @@ class ReductionKernelWorkspace {
         metrics.max_parallel_facets =
             std::max(metrics.max_parallel_facets, count);
       }
-      std::vector<std::future<FacetKernelResult>> futures;
+      std::vector<std::future<FacetKernelResult<CollectMetrics>>> futures;
       futures.reserve(count);
       for (std::size_t offset = 0; offset < count; ++offset) {
         const SimplexId facet = facets[first + offset];

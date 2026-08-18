@@ -196,15 +196,15 @@ MPLCONFIGDIR=../work/matplotlib-cache \
 The run contains 21 complexes and 231 measured rows. All parallel gradients
 match their sequential counterpart exactly, and all five approaches have zero
 critical-count difference from F-Max in every case. In 2D, sequential
-ProcessLowerStars and ReductionKernel take median times of 6.60 and 2.06 times
-the F-Max time. At eight workers these ratios fall to 4.11 and 1.31, so the
+ProcessLowerStars and ReductionKernel take median times of 6.46 and 1.86 times
+the F-Max time. At eight workers these ratios fall to 3.37 and 1.13, so the
 parallel ReductionKernel is the faster of the two. In 3D, the corresponding
-sequential ratios are 4.74 and 1.81; at eight workers they fall to 1.86 and
-0.62. ReductionKernel is therefore the faster parallel method in both
+sequential ratios are 4.58 and 1.74; at eight workers they fall to 1.72 and
+0.56. ReductionKernel is therefore the faster parallel method in both
 dimensions and is faster than F-Max over the aggregate 3D corpus. At grid
-sizes 12 and 16 it reaches 0.58 and 0.41 times the F-Max time, respectively.
-ReductionKernel scales from one to eight workers by 1.51-fold in 2D and
-2.89-fold in 3D, versus 1.54-fold and 2.58-fold for ProcessLowerStars. The
+sizes 12 and 16 it reaches 0.45 and 0.43 times the F-Max time, respectively.
+ReductionKernel scales from one to eight workers by 1.50-fold in 2D and
+3.16-fold in 3D, versus 1.66-fold and 2.61-fold for ProcessLowerStars. The
 lower 2D ReductionKernel speedup reflects its substantially faster one-worker
 implementation rather than a regression in eight-worker time.
 
@@ -214,11 +214,13 @@ calls inside ReductionKernel facet tasks from biasing the comparison. The
 optimized kernel caches compact same-level face closures for triangular and
 tetrahedral sections, reuses per-worker level scratch across filtration levels
 and facet-discovery and result buffers across rounds, and stores the small
-per-facet cells, removal masks, and events inline. Facet
-events are consumed directly in deterministic order instead of rebuilding
-intermediate event vectors. Higher-dimensional cells transparently fall back
-to dynamic storage. Relative to the preceding cached-closure implementation,
-the median ReductionKernel/F-Max ratio falls from 5.51 to 3.04 sequentially in
+per-facet cells, removal masks, and events inline. Facet events are consumed
+directly in deterministic order instead of rebuilding intermediate event
+vectors. Per-level events are written into disjoint slices of one preallocated
+arena, eliminating one allocation per filtration level without changing
+reverse-per-level replay. Higher-dimensional cells transparently fall back to
+dynamic storage. Relative to the preceding cached-closure implementation, the
+median ReductionKernel/F-Max ratio falls from 5.51 to 3.04 sequentially in
 2D and from 3.74 to 2.06 sequentially in 3D; the eight-worker 3D ratio falls
 from 0.94 to 0.68.
 Dynamic level claiming then lowers the eight-worker ratio from 1.89 to 1.33 in
@@ -228,6 +230,9 @@ Reusing the level scratch owned by each worker subsequently lowers the
 sequential ratios from 3.08 to 2.06 in 2D and from 2.14 to 1.81 in 3D. The
 eight-worker ratios also fall from 1.33 to 1.31 and from 0.63 to 0.62,
 respectively.
+The shared event arena then lowers those eight-worker ratios from 1.31 to 1.13
+in 2D and from 0.62 to 0.56 in 3D; the sequential ratios fall from 2.06 to 1.86
+and from 1.81 to 1.74.
 
 ![Gradient-only strategy comparison](gradient_strategy_comparison.svg)
 
@@ -366,10 +371,10 @@ MPLCONFIGDIR=../work/matplotlib-cache \
 ```
 
 Across the nine cases, eight-worker ProcessLowerStars reaches a median
-gradient-construction speedup of 2.71, versus 2.76 for the reduction kernel.
-The corresponding median construction times are 1.43 ms and 0.52 ms, so the
+gradient-construction speedup of 2.43, versus 2.76 for the reduction kernel.
+The corresponding median construction times are 1.52 ms and 0.54 ms, so the
 optimized ReductionKernel is now faster in absolute time. Median eight-worker
-efficiencies are 0.34 and 0.35, respectively.
+efficiencies are 0.30 and 0.35, respectively.
 
 ![Tetrahedral worker scaling](tetrahedral_worker_scaling.svg)
 
@@ -400,14 +405,14 @@ python3 tools/render_tetrahedral_phase_profile.py \
   --table-output docs/tetrahedral_phase_profile_table.tex
 ```
 
-Across the twelve cases, eight-worker ProcessLowerStars reaches a 2.57-fold
-gradient-construction speedup; ReductionKernel reaches 3.15-fold. Their median
-eight-worker construction times are 3.18 ms and 0.96 ms, respectively. At
-eight workers, ProcessLowerStars spends 33.1 percent in global setup, 36.2
-percent in parallel local-star processing, 2.4 percent in ordered replay, and
-4.5 percent in builder initialization. ReductionKernel spends 82.0 percent of
-its diagnostic wall time processing levels; setup and replay account for 12.8
-and 4.3 percent. The CSV now also records kernel rounds, facet kernels, facet
+Across the twelve cases, eight-worker ProcessLowerStars reaches a 2.41-fold
+gradient-construction speedup; ReductionKernel reaches 3.07-fold. Their median
+eight-worker construction times are 3.28 ms and 1.03 ms, respectively. At
+eight workers, ProcessLowerStars spends 31.9 percent in global setup, 40.1
+percent in parallel local-star processing, 2.6 percent in ordered replay, and
+5.1 percent in builder initialization. ReductionKernel spends 81.6 percent of
+its diagnostic wall time processing levels; setup and replay account for 14.5
+and 3.7 percent. The CSV now also records kernel rounds, facet kernels, facet
 discovery scans, cached-cell visits, local candidate scans, coboundary scans,
 membership tests, and inline-buffer overflows. All measured triangular and
 tetrahedral kernels report zero inline-buffer overflows. For the `n=16`
@@ -427,8 +432,9 @@ task dynamically claims the next filtration level from an atomic counter,
 avoiding both thousands of tiny executor tasks and the former sorting and
 static simplex-count partition. Each task retains its facet flags, closure
 tables, incidence counters, and result buffers between claimed levels. It
-disables nested facet tasks while multiple levels are running concurrently. A
-single large plateau still uses the facet-parallel reduction-kernel path.
+also writes into a preassigned slice of the shared event arena. It disables
+nested facet tasks while multiple levels are running concurrently. A single
+large plateau still uses the facet-parallel reduction-kernel path.
 
 ```sh
 PYTHONPATH=python python3 tools/benchmark_reduction_kernel_scaling.py \
@@ -450,7 +456,7 @@ MPLCONFIGDIR=../work/matplotlib-cache \
 This older Python-level pipeline benchmark includes sequence-object
 materialization, reference maps, and persistence, so it is retained only as an
 overhead diagnostic rather than evidence for gradient speed. Across the nine
-terrains, median native-sequence speedups are 1.07x, 1.11x, and 1.09x at two,
+terrains, median native-sequence speedups are 0.97x, 1.02x, and 1.02x at two,
 four, and eight workers; median end-to-end speedup is 1.01x at eight workers.
 Every worker count is checked for the exact sequential reduction-kernel
 sequence and the standard barcode. The gradient-only results above are the

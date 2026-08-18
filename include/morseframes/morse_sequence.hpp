@@ -1607,7 +1607,14 @@ class FSequenceBuilder {
         executor == nullptr ? 1 : executor->worker_count();
     const std::size_t level_workers = std::min(num_levels, workers);
     ReductionKernelWorkspace<ComplexView> workspace(complex_, options, executor);
-    std::vector<ReductionKernelLevelResult> level_results(num_levels);
+    std::vector<std::size_t> event_offsets(num_levels + 1, 0);
+    for (LevelId level = 0; level < num_levels; ++level) {
+      event_offsets[level + 1] =
+          event_offsets[level] + complex_.simplices_of_level(level).size();
+    }
+    std::vector<ReductionKernelEvent> level_events(event_offsets.back());
+    std::vector<std::size_t> level_event_counts(num_levels, 0);
+    std::vector<ReductionKernelMetrics> level_metrics(num_levels);
     ReductionKernelMetrics kernel_metrics;
     kernel_metrics.executor_workers = workers;
     profile_add(&MorseSequenceBuildMetrics::reduction_kernel_setup_nanoseconds,
@@ -1616,8 +1623,10 @@ class FSequenceBuilder {
     const auto level_start = profile_start();
     if (level_workers == 1 || num_levels <= 1) {
       for (LevelId level = 0; level < num_levels; ++level) {
-        level_results[level] =
-            workspace.compute_level_isolated_reusing_scratch(level, 0);
+        level_metrics[level] = workspace.compute_level_isolated_into(
+            level, 0, level_events.data() + event_offsets[level],
+            event_offsets[level + 1] - event_offsets[level],
+            level_event_counts[level]);
       }
     } else {
       // Levels own disjoint workspace entries. Long-lived tasks dynamically
@@ -1633,16 +1642,18 @@ class FSequenceBuilder {
       futures.reserve(task_count);
       for (std::size_t task = 0; task < task_count; ++task) {
         futures.push_back(executor->submit(
-            [task, &next_level, num_levels, &workspace, &level_results]() {
+            [task, &next_level, num_levels, &workspace, &event_offsets,
+             &level_events, &level_event_counts, &level_metrics]() {
               while (true) {
                 const LevelId level = next_level.fetch_add(
                     1, std::memory_order_relaxed);
                 if (level >= num_levels) {
                   return;
                 }
-                level_results[level] =
-                    workspace.compute_level_isolated_reusing_scratch(
-                        level, task, false);
+                level_metrics[level] = workspace.compute_level_isolated_into(
+                    level, task, level_events.data() + event_offsets[level],
+                    event_offsets[level + 1] - event_offsets[level],
+                    level_event_counts[level], false);
               }
             }));
       }
@@ -1656,12 +1667,11 @@ class FSequenceBuilder {
 
     const auto replay_start = profile_start();
     for (LevelId level = 0; level < num_levels; ++level) {
-      auto& level_result = level_results[level];
       ReductionKernelWorkspace<ComplexView>::accumulate_metrics(
-          kernel_metrics, level_result.metrics);
-      const auto& events = level_result.events;
-      for (std::size_t index = events.size(); index > 0; --index) {
-        const auto& event = events[index - 1];
+          kernel_metrics, level_metrics[level]);
+      const std::size_t first = event_offsets[level];
+      for (std::size_t index = level_event_counts[level]; index > 0; --index) {
+        const auto& event = level_events[first + index - 1];
         if (event.type == ReductionKernelEventType::Perforation) {
           sequence.add_critical(event.sigma, level);
           if (sequence_metrics_ != nullptr) {

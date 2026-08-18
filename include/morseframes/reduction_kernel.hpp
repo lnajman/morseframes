@@ -127,7 +127,8 @@ class ReductionKernelWorkspace {
       return size_;
     }
 
-    void append_to(std::vector<T>& destination) const {
+    template <typename Destination>
+    void append_to(Destination& destination) const {
       destination.reserve(destination.size() + size_);
       for (std::size_t index = 0; index < size_; ++index) {
         destination.push_back((*this)[index]);
@@ -191,6 +192,31 @@ class ReductionKernelWorkspace {
     std::vector<std::size_t> cell_indices;
   };
 
+  class FixedEventBuffer {
+   public:
+    FixedEventBuffer(ReductionKernelEvent* entries, std::size_t capacity)
+        : entries_(entries), capacity_(capacity) {}
+
+    void reserve(std::size_t requested) const {
+      if (requested > capacity_) {
+        throw std::length_error(
+            "Reduction-kernel level event capacity exceeded.");
+      }
+    }
+
+    void push_back(const ReductionKernelEvent& event) {
+      reserve(size_ + 1);
+      entries_[size_++] = event;
+    }
+
+    std::size_t size() const { return size_; }
+
+   private:
+    ReductionKernelEvent* entries_ = nullptr;
+    std::size_t capacity_ = 0;
+    std::size_t size_ = 0;
+  };
+
   static std::uint64_t elapsed_nanoseconds(Clock::time_point start,
                                            Clock::time_point stop) {
     return static_cast<std::uint64_t>(
@@ -245,8 +271,10 @@ class ReductionKernelWorkspace {
   ReductionKernelLevelResult compute_level_isolated(
       LevelId level, bool allow_intra_level_parallelism = true) {
     LevelScratch scratch;
-    return compute_level_isolated_with_scratch(
-        level, allow_intra_level_parallelism, scratch);
+    ReductionKernelLevelResult result;
+    result.metrics = compute_level_isolated_with_scratch(
+        level, allow_intra_level_parallelism, scratch, result.events);
+    return result;
   }
 
   ReductionKernelLevelResult compute_level_isolated_reusing_scratch(
@@ -258,18 +286,39 @@ class ReductionKernelWorkspace {
       throw std::out_of_range(
           "Reduction-kernel scratch index exceeds executor workers.");
     }
-    return compute_level_isolated_with_scratch(
-        level, allow_intra_level_parallelism, level_scratch_[scratch_index]);
+    ReductionKernelLevelResult result;
+    result.metrics = compute_level_isolated_with_scratch(
+        level, allow_intra_level_parallelism, level_scratch_[scratch_index],
+        result.events);
+    return result;
+  }
+
+  ReductionKernelMetrics compute_level_isolated_into(
+      LevelId level, std::size_t scratch_index,
+      ReductionKernelEvent* event_storage, std::size_t event_capacity,
+      std::size_t& event_count,
+      bool allow_intra_level_parallelism = true) {
+    // The caller owns this level's disjoint event slice and the scratch index
+    // assigned to its long-lived task.
+    if (scratch_index >= level_scratch_.size()) {
+      throw std::out_of_range(
+          "Reduction-kernel scratch index exceeds executor workers.");
+    }
+    FixedEventBuffer events(event_storage, event_capacity);
+    auto metrics = compute_level_isolated_with_scratch(
+        level, allow_intra_level_parallelism, level_scratch_[scratch_index],
+        events);
+    event_count = events.size();
+    return metrics;
   }
 
  private:
-  ReductionKernelLevelResult compute_level_isolated_with_scratch(
+  template <typename EventBuffer>
+  ReductionKernelMetrics compute_level_isolated_with_scratch(
       LevelId level, bool allow_intra_level_parallelism,
-      LevelScratch& scratch) {
+      LevelScratch& scratch, EventBuffer& events) {
     const auto& bucket = complex_.simplices_of_level(level);
-    ReductionKernelLevelResult result;
-    auto& events = result.events;
-    auto& metrics = result.metrics;
+    ReductionKernelMetrics metrics;
     metrics.executor_workers =
         executor_ == nullptr ? 1 : executor_->worker_count();
     events.reserve(bucket.size());
@@ -391,7 +440,7 @@ class ReductionKernelWorkspace {
       ++metrics.perforations;
     }
 
-    return result;
+    return metrics;
   }
 
  public:

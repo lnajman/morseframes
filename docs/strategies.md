@@ -278,6 +278,10 @@ marker clearing and removal scans while preserving deterministic event order.
 Sequential facet discovery compacts an ordered active-simplex list in place.
 That list also bounds facet-incidence reset and uncached low-dimensional cell
 construction, so later rounds do not revisit already removed simplices.
+The ordinary metrics-free sequential path consumes facet results immediately,
+keeping only their compact event stream for conflict checking and merging.
+Diagnostic and parallel executions retain explicit facet results for phase
+accounting and concurrent result collection.
 
 For repeated sequential gradients on an owning `FilteredComplex`, callers may
 invoke `complex_.prepare_reduction_kernel_cache()` once. ReductionKernel then

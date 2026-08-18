@@ -199,9 +199,9 @@ class ReductionKernelWorkspace {
         active_simplices.reserve(bucket_size);
       }
       facet_results.clear();
-      round_removed_simplices.clear();
-      if (round_removed_simplices.capacity() < bucket_size) {
-        round_removed_simplices.reserve(bucket_size);
+      round_events.clear();
+      if (round_events.capacity() < bucket_size) {
+        round_events.reserve(bucket_size);
       }
       included.resize(bucket_size);
       cell_indices.clear();
@@ -220,7 +220,7 @@ class ReductionKernelWorkspace {
     std::vector<SimplexId> facets;
     std::vector<SimplexId> active_simplices;
     std::vector<FacetKernelResult> facet_results;
-    std::vector<SimplexId> round_removed_simplices;
+    std::vector<ReductionKernelEvent> round_events;
     LevelCells level_cells;
     std::vector<std::uint8_t> included;
     std::vector<std::size_t> cell_indices;
@@ -441,19 +441,56 @@ class ReductionKernelWorkspace {
             allow_intra_level_parallelism);
         profile_add<CollectMetrics>(metrics.essential_nanoseconds,
                                     essential_start);
-        scratch.round_removed_simplices.clear();
+        scratch.round_events.clear();
+        auto record_facet_events = [&](const FacetKernelResult& result) {
+          for (std::size_t index = 0; index < result.events.size(); ++index) {
+            const auto& event = result.events[index];
+            if (event.is_perforation()) {
+              throw std::logic_error(
+                  "A facet kernel returned a non-reduction event.");
+            }
+            if (round_removed_[event.sigma] || round_removed_[event.tau]) {
+              throw std::logic_error(
+                  "Facet reduction kernels removed the same simplex twice.");
+            }
+            round_removed_[event.sigma] = 1;
+            round_removed_[event.tau] = 1;
+            scratch.round_events.push_back(event);
+          }
+        };
 
-        const auto& facet_results = execute_facets<CollectMetrics>(
-            level, facets, scratch.active_simplices, level_cells,
-            scratch.facet_results, metrics, allow_intra_level_parallelism);
-        const auto aggregation_start = profile_start<CollectMetrics>();
-        if constexpr (CollectMetrics) {
+        if constexpr (!CollectMetrics) {
+          const std::size_t workers =
+              executor_ == nullptr ? 1 : executor_->worker_count();
+          const bool execute_sequentially =
+              !allow_intra_level_parallelism ||
+              options_.policy == ReductionKernelExecutionPolicy::Sequential ||
+              workers <= 1 || facets.size() <= 1;
+          if (execute_sequentially) {
+            for (SimplexId facet : facets) {
+              const auto result = compute_facet_kernel<false>(
+                  level, facet, scratch.active_simplices, level_cells);
+              record_facet_events(result);
+            }
+          } else {
+            const auto& facet_results = execute_facets<false>(
+                level, facets, scratch.active_simplices, level_cells,
+                scratch.facet_results, metrics,
+                allow_intra_level_parallelism);
+            for (const auto& result : facet_results) {
+              record_facet_events(result);
+            }
+          }
+        } else {
+          const auto& facet_results = execute_facets<true>(
+              level, facets, scratch.active_simplices, level_cells,
+              scratch.facet_results, metrics,
+              allow_intra_level_parallelism);
+          const auto aggregation_start = profile_start<true>();
           if (facet_results.size() > 1) {
             ++metrics.aggregation_rounds;
           }
-        }
-        for (const auto& facet_result : facet_results) {
-          if constexpr (CollectMetrics) {
+          for (const auto& facet_result : facet_results) {
             metrics.core_nanoseconds += facet_result.core_nanoseconds;
             metrics.local_reduction_nanoseconds +=
                 facet_result.local_reduction_nanoseconds;
@@ -468,42 +505,27 @@ class ReductionKernelWorkspace {
                 facet_result.inline_cell_overflows;
             metrics.inline_event_overflows +=
                 facet_result.inline_event_overflows;
+            record_facet_events(facet_result);
           }
-          for (std::size_t index = 0; index < facet_result.events.size();
-               ++index) {
-            const auto& event = facet_result.events[index];
-            if (event.is_perforation()) {
-              throw std::logic_error(
-                  "A facet kernel returned a non-reduction event.");
-            }
-            if (round_removed_[event.sigma] || round_removed_[event.tau]) {
-              throw std::logic_error(
-                  "Facet reduction kernels removed the same simplex twice.");
-            }
-            round_removed_[event.sigma] = 1;
-            round_removed_[event.tau] = 1;
-            scratch.round_removed_simplices.push_back(event.sigma);
-            scratch.round_removed_simplices.push_back(event.tau);
-          }
+          profile_add<true>(metrics.aggregation_nanoseconds,
+                            aggregation_start);
         }
-        profile_add<CollectMetrics>(metrics.aggregation_nanoseconds,
-                                    aggregation_start);
 
         const auto merge_start = profile_start<CollectMetrics>();
-        for (SimplexId simplex : scratch.round_removed_simplices) {
-          if (!active_[simplex]) {
+        for (const auto& event : scratch.round_events) {
+          if (!active_[event.sigma] || !active_[event.tau]) {
             throw std::logic_error(
                 "A reduction-kernel round removed an inactive simplex.");
           }
-          active_[simplex] = 0;
-          round_removed_[simplex] = 0;
-          --remaining;
+          active_[event.sigma] = 0;
+          active_[event.tau] = 0;
+          round_removed_[event.sigma] = 0;
+          round_removed_[event.tau] = 0;
+          remaining -= 2;
           kernel_round_changed = true;
-        }
-        for (const auto& facet_result : facet_results) {
-          facet_result.events.append_to(events);
+          events.push_back(event);
           if constexpr (CollectMetrics) {
-            metrics.reductions += facet_result.events.size();
+            ++metrics.reductions;
           }
         }
         profile_add<CollectMetrics>(metrics.merge_nanoseconds, merge_start);

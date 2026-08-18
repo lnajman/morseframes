@@ -69,6 +69,24 @@ builder.insert([0, 1, 2], 2.0, include_faces=True)
 complex_ = builder.finalize()
 ```
 
+When the same owning complex will be processed by sequential ReductionKernel
+more than once, its native same-level closures can be cached explicitly:
+
+```python
+cache = complex_.prepare_reduction_kernel_cache()
+print(cache["build_nanoseconds"], cache["bytes"])
+sequence = mf.compute_morse_sequence(
+    complex_, algorithm="flooding-reduction-kernel"
+)
+```
+
+Cache construction is not hidden in gradient timing. The method requires the
+native backend and reports its build cost, entry count, and memory footprint.
+Multiworker ReductionKernel currently ignores the cache because disjoint level
+workers build their small closures concurrently and shared-cache access did not
+improve wall time.
+Call `complex_.clear_reduction_kernel_cache()` to release the optional cache.
+
 ## Sequence Strategies
 
 Most high-level functions accept an `algorithm` keyword. The currently exposed

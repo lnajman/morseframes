@@ -87,6 +87,20 @@ class ReductionKernelWorkspace {
                 "ReductionKernelWorkspace requires a Morse complex-view type.");
 
  private:
+  template <typename View, typename = void>
+  struct HasSameLevelClosureCache : std::false_type {};
+
+  template <typename View>
+  struct HasSameLevelClosureCache<
+      View,
+      std::void_t<
+          decltype(std::declval<const View&>()
+                       .has_same_level_closure_cache()),
+          decltype(std::declval<const View&>()
+                       .same_level_closure_entries()),
+          decltype(std::declval<const View&>()
+                       .same_level_closure_ranges())>> : std::true_type {};
+
   using Clock = std::chrono::steady_clock;
   // A tetrahedron has 15 nonempty faces and admits at most seven local pairs.
   static constexpr std::size_t kInlineCellCapacity = 16;
@@ -159,6 +173,9 @@ class ReductionKernelWorkspace {
     bool enabled = false;
     std::vector<SimplexId> entries;
     std::vector<std::pair<std::size_t, std::size_t>> ranges;
+    const std::vector<SimplexId>* cached_entries = nullptr;
+    const std::vector<std::pair<std::size_t, std::size_t>>* cached_ranges =
+        nullptr;
   };
 
   struct LevelScratch {
@@ -182,6 +199,8 @@ class ReductionKernelWorkspace {
       level_cells.enabled = false;
       level_cells.entries.clear();
       level_cells.ranges.clear();
+      level_cells.cached_entries = nullptr;
+      level_cells.cached_ranges = nullptr;
     }
 
     std::vector<std::uint8_t> facet_flags;
@@ -552,12 +571,36 @@ class ReductionKernelWorkspace {
                          face_vertices.begin(), face_vertices.end());
   }
 
+  const std::vector<SimplexId>& cell_entries(
+      const LevelCells& cells) const {
+    return cells.cached_entries == nullptr ? cells.entries
+                                           : *cells.cached_entries;
+  }
+
+  std::pair<std::size_t, std::size_t> cell_range(
+      const LevelCells& cells, SimplexId simplex) const {
+    if (cells.cached_ranges != nullptr) {
+      return (*cells.cached_ranges)[simplex];
+    }
+    return cells.ranges[bucket_index_[simplex]];
+  }
+
   void build_level_cells(
       const std::vector<SimplexId>& bucket, bool enabled,
       LevelScratch& scratch, LevelCells& cells) const {
     cells.enabled = enabled;
     if (!enabled) {
       return;
+    }
+    if constexpr (HasSameLevelClosureCache<ComplexView>::value) {
+      const bool parallel_levels =
+          options_.policy == ReductionKernelExecutionPolicy::Parallel &&
+          executor_ != nullptr && executor_->worker_count() > 1;
+      if (!parallel_levels && complex_.has_same_level_closure_cache()) {
+        cells.cached_entries = &complex_.same_level_closure_entries();
+        cells.cached_ranges = &complex_.same_level_closure_ranges();
+        return;
+      }
     }
     if (cells.entries.capacity() < 4 * bucket.size()) {
       cells.entries.reserve(4 * bucket.size());
@@ -698,13 +741,13 @@ class ReductionKernelWorkspace {
         facet_incidence_[simplex] = 0;
       }
       for (SimplexId facet : facets) {
-        const auto [first, last] =
-            level_cells.ranges[bucket_index_[facet]];
+        const auto [first, last] = cell_range(level_cells, facet);
+        const auto& entries = cell_entries(level_cells);
         for (std::size_t index = first; index < last; ++index) {
           if constexpr (CollectMetrics) {
             ++metrics.incidence_cell_visits;
           }
-          const SimplexId simplex = level_cells.entries[index];
+          const SimplexId simplex = entries[index];
           if (active_[simplex] && facet_incidence_[simplex] < 2) {
             ++facet_incidence_[simplex];
           }
@@ -751,12 +794,13 @@ class ReductionKernelWorkspace {
     const auto core_start = profile_start<CollectMetrics>();
     InlineVector<SimplexId, kInlineCellCapacity> cell;
     if (level_cells.enabled) {
-      const auto [first, last] = level_cells.ranges[bucket_index_[facet]];
+      const auto [first, last] = cell_range(level_cells, facet);
+      const auto& entries = cell_entries(level_cells);
       for (std::size_t index = first; index < last; ++index) {
         if constexpr (CollectMetrics) {
           ++result.facet_cell_visits;
         }
-        const SimplexId simplex = level_cells.entries[index];
+        const SimplexId simplex = entries[index];
         if (active_[simplex]) {
           cell.push_back(simplex);
         }

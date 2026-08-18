@@ -939,6 +939,39 @@ class FilteredComplex:
     def cpp_backend_active(self) -> bool:
         return self._cpp is not None
 
+    def prepare_reduction_kernel_cache(self) -> dict[str, int]:
+        """Precompute immutable same-level closures for repeated gradients.
+
+        Cache construction is explicit so callers can account for its time and
+        memory separately from ReductionKernel gradient construction.
+        """
+        self._ensure_finalized()
+        if self._cpp is None:
+            raise RuntimeError(
+                "The reduction-kernel cache requires the native C++ backend."
+            )
+        prepare = getattr(self._cpp, "prepare_reduction_kernel_cache", None)
+        if prepare is None:
+            raise RuntimeError(
+                "The native backend does not provide a reduction-kernel cache."
+            )
+        return {str(key): int(value) for key, value in dict(prepare()).items()}
+
+    @property
+    def reduction_kernel_cache_ready(self) -> bool:
+        self._ensure_finalized()
+        if self._cpp is None:
+            return False
+        return bool(getattr(self._cpp, "reduction_kernel_cache_ready", False))
+
+    def clear_reduction_kernel_cache(self) -> None:
+        """Release the optional native ReductionKernel closure cache."""
+        self._ensure_finalized()
+        if self._cpp is not None:
+            clear = getattr(self._cpp, "clear_reduction_kernel_cache", None)
+            if clear is not None:
+                clear()
+
     def to_cpp(self) -> object:
         self._ensure_finalized()
         if self._cpp is None:

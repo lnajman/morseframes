@@ -1616,6 +1616,27 @@ NB_MODULE(_morse_core, m) {
       .def("simplices_of_level", [](const PyFilteredComplex& self, morseframes::LevelId level) {
         require_finalized(self);
         return self.complex.simplices_of_level(level);
+      })
+      .def("prepare_reduction_kernel_cache", [](PyFilteredComplex& self) {
+        require_finalized(self);
+        const auto start = Clock::now();
+        self.complex.prepare_same_level_closure_cache();
+        const auto stop = Clock::now();
+        nb::dict result;
+        result["build_nanoseconds"] = elapsed_nanoseconds(start, stop);
+        result["entries"] =
+            self.complex.same_level_closure_entries().size();
+        result["bytes"] = self.complex.same_level_closure_cache_bytes();
+        return result;
+      })
+      .def_prop_ro("reduction_kernel_cache_ready",
+                   [](const PyFilteredComplex& self) {
+                     require_finalized(self);
+                     return self.complex.has_same_level_closure_cache();
+                   })
+      .def("clear_reduction_kernel_cache", [](PyFilteredComplex& self) {
+        require_finalized(self);
+        self.complex.release_same_level_closure_cache();
       });
 
   nb::class_<PySimplexTreeBuilder>(m, "SimplexTreeBuilder")

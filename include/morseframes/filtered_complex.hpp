@@ -40,6 +40,7 @@ class FilteredSimplicialComplex {
     if (!inserted && std::fabs(it->second - filtration) > 1e-12) {
       throw std::invalid_argument("Duplicate simplex inserted with a different filtration value.");
     }
+    clear_same_level_closure_cache();
   }
 
   void finalize() {
@@ -52,6 +53,7 @@ class FilteredSimplicialComplex {
     level_values_.clear();
     level_buckets_.clear();
     filtration_order_.clear();
+    clear_same_level_closure_cache();
 
     for (const auto& [vertices, filtration] : pending_) {
       (void)filtration;
@@ -105,6 +107,95 @@ class FilteredSimplicialComplex {
   const std::vector<double>& level_values() const { return level_values_; }
   std::size_t num_levels() const { return level_values_.size(); }
 
+  void prepare_same_level_closure_cache() {
+    if (!finalized_) {
+      throw std::logic_error(
+          "Cannot prepare a closure cache before finalization.");
+    }
+    if (same_level_closure_cache_ready_) {
+      return;
+    }
+
+    same_level_closure_entries_.clear();
+    same_level_closure_ranges_.assign(size(), {0, 0});
+    std::vector<std::size_t> bucket_index(
+        size(), std::numeric_limits<std::size_t>::max());
+    std::vector<std::uint8_t> included;
+    std::vector<std::size_t> closure_indices;
+
+    for (const auto& bucket : level_buckets_) {
+      included.assign(bucket.size(), 0);
+      for (std::size_t index = 0; index < bucket.size(); ++index) {
+        bucket_index[bucket[index]] = index;
+      }
+      for (std::size_t simplex_index = 0; simplex_index < bucket.size();
+           ++simplex_index) {
+        const SimplexId simplex = bucket[simplex_index];
+        const std::size_t first = same_level_closure_entries_.size();
+        closure_indices.clear();
+        included[simplex_index] = 1;
+        closure_indices.push_back(simplex_index);
+        for (SimplexId face : boundary(simplex)) {
+          if (level(face) != level(simplex)) {
+            continue;
+          }
+          const std::size_t face_index = bucket_index[face];
+          if (face_index >= simplex_index) {
+            throw std::logic_error(
+                "Same-level closure cache requires face-first buckets.");
+          }
+          const auto [face_first, face_last] =
+              same_level_closure_ranges_[face];
+          for (std::size_t entry = face_first; entry < face_last; ++entry) {
+            const std::size_t local_index =
+                bucket_index[same_level_closure_entries_[entry]];
+            if (!included[local_index]) {
+              included[local_index] = 1;
+              closure_indices.push_back(local_index);
+            }
+          }
+        }
+        std::sort(closure_indices.begin(), closure_indices.end());
+        for (std::size_t local_index : closure_indices) {
+          same_level_closure_entries_.push_back(bucket[local_index]);
+          included[local_index] = 0;
+        }
+        same_level_closure_ranges_[simplex] =
+            {first, same_level_closure_entries_.size()};
+      }
+    }
+    same_level_closure_cache_ready_ = true;
+  }
+
+  bool has_same_level_closure_cache() const {
+    return same_level_closure_cache_ready_;
+  }
+
+  const std::vector<SimplexId>& same_level_closure_entries() const {
+    if (!same_level_closure_cache_ready_) {
+      throw std::logic_error("Same-level closure cache is not prepared.");
+    }
+    return same_level_closure_entries_;
+  }
+
+  const std::vector<std::pair<std::size_t, std::size_t>>&
+  same_level_closure_ranges() const {
+    if (!same_level_closure_cache_ready_) {
+      throw std::logic_error("Same-level closure cache is not prepared.");
+    }
+    return same_level_closure_ranges_;
+  }
+
+  std::size_t same_level_closure_cache_bytes() const {
+    return same_level_closure_entries_.capacity() * sizeof(SimplexId) +
+           same_level_closure_ranges_.capacity() *
+               sizeof(std::pair<std::size_t, std::size_t>);
+  }
+
+  void release_same_level_closure_cache() {
+    clear_same_level_closure_cache();
+  }
+
   SimplexId find_simplex(const std::vector<VertexId>& vertices) const {
     std::vector<VertexId> canonical = vertices;
     canonicalize(canonical);
@@ -116,6 +207,12 @@ class FilteredSimplicialComplex {
   }
 
  private:
+  void clear_same_level_closure_cache() {
+    same_level_closure_cache_ready_ = false;
+    same_level_closure_entries_ = {};
+    same_level_closure_ranges_ = {};
+  }
+
   struct VectorLess {
     bool operator()(const std::vector<VertexId>& lhs, const std::vector<VertexId>& rhs) const {
       return std::lexicographical_compare(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
@@ -238,6 +335,10 @@ class FilteredSimplicialComplex {
   std::vector<Simplex> simplices_;
   std::vector<double> level_values_;
   std::vector<std::vector<SimplexId>> level_buckets_;
+  bool same_level_closure_cache_ready_ = false;
+  std::vector<SimplexId> same_level_closure_entries_;
+  std::vector<std::pair<std::size_t, std::size_t>>
+      same_level_closure_ranges_;
   std::vector<SimplexId> filtration_order_;
 };
 

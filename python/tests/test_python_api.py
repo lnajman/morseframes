@@ -349,6 +349,32 @@ class PythonApiTest(unittest.TestCase):
         self.assertEqual(mp.compute_reference_map(complex_, sequence), ((0,), (2,), (1,)))
         self.assertEqual(mp.compute_morse_persistence(complex_, sequence).finite_barcode(), ((0, 0.0, 1.0),))
 
+    def test_reduction_kernel_cache_when_available(self):
+        if not mp.cpp_backend_available():
+            self.skipTest("C++ backend is not built")
+
+        complex_ = filled_triangle_complex()
+        uncached = mp.compute_morse_sequence(
+            complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_SEQUENCE
+        )
+        self.assertFalse(complex_.reduction_kernel_cache_ready)
+        cache = complex_.prepare_reduction_kernel_cache()
+        self.assertTrue(complex_.reduction_kernel_cache_ready)
+        self.assertGreater(cache["entries"], 0)
+        self.assertGreater(cache["bytes"], 0)
+        cached = mp.compute_morse_sequence(
+            complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_SEQUENCE
+        )
+        parallel = mp.compute_morse_sequence(
+            complex_,
+            algorithm=mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+            max_workers=2,
+        )
+        self.assertEqual(uncached.steps, cached.steps)
+        self.assertEqual(uncached.steps, parallel.steps)
+        complex_.clear_reduction_kernel_cache()
+        self.assertFalse(complex_.reduction_kernel_cache_ready)
+
     def test_low_level_cpp_api_when_available(self):
         if not mp.cpp_backend_available():
             self.skipTest("C++ backend is not built")

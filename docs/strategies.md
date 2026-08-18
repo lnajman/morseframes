@@ -272,6 +272,14 @@ as well as time spent finding facets, computing facet incidence, constructing
 cells, computing local reductions, aggregating facet results, and merging a
 round.
 
+For repeated sequential gradients on an owning `FilteredComplex`, callers may
+invoke `complex_.prepare_reduction_kernel_cache()` once. ReductionKernel then
+reads immutable, precomputed same-level closure ranges instead of rebuilding
+them for every sequence. Cache construction and memory are reported by that
+explicit call and are therefore excluded from subsequent gradient timings.
+The generic `ComplexView` contract is unchanged, and multiworker execution
+continues to use worker-local closure construction.
+
 The companion strategy `"flooding-reduction-kernel-parallel"` uses the same
 workspace and local-kernel routine. Facet cells in a round are evaluated in
 bounded batches against one immutable active-set snapshot. A reusable task pool

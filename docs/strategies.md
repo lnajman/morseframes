@@ -7,8 +7,9 @@ constructors should be easy to add.
 
 All strategies exposed here produce a simplex-wise Morse sequence compatible
 with the input filtration. Regular pairs are restricted to a single filtration
-level, so the methods work directly on complexes with plateaus. No lower-star
-refinement is required by the API.
+level. Most methods work directly on complexes with plateaus;
+`process-lower-stars` deliberately has the stricter classical lower-star input
+contract described below.
 
 A flooding sequence is an `F`-sequence whose order is globally nondecreasing
 with respect to the filtration: once a simplex of value `lambda` has appeared,
@@ -25,6 +26,8 @@ The Python API accepts these canonical names:
 ```python
 "saturated"
 "f-max"
+"process-lower-stars"
+"process-lower-stars-parallel"
 "f-min"
 "same-level-reduction"
 "plateau-greedy"
@@ -109,6 +112,55 @@ otherwise add the next available critical seed.
 This is the implementation corresponding to the `Max(S,F)` style used in our
 experiments. It is a valid `F`-sequence constructor, but it is not necessarily a
 flooding construction.
+
+## ProcessLowerStars
+
+Canonical name:
+
+```python
+"process-lower-stars"
+```
+
+This is the simplicial ProcessLowerStars construction. It orders the vertices
+by increasing filtration value and partitions every simplex into the lower star
+of its unique maximum vertex. Each lower star is then processed independently
+with the forward one-missing-face expansion used by `f-max`. Candidate cells
+are ordered by the Robins key: the ranks of their vertices in decreasing order,
+compared lexicographically.
+
+The current implementation intentionally enforces the classical generic-input
+case:
+
+- every cell is a nonempty simplex;
+- vertex filtration values are injective; and
+- every simplex has the same filtration level as its maximum vertex.
+
+An attachment face of a lower star belongs to an earlier lower star and is
+treated as already inserted. Lower stars are processed in increasing maximum-
+vertex order, so the emitted result is a globally filtration-monotone Morse
+sequence. Invalid inputs raise an error instead of being silently refined or
+tie-broken.
+
+The strategy is available from the C++ and Python APIs but is not part of the
+default automatic strategy portfolio, because that portfolio accepts arbitrary
+filtered complexes.
+
+The parallel variant has canonical name:
+
+```python
+"process-lower-stars-parallel"
+```
+
+It computes disjoint lower-star kernels concurrently with the package's bounded
+executor. Lower stars are assigned greedily from largest to smallest, using
+their simplex cardinality as a deterministic work estimate, so workers receive
+more even loads than with equal vertex-count chunks. Profile metrics report the
+number and maximum size of lower stars plus the minimum and maximum scheduled
+task loads. Local events are then replayed in increasing maximum-vertex order.
+Consequently it produces exactly the same deterministic sequence as
+`process-lower-stars`. In Python, `max_workers` limits the complete worker
+budget, including the calling thread. The pure-Python fallback accepts the same
+name and preserves the result but currently executes the kernels sequentially.
 
 ## F-Min
 
@@ -219,6 +271,27 @@ processed levels, kernel rounds, facet kernels, reductions, and perforations,
 as well as time spent finding facets, computing facet incidence, constructing
 cells, computing local reductions, aggregating facet results, and merging a
 round.
+
+Round merging visits only the simplices named by accepted reduction events.
+Their conflict markers are reset as they are removed, avoiding bucket-wide
+marker clearing and removal scans while preserving deterministic event order.
+Sequential facet discovery compacts an ordered active-simplex list in place.
+That list also bounds facet-incidence reset and uncached low-dimensional cell
+construction, so later rounds do not revisit already removed simplices.
+The ordinary metrics-free sequential path consumes facet results immediately,
+keeping only their compact event stream for conflict checking and merging.
+Diagnostic and parallel executions retain explicit facet results for phase
+accounting and concurrent result collection.
+The metrics-free result type omits all diagnostic fields at compile time;
+parallel metrics-free collection therefore also moves smaller result objects.
+
+For repeated sequential gradients on an owning `FilteredComplex`, callers may
+invoke `complex_.prepare_reduction_kernel_cache()` once. ReductionKernel then
+reads immutable, precomputed same-level closure ranges and coboundary adjacency
+instead of reconstructing or filtering them for every sequence. Cache
+construction and memory are reported by that explicit call and are therefore
+excluded from subsequent gradient timings. The generic `ComplexView` contract
+is unchanged, and multiworker execution continues to use worker-local topology.
 
 The companion strategy `"flooding-reduction-kernel-parallel"` uses the same
 workspace and local-kernel routine. Facet cells in a round are evaluated in

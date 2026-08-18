@@ -1,0 +1,30 @@
+\begin{tabular}{llrrrrrr}
+\toprule
+Data & Strategy & Workers & Critical/F-Max & Time/F-Max & Speedup$_1$ & Efficiency & M simplex/s \\
+\midrule
+2D triangulated terrain & F-Max & 1 & 1.00 & 1.00 & 1.00 & 1.00 & 17.75 \\
+2D triangulated terrain & ProcessLowerStars (sequential) & 1 & 1.00 & 6.19 & 1.00 & 1.00 & 2.98 \\
+2D triangulated terrain & ProcessLowerStars & 1 & 1.00 & 6.45 & 1.00 & 1.00 & 3.02 \\
+2D triangulated terrain & ProcessLowerStars & 2 & 1.00 & 4.75 & 1.26 & 0.63 & 3.83 \\
+2D triangulated terrain & ProcessLowerStars & 4 & 1.00 & 3.69 & 1.60 & 0.40 & 4.82 \\
+2D triangulated terrain & ProcessLowerStars & 8 & 1.00 & 3.47 & 1.66 & 0.21 & 5.03 \\
+2D triangulated terrain & Reduction kernel (sequential) & 1 & 1.00 & 1.45 & 1.00 & 1.00 & 12.62 \\
+2D triangulated terrain & Reduction kernel & 1 & 1.00 & 1.47 & 1.00 & 1.00 & 12.65 \\
+2D triangulated terrain & Reduction kernel & 2 & 1.00 & 1.03 & 1.41 & 0.70 & 16.61 \\
+2D triangulated terrain & Reduction kernel & 4 & 1.00 & 0.90 & 1.48 & 0.37 & 18.41 \\
+2D triangulated terrain & Reduction kernel & 8 & 1.00 & 0.99 & 1.40 & 0.18 & 17.91 \\
+\addlinespace
+3D tetrahedral volume & F-Max & 1 & 1.00 & 1.00 & 1.00 & 1.00 & 12.42 \\
+3D tetrahedral volume & ProcessLowerStars (sequential) & 1 & 1.00 & 4.71 & 1.00 & 1.00 & 2.61 \\
+3D tetrahedral volume & ProcessLowerStars & 1 & 1.00 & 4.84 & 1.00 & 1.00 & 2.59 \\
+3D tetrahedral volume & ProcessLowerStars & 2 & 1.00 & 2.95 & 1.60 & 0.80 & 4.14 \\
+3D tetrahedral volume & ProcessLowerStars & 4 & 1.00 & 2.11 & 2.26 & 0.56 & 5.86 \\
+3D tetrahedral volume & ProcessLowerStars & 8 & 1.00 & 1.69 & 2.80 & 0.35 & 7.27 \\
+3D tetrahedral volume & Reduction kernel (sequential) & 1 & 1.00 & 1.41 & 1.00 & 1.00 & 8.37 \\
+3D tetrahedral volume & Reduction kernel & 1 & 1.00 & 1.41 & 1.00 & 1.00 & 8.57 \\
+3D tetrahedral volume & Reduction kernel & 2 & 1.00 & 0.86 & 1.59 & 0.79 & 13.69 \\
+3D tetrahedral volume & Reduction kernel & 4 & 1.00 & 0.59 & 2.39 & 0.60 & 20.60 \\
+3D tetrahedral volume & Reduction kernel & 8 & 1.00 & 0.49 & 2.99 & 0.37 & 25.64 \\
+\addlinespace
+\bottomrule
+\end{tabular}

@@ -53,6 +53,8 @@ PLATEAU_GREEDY_SEQUENCE = "plateau-greedy"
 SAME_LEVEL_REDUCTION_SEQUENCE = "same-level-reduction"
 COREDUCTION_SEQUENCE = SAME_LEVEL_REDUCTION_SEQUENCE
 F_MAX_SEQUENCE = "f-max"
+PROCESS_LOWER_STARS_SEQUENCE = "process-lower-stars"
+PROCESS_LOWER_STARS_PARALLEL_SEQUENCE = "process-lower-stars-parallel"
 F_MIN_SEQUENCE = "f-min"
 FLOODING_MAX_SEQUENCE = "flooding-max"
 FLOODING_MIN_SEQUENCE = "flooding-min"
@@ -69,6 +71,8 @@ MORSE_SEQUENCE_ALGORITHMS = (
     PLATEAU_GREEDY_SEQUENCE,
     SAME_LEVEL_REDUCTION_SEQUENCE,
     F_MAX_SEQUENCE,
+    PROCESS_LOWER_STARS_SEQUENCE,
+    PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
     F_MIN_SEQUENCE,
     FLOODING_MAX_SEQUENCE,
     FLOODING_MIN_SEQUENCE,
@@ -222,6 +226,8 @@ class PersistenceBenchmark:
     num_simplices: int
     num_levels: int
     num_critical_simplices: int
+    critical_simplices_by_dimension: tuple[int, ...]
+    num_regular_pairs: int
     sequence_algorithm: str
     frame_mode: str
     reference_final_live_nonempty_annotations: int
@@ -279,6 +285,58 @@ class PersistenceBenchmark:
         if self.morse_seconds == 0.0:
             return inf
         return self.standard_seconds / self.morse_seconds
+
+    @property
+    def critical_ratio(self) -> float:
+        if self.num_simplices == 0:
+            return 0.0
+        return float(self.num_critical_simplices) / float(self.num_simplices)
+
+    @property
+    def eliminated_simplices(self) -> int:
+        return self.num_simplices - self.num_critical_simplices
+
+    @property
+    def sequence_seconds_per_eliminated_simplex(self) -> float:
+        if self.eliminated_simplices == 0:
+            return inf
+        return self.sequence_seconds / float(self.eliminated_simplices)
+
+    @property
+    def persistence_seconds(self) -> float:
+        return self.reference_seconds + self.morse_reduction_seconds
+
+    @property
+    def total_seconds(self) -> float:
+        return self.morse_seconds
+
+
+@dataclass(frozen=True)
+class MorseSequenceProfile:
+    """Gradient-construction timings and counters, excluding persistence."""
+
+    num_simplices: int
+    num_levels: int
+    num_critical_simplices: int
+    num_regular_pairs: int
+    critical_simplices_by_dimension: tuple[int, ...]
+    sequence_algorithm: str
+    builder_init_seconds: float
+    sequence_build_seconds: float
+    construction_seconds: float
+    metrics: dict[str, object] = field(default_factory=dict, repr=False, compare=False)
+
+    @property
+    def critical_ratio(self) -> float:
+        if self.num_simplices == 0:
+            return 0.0
+        return float(self.num_critical_simplices) / float(self.num_simplices)
+
+    @property
+    def simplices_per_second(self) -> float:
+        if self.construction_seconds == 0.0:
+            return inf
+        return float(self.num_simplices) / self.construction_seconds
 
 
 @dataclass(frozen=True)
@@ -881,6 +939,41 @@ class FilteredComplex:
     def cpp_backend_active(self) -> bool:
         return self._cpp is not None
 
+    def prepare_reduction_kernel_cache(self) -> dict[str, int]:
+        """Precompute immutable same-level topology for repeated gradients.
+
+        Cache construction is explicit so callers can account for its time and
+        memory separately from ReductionKernel gradient construction. The
+        returned mapping reports closure entries, coboundary entries, bytes,
+        and build time in nanoseconds.
+        """
+        self._ensure_finalized()
+        if self._cpp is None:
+            raise RuntimeError(
+                "The reduction-kernel cache requires the native C++ backend."
+            )
+        prepare = getattr(self._cpp, "prepare_reduction_kernel_cache", None)
+        if prepare is None:
+            raise RuntimeError(
+                "The native backend does not provide a reduction-kernel cache."
+            )
+        return {str(key): int(value) for key, value in dict(prepare()).items()}
+
+    @property
+    def reduction_kernel_cache_ready(self) -> bool:
+        self._ensure_finalized()
+        if self._cpp is None:
+            return False
+        return bool(getattr(self._cpp, "reduction_kernel_cache_ready", False))
+
+    def clear_reduction_kernel_cache(self) -> None:
+        """Release the optional native ReductionKernel topology cache."""
+        self._ensure_finalized()
+        if self._cpp is not None:
+            clear = getattr(self._cpp, "clear_reduction_kernel_cache", None)
+            if clear is not None:
+                clear()
+
     def to_cpp(self) -> object:
         self._ensure_finalized()
         if self._cpp is None:
@@ -1176,6 +1269,13 @@ def compute_morse_sequence(
         return _compute_coreduction_morse_sequence_python(complex_, algorithm=algorithm)
     if algorithm in {F_MAX_SEQUENCE, F_MIN_SEQUENCE}:
         return _compute_paper_f_morse_sequence_python(complex_, algorithm=algorithm)
+    if algorithm in {
+        PROCESS_LOWER_STARS_SEQUENCE,
+        PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+    }:
+        return _compute_process_lower_stars_morse_sequence_python(
+            complex_, algorithm=algorithm
+        )
     if algorithm in {
         FLOODING_MAX_SEQUENCE,
         FLOODING_MIN_SEQUENCE,
@@ -1528,6 +1628,156 @@ def _compute_coreduction_morse_sequence_python(
 
         for sigma, tau in reversed(collapse_pairs):
             emit_pair(sigma, tau, level)
+
+    return MorseSequence(
+        steps=tuple(steps),
+        critical_simplices=tuple(critical_simplices),
+        critical_index_of_simplex=tuple(critical_index_of_simplex),
+        paired_with=tuple(paired_with),
+        algorithm=algorithm,
+    )
+
+
+def _compute_process_lower_stars_morse_sequence_python(
+    complex_: FilteredComplex,
+    *,
+    algorithm: str,
+) -> MorseSequence:
+    """Run Robins' simplicial lower-star algorithm with injective vertex data."""
+    n = complex_.size
+    vertex_order = tuple(
+        simplex
+        for simplex in complex_.filtration_order
+        if complex_.dimension(simplex) == 0
+    )
+    if not vertex_order:
+        raise ValueError("ProcessLowerStars requires at least one zero-cell.")
+
+    vertex_simplex: dict[int, int] = {}
+    for index, simplex in enumerate(vertex_order):
+        vertices = complex_.vertices(simplex)
+        if len(vertices) != 1:
+            raise ValueError("ProcessLowerStars requires zero-cells with one vertex.")
+        vertex = vertices[0]
+        if vertex in vertex_simplex:
+            raise ValueError("ProcessLowerStars requires unique vertex identifiers.")
+        vertex_simplex[vertex] = simplex
+        if index and complex_.filtration(vertex_order[index - 1]) == complex_.filtration(simplex):
+            raise ValueError(
+                "ProcessLowerStars requires injective vertex filtration values."
+            )
+
+    vertex_rank = {
+        complex_.vertices(simplex)[0]: rank
+        for rank, simplex in enumerate(vertex_order)
+    }
+    owner = [-1] * n
+    owned: list[list[int]] = [[] for _ in range(n)]
+    robins_key: list[tuple[int, ...]] = [()] * n
+    for simplex in range(n):
+        vertices = complex_.vertices(simplex)
+        if not vertices:
+            raise ValueError("ProcessLowerStars does not support the empty simplex.")
+        try:
+            ranks = tuple(sorted((vertex_rank[vertex] for vertex in vertices), reverse=True))
+        except KeyError as error:
+            raise ValueError(
+                "ProcessLowerStars found a simplex with an unknown vertex."
+            ) from error
+        simplex_owner = vertex_order[ranks[0]]
+        if complex_.level(simplex) != complex_.level(simplex_owner):
+            raise ValueError(
+                "ProcessLowerStars requires the max-vertex lower-star extension."
+            )
+        owner[simplex] = simplex_owner
+        owned[simplex_owner].append(simplex)
+        robins_key[simplex] = ranks
+
+    steps: list[MorseStep] = []
+    critical_simplices: list[int] = []
+    critical_index_of_simplex = [-1] * n
+    paired_with: list[int | None] = [None] * n
+    inserted = [False] * n
+    local_boundary_count = [0] * n
+    local_boundary_xor = [0] * n
+
+    def emit_critical(simplex: int) -> None:
+        critical_index_of_simplex[simplex] = len(critical_simplices)
+        critical_simplices.append(simplex)
+        steps.append(MorseStep(CRITICAL, simplex, None, complex_.level(simplex)))
+
+    def emit_pair(sigma: int, tau: int) -> None:
+        paired_with[sigma] = tau
+        paired_with[tau] = sigma
+        steps.append(MorseStep(REGULAR_PAIR, sigma, tau, complex_.level(tau)))
+
+    for star_vertex in vertex_order:
+        pair_candidates: list[tuple[tuple[int, ...], int]] = []
+        zero_candidates: list[tuple[tuple[int, ...], int]] = []
+        remaining = len(owned[star_vertex])
+
+        def enqueue(simplex: int) -> None:
+            if inserted[simplex] or owner[simplex] != star_vertex:
+                return
+            item = (robins_key[simplex], simplex)
+            if local_boundary_count[simplex] == 1:
+                heapq.heappush(pair_candidates, item)
+            elif local_boundary_count[simplex] == 0:
+                heapq.heappush(zero_candidates, item)
+
+        for simplex in owned[star_vertex]:
+            count = 0
+            boundary_xor = 0
+            for face in complex_.boundary(simplex):
+                if owner[face] == star_vertex and not inserted[face]:
+                    count += 1
+                    boundary_xor ^= face
+                elif not inserted[face]:
+                    raise RuntimeError(
+                        "A lower-star attachment face was not inserted earlier."
+                    )
+            local_boundary_count[simplex] = count
+            local_boundary_xor[simplex] = boundary_xor
+            enqueue(simplex)
+
+        def mark_inserted(simplex: int) -> None:
+            nonlocal remaining
+            if inserted[simplex]:
+                raise RuntimeError("ProcessLowerStars classified a simplex twice.")
+            inserted[simplex] = True
+            remaining -= 1
+            for coface in complex_.coboundary(simplex):
+                if owner[coface] != star_vertex or inserted[coface]:
+                    continue
+                if local_boundary_count[coface] == 0:
+                    raise RuntimeError("ProcessLowerStars local boundary count underflow.")
+                local_boundary_count[coface] -= 1
+                local_boundary_xor[coface] ^= simplex
+                enqueue(coface)
+
+        while remaining:
+            while pair_candidates:
+                _, tau = heapq.heappop(pair_candidates)
+                if inserted[tau] or local_boundary_count[tau] != 1:
+                    continue
+                sigma = local_boundary_xor[tau]
+                if inserted[sigma] or owner[sigma] != star_vertex:
+                    continue
+                emit_pair(sigma, tau)
+                mark_inserted(sigma)
+                mark_inserted(tau)
+                break
+            else:
+                while zero_candidates:
+                    _, critical = heapq.heappop(zero_candidates)
+                    if not inserted[critical] and local_boundary_count[critical] == 0:
+                        break
+                else:
+                    raise RuntimeError(
+                        "ProcessLowerStars found no local expansion or critical step."
+                    )
+                emit_critical(critical)
+                mark_inserted(critical)
 
     return MorseSequence(
         steps=tuple(steps),
@@ -2109,6 +2359,17 @@ def compute_morse_sequence_and_reference_map(
         )
     if algorithm in {F_MAX_SEQUENCE, F_MIN_SEQUENCE}:
         sequence = _compute_paper_f_morse_sequence_python(complex_, algorithm=algorithm)
+        return MorseReferenceFrame(
+            sequence=sequence,
+            _references=compute_reference_map(complex_, sequence, algorithm=algorithm),
+        )
+    if algorithm in {
+        PROCESS_LOWER_STARS_SEQUENCE,
+        PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+    }:
+        sequence = _compute_process_lower_stars_morse_sequence_python(
+            complex_, algorithm=algorithm
+        )
         return MorseReferenceFrame(
             sequence=sequence,
             _references=compute_reference_map(complex_, sequence, algorithm=algorithm),
@@ -3079,20 +3340,26 @@ def profile_morse_reference_frame(
     complex_: FilteredComplex,
     *,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    max_workers: int | None = None,
 ) -> MorseReferenceProfile:
     """Profile a Morse-reference frame without running the pivot reduction."""
 
     algorithm = _normalize_morse_sequence_algorithm(algorithm)
+    native_max_workers = _normalize_parallel_max_workers(algorithm, max_workers)
     core_profiler = (
         getattr(_morse_core, "profile_morse_reference_frame_core", None)
         if _morse_core is not None and complex_._cpp is not None
         else None
     )
     if core_profiler is not None:
-        return _make_morse_reference_profile(dict(core_profiler(complex_._cpp, algorithm)))
+        return _make_morse_reference_profile(
+            dict(core_profiler(complex_._cpp, algorithm, native_max_workers))
+        )
 
     started = perf_counter()
-    frame = compute_morse_sequence_and_reference_map(complex_, algorithm=algorithm)
+    frame = compute_morse_sequence_and_reference_map(
+        complex_, algorithm=algorithm, max_workers=max_workers
+    )
     payload = _profile_morse_reference_frame_python(
         complex_,
         frame.sequence,
@@ -3101,6 +3368,63 @@ def profile_morse_reference_frame(
         profile_seconds=perf_counter() - started,
     )
     return _make_morse_reference_profile(payload)
+
+
+def profile_morse_sequence(
+    complex_: FilteredComplex,
+    *,
+    algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    max_workers: int | None = None,
+) -> MorseSequenceProfile:
+    """Profile gradient construction without references or persistence."""
+
+    algorithm = _normalize_morse_sequence_algorithm(algorithm)
+    native_max_workers = _normalize_parallel_max_workers(algorithm, max_workers)
+    core_profiler = (
+        getattr(_morse_core, "profile_morse_sequence_core", None)
+        if _morse_core is not None and complex_._cpp is not None
+        else None
+    )
+    if core_profiler is not None:
+        payload = dict(core_profiler(complex_._cpp, algorithm, native_max_workers))
+        return MorseSequenceProfile(
+            num_simplices=int(payload["num_simplices"]),
+            num_levels=int(payload["num_levels"]),
+            num_critical_simplices=int(payload["num_critical_simplices"]),
+            num_regular_pairs=int(payload["num_regular_pairs"]),
+            critical_simplices_by_dimension=tuple(
+                int(count) for count in payload["critical_simplices_by_dimension"]
+            ),
+            sequence_algorithm=str(payload["sequence_algorithm"]),
+            builder_init_seconds=1.0e-9 * int(payload["builder_init_nanoseconds"]),
+            sequence_build_seconds=1.0e-9 * int(payload["sequence_build_nanoseconds"]),
+            construction_seconds=1.0e-9 * int(payload["construction_nanoseconds"]),
+            metrics=dict(payload["metrics"]),
+        )
+
+    started = perf_counter()
+    sequence = compute_morse_sequence(
+        complex_, algorithm=algorithm, max_workers=max_workers
+    )
+    construction_seconds = perf_counter() - started
+    max_dimension = max(
+        (complex_.dimension(simplex) for simplex in range(complex_.size)), default=-1
+    )
+    critical_counts = [0] * (max_dimension + 1)
+    for simplex in sequence.critical_simplices:
+        critical_counts[complex_.dimension(simplex)] += 1
+    return MorseSequenceProfile(
+        num_simplices=complex_.size,
+        num_levels=complex_.num_levels,
+        num_critical_simplices=len(sequence.critical_simplices),
+        num_regular_pairs=sum(step.type == REGULAR_PAIR for step in sequence.steps),
+        critical_simplices_by_dimension=tuple(critical_counts),
+        sequence_algorithm=algorithm,
+        builder_init_seconds=0.0,
+        sequence_build_seconds=construction_seconds,
+        construction_seconds=construction_seconds,
+        metrics={},
+    )
 
 
 def profile_morse_sequence_algorithms(
@@ -3558,13 +3882,21 @@ def cpp_profile_morse_reference_frame(
     cpp_complex: object,
     *,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    max_workers: int | None = None,
 ) -> MorseReferenceProfile:
     _require_cpp_backend()
     profiler = getattr(_morse_core, "profile_morse_reference_frame_core", None)
     if profiler is None:
         raise RuntimeError("The C++ backend does not expose Morse reference profiling.")
+    normalized_algorithm = _normalize_morse_sequence_algorithm(algorithm)
     return _make_morse_reference_profile(
-        dict(profiler(cpp_complex, _normalize_morse_sequence_algorithm(algorithm)))
+        dict(
+            profiler(
+                cpp_complex,
+                normalized_algorithm,
+                _normalize_parallel_max_workers(normalized_algorithm, max_workers),
+            )
+        )
     )
 
 
@@ -3944,6 +4276,10 @@ def benchmark_persistence(
             return _make_persistence_benchmark(
                 complex_,
                 num_critical_simplices=int(best_core_result["num_critical_simplices"]),
+                critical_simplices_by_dimension=tuple(
+                    int(count)
+                    for count in best_core_result["critical_simplices_by_dimension"]
+                ),
                 sequence_algorithm=sequence_algorithm,
                 frame_mode=str(best_core_result["frame_mode"]),
                 frame_metrics=best_core_result["frame_metrics"],  # type: ignore[arg-type]
@@ -4078,6 +4414,20 @@ def benchmark_persistence(
     return _make_persistence_benchmark(
         complex_,
         num_critical_simplices=len(sequence.critical_simplices),
+        critical_simplices_by_dimension=tuple(
+            sum(
+                1
+                for simplex in sequence.critical_simplices
+                if complex_.dimension(simplex) == dimension
+            )
+            for dimension in range(
+                1
+                + max(
+                    (complex_.dimension(simplex) for simplex in range(complex_.size)),
+                    default=-1,
+                )
+            )
+        ),
         sequence_algorithm=sequence_algorithm,
         frame_mode=measured_frame_mode,
         frame_metrics=_empty_frame_metrics(),
@@ -4172,6 +4522,7 @@ def _make_persistence_benchmark(
     complex_: FilteredComplex,
     *,
     num_critical_simplices: int,
+    critical_simplices_by_dimension: tuple[int, ...],
     sequence_algorithm: str,
     frame_mode: str,
     frame_metrics: dict[str, object],
@@ -4194,6 +4545,8 @@ def _make_persistence_benchmark(
         num_simplices=complex_.size,
         num_levels=complex_.num_levels,
         num_critical_simplices=num_critical_simplices,
+        critical_simplices_by_dimension=critical_simplices_by_dimension,
+        num_regular_pairs=(complex_.size - num_critical_simplices) // 2,
         sequence_algorithm=sequence_algorithm,
         frame_mode=frame_mode,
         reference_final_live_nonempty_annotations=int(
@@ -4509,6 +4862,13 @@ def _profile_morse_reference_frame_python(
         "sequence_reduction_kernel_local_reduction_nanoseconds": 0,
         "sequence_reduction_kernel_aggregation_nanoseconds": 0,
         "sequence_reduction_kernel_merge_nanoseconds": 0,
+        "sequence_process_lower_stars_builder_init_nanoseconds": 0,
+        "sequence_process_lower_stars_setup_nanoseconds": 0,
+        "sequence_process_lower_stars_local_wall_nanoseconds": 0,
+        "sequence_process_lower_stars_replay_nanoseconds": 0,
+        "sequence_process_lower_stars_cumulative_task_nanoseconds": 0,
+        "sequence_process_lower_stars_min_task_nanoseconds": 0,
+        "sequence_process_lower_stars_max_task_nanoseconds": 0,
         "sequence_candidate_pushes": 0,
         "sequence_candidate_pops": 0,
         "sequence_stale_candidate_skips": 0,
@@ -4529,6 +4889,13 @@ def _profile_morse_reference_frame_python(
         "sequence_reduction_kernel_essential_parallel_tasks": 0,
         "sequence_reduction_kernel_aggregation_rounds": 0,
         "sequence_reduction_kernel_aggregation_parallel_tasks": 0,
+        "sequence_process_lower_stars_count": 0,
+        "sequence_process_lower_stars_max_star_size": 0,
+        "sequence_process_lower_stars_executor_workers": 1,
+        "sequence_process_lower_stars_setup_parallel_tasks": 0,
+        "sequence_process_lower_stars_parallel_tasks": 0,
+        "sequence_process_lower_stars_min_task_load": 0,
+        "sequence_process_lower_stars_max_task_load": 0,
         "final_live_nonempty_annotations": full_reference_nonempty,
         "final_live_total_annotation_size": full_reference_total,
         "peak_live_nonempty_annotations": full_reference_nonempty,
@@ -4536,6 +4903,27 @@ def _profile_morse_reference_frame_python(
         "released_annotations": 0,
         "released_total_annotation_size": 0,
     }
+    if algorithm in {
+        PROCESS_LOWER_STARS_SEQUENCE,
+        PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+    }:
+        vertex_order = tuple(
+            simplex
+            for simplex in complex_.filtration_order
+            if complex_.dimension(simplex) == 0
+        )
+        vertex_rank = {
+            complex_.vertices(simplex)[0]: rank
+            for rank, simplex in enumerate(vertex_order)
+        }
+        star_sizes = [0] * len(vertex_order)
+        for simplex in range(complex_.size):
+            owner_rank = max(vertex_rank[vertex] for vertex in complex_.vertices(simplex))
+            star_sizes[owner_rank] += 1
+        frame_metrics["sequence_process_lower_stars_count"] = len(star_sizes)
+        frame_metrics["sequence_process_lower_stars_max_star_size"] = max(star_sizes)
+        frame_metrics["sequence_process_lower_stars_min_task_load"] = complex_.size
+        frame_metrics["sequence_process_lower_stars_max_task_load"] = complex_.size
     metrics = _empty_reducer_metrics()
     metrics["working_set_size"] = len(working_set)
     metrics["critical_count"] = len(sequence.critical_simplices)
@@ -4638,6 +5026,13 @@ def _empty_frame_metrics() -> dict[str, object]:
         "sequence_reduction_kernel_local_reduction_nanoseconds": 0,
         "sequence_reduction_kernel_aggregation_nanoseconds": 0,
         "sequence_reduction_kernel_merge_nanoseconds": 0,
+        "sequence_process_lower_stars_builder_init_nanoseconds": 0,
+        "sequence_process_lower_stars_setup_nanoseconds": 0,
+        "sequence_process_lower_stars_local_wall_nanoseconds": 0,
+        "sequence_process_lower_stars_replay_nanoseconds": 0,
+        "sequence_process_lower_stars_cumulative_task_nanoseconds": 0,
+        "sequence_process_lower_stars_min_task_nanoseconds": 0,
+        "sequence_process_lower_stars_max_task_nanoseconds": 0,
         "sequence_candidate_pushes": 0,
         "sequence_candidate_pops": 0,
         "sequence_stale_candidate_skips": 0,
@@ -4658,6 +5053,13 @@ def _empty_frame_metrics() -> dict[str, object]:
         "sequence_reduction_kernel_essential_parallel_tasks": 0,
         "sequence_reduction_kernel_aggregation_rounds": 0,
         "sequence_reduction_kernel_aggregation_parallel_tasks": 0,
+        "sequence_process_lower_stars_count": 0,
+        "sequence_process_lower_stars_max_star_size": 0,
+        "sequence_process_lower_stars_executor_workers": 1,
+        "sequence_process_lower_stars_setup_parallel_tasks": 0,
+        "sequence_process_lower_stars_parallel_tasks": 0,
+        "sequence_process_lower_stars_min_task_load": 0,
+        "sequence_process_lower_stars_max_task_load": 0,
         "final_live_nonempty_annotations": 0,
         "final_live_total_annotation_size": 0,
         "peak_live_nonempty_annotations": 0,
@@ -4774,6 +5176,12 @@ def _normalize_morse_sequence_algorithm(algorithm: str) -> str:
         "max-s-f": F_MAX_SEQUENCE,
         "max-sf": F_MAX_SEQUENCE,
         "maximal-f-sequence": F_MAX_SEQUENCE,
+        "process-lower-star": PROCESS_LOWER_STARS_SEQUENCE,
+        "lower-stars": PROCESS_LOWER_STARS_SEQUENCE,
+        "lower-star": PROCESS_LOWER_STARS_SEQUENCE,
+        "process-lower-star-parallel": PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+        "parallel-lower-stars": PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+        "lower-stars-parallel": PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
         "paper-min": F_MIN_SEQUENCE,
         "min-s-f": F_MIN_SEQUENCE,
         "min-sf": F_MIN_SEQUENCE,
@@ -4826,9 +5234,12 @@ def _normalize_parallel_max_workers(
         raise TypeError("max_workers must be an integer or None.")
     if max_workers < 1:
         raise ValueError("max_workers must be positive.")
-    if algorithm != FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE:
+    if algorithm not in {
+        FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+        PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+    }:
         raise ValueError(
-            "max_workers is only valid for flooding-reduction-kernel-parallel."
+            "max_workers is only valid for a parallel Morse sequence strategy."
         )
     return max_workers
 
@@ -5394,6 +5805,8 @@ __all__ = [
     "FilteredComplex",
     "FilteredComplexBuilder",
     "F_MAX_SEQUENCE",
+    "PROCESS_LOWER_STARS_SEQUENCE",
+    "PROCESS_LOWER_STARS_PARALLEL_SEQUENCE",
     "F_MIN_SEQUENCE",
     "FLOODING_MAXMIN_SEQUENCE",
     "FLOODING_MAX_SEQUENCE",
@@ -5406,6 +5819,7 @@ __all__ = [
     "MorseCoreferenceFrame",
     "MorseReferenceFrame",
     "MorseReferenceProfile",
+    "MorseSequenceProfile",
     "MorseSequence",
     "MorseStep",
     "MorseStepSimplices",
@@ -5470,6 +5884,7 @@ __all__ = [
     "gudhi_barcode",
     "morse_sequence_as_simplices",
     "profile_morse_reference_frame",
+    "profile_morse_sequence",
     "profile_morse_sequence_algorithms",
     "reference_map_as_simplices",
     "select_morse_sequence_algorithm",

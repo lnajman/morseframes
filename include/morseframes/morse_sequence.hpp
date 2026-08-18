@@ -1,13 +1,18 @@
 #pragma once
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstddef>
+#include <functional>
 #include <future>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <queue>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -55,6 +60,17 @@ struct MorseSequenceBuildMetrics {
   std::uint64_t reduction_kernel_local_reduction_nanoseconds = 0;
   std::uint64_t reduction_kernel_aggregation_nanoseconds = 0;
   std::uint64_t reduction_kernel_merge_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_nanoseconds = 0;
+  std::uint64_t reduction_kernel_setup_nanoseconds = 0;
+  std::uint64_t reduction_kernel_level_wall_nanoseconds = 0;
+  std::uint64_t reduction_kernel_replay_nanoseconds = 0;
+  std::uint64_t process_lower_stars_builder_init_nanoseconds = 0;
+  std::uint64_t process_lower_stars_setup_nanoseconds = 0;
+  std::uint64_t process_lower_stars_local_wall_nanoseconds = 0;
+  std::uint64_t process_lower_stars_replay_nanoseconds = 0;
+  std::uint64_t process_lower_stars_cumulative_task_nanoseconds = 0;
+  std::uint64_t process_lower_stars_min_task_nanoseconds = 0;
+  std::uint64_t process_lower_stars_max_task_nanoseconds = 0;
   std::size_t candidate_pushes = 0;
   std::size_t candidate_pops = 0;
   std::size_t stale_candidate_skips = 0;
@@ -75,6 +91,21 @@ struct MorseSequenceBuildMetrics {
   std::size_t reduction_kernel_essential_parallel_tasks = 0;
   std::size_t reduction_kernel_aggregation_rounds = 0;
   std::size_t reduction_kernel_aggregation_parallel_tasks = 0;
+  std::size_t reduction_kernel_facet_discovery_coboundary_visits = 0;
+  std::size_t reduction_kernel_incidence_cell_visits = 0;
+  std::size_t reduction_kernel_facet_cell_visits = 0;
+  std::size_t reduction_kernel_local_candidate_visits = 0;
+  std::size_t reduction_kernel_local_coboundary_visits = 0;
+  std::size_t reduction_kernel_local_membership_tests = 0;
+  std::size_t reduction_kernel_inline_cell_overflows = 0;
+  std::size_t reduction_kernel_inline_event_overflows = 0;
+  std::size_t process_lower_stars_count = 0;
+  std::size_t process_lower_stars_max_star_size = 0;
+  std::size_t process_lower_stars_executor_workers = 1;
+  std::size_t process_lower_stars_setup_parallel_tasks = 0;
+  std::size_t process_lower_stars_parallel_tasks = 0;
+  std::size_t process_lower_stars_min_task_load = 0;
+  std::size_t process_lower_stars_max_task_load = 0;
 };
 
 class MorseSequence {
@@ -322,6 +353,19 @@ class FSequenceBuilder {
   // coreduction-like pairs before choosing the next seed.
   MorseSequence build_f_max() const {
     return build_f_max_with_step_callback([](const MorseSequence&, const MorseStep&) {});
+  }
+
+  // Simplicial ProcessLowerStars: partition by the unique maximal vertex and
+  // run the forward one-missing-face expansion independently in each star.
+  MorseSequence build_process_lower_stars() const {
+    return build_process_lower_stars_with_step_callback(
+        [](const MorseSequence&, const MorseStep&) {});
+  }
+
+  MorseSequence build_process_lower_stars_parallel(
+      std::size_t max_workers = 0) const {
+    return build_process_lower_stars_parallel_with_step_callback(
+        [](const MorseSequence&, const MorseStep&) {}, max_workers);
   }
 
   // Decreasing Min(S,F)-style dual construction.  Events are removed from the
@@ -967,6 +1011,387 @@ class FSequenceBuilder {
   }
 
   template <typename StepCallback>
+  MorseSequence build_process_lower_stars_with_step_callback(
+      StepCallback&& on_step) const {
+    return build_process_lower_stars_with_execution_options(
+        std::forward<StepCallback>(on_step), 1);
+  }
+
+  template <typename StepCallback>
+  MorseSequence build_process_lower_stars_parallel_with_step_callback(
+      StepCallback&& on_step, std::size_t max_workers = 0) const {
+    return build_process_lower_stars_with_execution_options(
+        std::forward<StepCallback>(on_step), max_workers);
+  }
+
+  template <typename StepCallback>
+  MorseSequence build_process_lower_stars_with_execution_options(
+      StepCallback&& on_step, std::size_t max_workers) const {
+    const auto setup_start = profile_start();
+    const std::size_t n = complex_.size();
+    MorseSequence sequence(n);
+    auto&& callback = on_step;
+
+    std::vector<SimplexId> vertex_order;
+    vertex_order.reserve(n);
+    std::unordered_map<VertexId, SimplexId> vertex_simplex;
+    for (SimplexId simplex : complex_.filtration_order()) {
+      if (simplex_dimension(simplex) != 0) {
+        continue;
+      }
+      const auto& vertices = complex_.vertices(simplex);
+      if (vertices.size() != 1) {
+        throw std::invalid_argument(
+            "ProcessLowerStars requires zero-cells with one vertex.");
+      }
+      if (!vertex_simplex.emplace(vertices[0], simplex).second) {
+        throw std::invalid_argument(
+            "ProcessLowerStars requires unique vertex identifiers.");
+      }
+      if (!vertex_order.empty() &&
+          complex_.filtration(vertex_order.back()) ==
+              complex_.filtration(simplex)) {
+        throw std::invalid_argument(
+            "ProcessLowerStars requires injective vertex filtration values.");
+      }
+      vertex_order.push_back(simplex);
+    }
+    if (vertex_order.empty()) {
+      throw std::invalid_argument(
+          "ProcessLowerStars requires at least one zero-cell.");
+    }
+
+    std::unordered_map<VertexId, std::size_t> vertex_rank;
+    vertex_rank.reserve(vertex_order.size());
+    for (std::size_t rank = 0; rank < vertex_order.size(); ++rank) {
+      vertex_rank.emplace(complex_.vertices(vertex_order[rank])[0], rank);
+    }
+
+    BoundedTaskExecutor executor(max_workers);
+    const std::size_t worker_count = executor.worker_count();
+    std::vector<SimplexId> owner(n, kInvalidSimplex);
+    std::vector<std::vector<SimplexId>> owned(n);
+    std::vector<std::vector<std::size_t>> robins_key(n);
+    auto build_owner_and_key = [&](SimplexId simplex) {
+      const auto& vertices = complex_.vertices(simplex);
+      if (vertices.empty()) {
+        throw std::invalid_argument(
+            "ProcessLowerStars does not support the empty simplex.");
+      }
+      auto& key = robins_key[simplex];
+      key.reserve(vertices.size());
+      SimplexId simplex_owner = kInvalidSimplex;
+      std::size_t owner_rank = 0;
+      for (VertexId vertex : vertices) {
+        const auto rank_it = vertex_rank.find(vertex);
+        const auto simplex_it = vertex_simplex.find(vertex);
+        if (rank_it == vertex_rank.end() || simplex_it == vertex_simplex.end()) {
+          throw std::invalid_argument(
+              "ProcessLowerStars found a cell with an unknown vertex.");
+        }
+        key.push_back(rank_it->second);
+        if (simplex_owner == kInvalidSimplex || rank_it->second > owner_rank) {
+          simplex_owner = simplex_it->second;
+          owner_rank = rank_it->second;
+        }
+      }
+      std::sort(key.begin(), key.end(), std::greater<std::size_t>());
+      if (complex_.level(simplex) != complex_.level(simplex_owner)) {
+        throw std::invalid_argument(
+            "ProcessLowerStars requires the max-vertex lower-star extension.");
+      }
+      owner[simplex] = simplex_owner;
+    };
+
+    constexpr std::size_t kParallelSetupThreshold = 512;
+    if (worker_count > 1 && n >= kParallelSetupThreshold) {
+      const std::size_t task_count = std::min(worker_count, n);
+      const std::size_t chunk_size = (n + task_count - 1) / task_count;
+      std::vector<std::future<void>> futures;
+      futures.reserve(task_count);
+      for (std::size_t first = 0; first < n; first += chunk_size) {
+        const std::size_t last = std::min(n, first + chunk_size);
+        futures.push_back(executor.submit([first, last, &build_owner_and_key]() {
+          for (SimplexId simplex = first; simplex < last; ++simplex) {
+            build_owner_and_key(simplex);
+          }
+        }));
+      }
+      if (sequence_metrics_ != nullptr) {
+        sequence_metrics_->process_lower_stars_setup_parallel_tasks =
+            futures.size();
+      }
+      for (auto& future : futures) {
+        executor.get(future);
+      }
+    } else {
+      for (SimplexId simplex = 0; simplex < n; ++simplex) {
+        build_owner_and_key(simplex);
+      }
+    }
+    for (SimplexId simplex = 0; simplex < n; ++simplex) {
+      owned[owner[simplex]].push_back(simplex);
+    }
+
+    struct RobinsMinPriority {
+      const std::vector<std::vector<std::size_t>>* keys = nullptr;
+
+      bool operator()(SimplexId lhs, SimplexId rhs) const {
+        const auto& lhs_key = (*keys)[lhs];
+        const auto& rhs_key = (*keys)[rhs];
+        if (lhs_key != rhs_key) {
+          return std::lexicographical_compare(
+              rhs_key.begin(), rhs_key.end(), lhs_key.begin(), lhs_key.end());
+        }
+        return rhs < lhs;
+      }
+    };
+
+    struct LowerStarEvent {
+      MorseStepType type = MorseStepType::Critical;
+      SimplexId sigma = kInvalidSimplex;
+      SimplexId tau = kInvalidSimplex;
+    };
+    std::vector<std::vector<LowerStarEvent>> events_by_star(vertex_order.size());
+
+    auto process_lower_star = [&](std::size_t star_rank) {
+      const SimplexId star_vertex = vertex_order[star_rank];
+      const auto& lower_star = owned[star_vertex];
+      auto& events = events_by_star[star_rank];
+      events.reserve(lower_star.size());
+
+      std::unordered_map<SimplexId, std::size_t> local_index;
+      local_index.reserve(lower_star.size());
+      for (std::size_t index = 0; index < lower_star.size(); ++index) {
+        local_index.emplace(lower_star[index], index);
+      }
+      std::vector<std::uint8_t> classified(lower_star.size(), 0);
+      std::vector<std::uint32_t> local_boundary_count(lower_star.size(), 0);
+      std::vector<SimplexId> local_boundary_xor(lower_star.size(), 0);
+
+      RobinsMinPriority priority{&robins_key};
+      std::priority_queue<SimplexId, std::vector<SimplexId>, RobinsMinPriority>
+          pair_candidates(priority);
+      std::priority_queue<SimplexId, std::vector<SimplexId>, RobinsMinPriority>
+          zero_candidates(priority);
+      std::size_t remaining = lower_star.size();
+
+      auto enqueue = [&](SimplexId simplex) {
+        const std::size_t index = local_index.at(simplex);
+        if (classified[index]) {
+          return;
+        }
+        if (local_boundary_count[index] == 1) {
+          pair_candidates.push(simplex);
+        } else if (local_boundary_count[index] == 0) {
+          zero_candidates.push(simplex);
+        }
+      };
+
+      for (SimplexId simplex : lower_star) {
+        const std::size_t index = local_index.at(simplex);
+        for (SimplexId face : complex_.boundary(simplex)) {
+          if (owner[face] == star_vertex) {
+            ++local_boundary_count[index];
+            local_boundary_xor[index] ^= face;
+          }
+        }
+        enqueue(simplex);
+      }
+
+      auto mark_classified = [&](SimplexId simplex) {
+        const std::size_t index = local_index.at(simplex);
+        if (classified[index]) {
+          throw std::logic_error(
+              "ProcessLowerStars classified a simplex twice.");
+        }
+        classified[index] = 1;
+        --remaining;
+        for (SimplexId coface : complex_.coboundary(simplex)) {
+          if (owner[coface] != star_vertex) {
+            continue;
+          }
+          const std::size_t coface_index = local_index.at(coface);
+          if (classified[coface_index]) {
+            continue;
+          }
+          if (local_boundary_count[coface_index] == 0) {
+            throw std::logic_error(
+                "ProcessLowerStars local boundary count underflow.");
+          }
+          --local_boundary_count[coface_index];
+          local_boundary_xor[coface_index] ^= simplex;
+          enqueue(coface);
+        }
+      };
+
+      while (remaining > 0) {
+        bool paired = false;
+        while (!pair_candidates.empty()) {
+          const SimplexId tau = pair_candidates.top();
+          pair_candidates.pop();
+          const std::size_t tau_index = local_index.at(tau);
+          if (classified[tau_index] || local_boundary_count[tau_index] != 1) {
+            continue;
+          }
+          const SimplexId sigma = local_boundary_xor[tau_index];
+          const auto sigma_it = local_index.find(sigma);
+          if (sigma >= n || sigma_it == local_index.end() ||
+              classified[sigma_it->second]) {
+            continue;
+          }
+          events.push_back(
+              LowerStarEvent{MorseStepType::RegularPair, sigma, tau});
+          mark_classified(sigma);
+          mark_classified(tau);
+          paired = true;
+          break;
+        }
+        if (paired) {
+          continue;
+        }
+
+        SimplexId critical = kInvalidSimplex;
+        while (!zero_candidates.empty()) {
+          const SimplexId candidate = zero_candidates.top();
+          zero_candidates.pop();
+          const std::size_t candidate_index = local_index.at(candidate);
+          if (!classified[candidate_index] &&
+              local_boundary_count[candidate_index] == 0) {
+            critical = candidate;
+            break;
+          }
+        }
+        if (critical == kInvalidSimplex) {
+          throw std::logic_error(
+              "ProcessLowerStars found no local expansion or critical step.");
+        }
+        events.push_back(
+            LowerStarEvent{MorseStepType::Critical, critical, kInvalidSimplex});
+        mark_classified(critical);
+      }
+    };
+
+    if (sequence_metrics_ != nullptr) {
+      sequence_metrics_->process_lower_stars_count = vertex_order.size();
+      for (SimplexId star_vertex : vertex_order) {
+        sequence_metrics_->process_lower_stars_max_star_size = std::max(
+            sequence_metrics_->process_lower_stars_max_star_size,
+            owned[star_vertex].size());
+      }
+      sequence_metrics_->process_lower_stars_executor_workers = worker_count;
+    }
+    profile_add(&MorseSequenceBuildMetrics::process_lower_stars_setup_nanoseconds,
+                setup_start);
+    const auto local_start = profile_start();
+    if (worker_count <= 1 || vertex_order.size() <= 1) {
+      for (std::size_t star_rank = 0; star_rank < vertex_order.size(); ++star_rank) {
+        process_lower_star(star_rank);
+      }
+      if (sequence_metrics_ != nullptr) {
+        sequence_metrics_->process_lower_stars_min_task_load = n;
+        sequence_metrics_->process_lower_stars_max_task_load = n;
+        const auto task_nanoseconds =
+            elapsed_nanoseconds(local_start, SequenceClock::now());
+        sequence_metrics_->process_lower_stars_cumulative_task_nanoseconds =
+            task_nanoseconds;
+        sequence_metrics_->process_lower_stars_min_task_nanoseconds =
+            task_nanoseconds;
+        sequence_metrics_->process_lower_stars_max_task_nanoseconds =
+            task_nanoseconds;
+      }
+    } else {
+      const std::size_t task_count = std::min(worker_count, vertex_order.size());
+      std::vector<std::size_t> star_ranks(vertex_order.size());
+      std::iota(star_ranks.begin(), star_ranks.end(), 0);
+      std::sort(star_ranks.begin(), star_ranks.end(),
+                [&](std::size_t lhs, std::size_t rhs) {
+                  const std::size_t lhs_size = owned[vertex_order[lhs]].size();
+                  const std::size_t rhs_size = owned[vertex_order[rhs]].size();
+                  return lhs_size != rhs_size ? lhs_size > rhs_size : lhs < rhs;
+                });
+
+      std::vector<std::vector<std::size_t>> task_stars(task_count);
+      std::vector<std::size_t> task_loads(task_count, 0);
+      for (std::size_t star_rank : star_ranks) {
+        const auto lightest =
+            std::min_element(task_loads.begin(), task_loads.end());
+        const std::size_t task_index =
+            static_cast<std::size_t>(lightest - task_loads.begin());
+        task_stars[task_index].push_back(star_rank);
+        task_loads[task_index] += owned[vertex_order[star_rank]].size();
+      }
+
+      std::vector<std::future<void>> futures;
+      futures.reserve(task_count);
+      const bool measure_tasks = sequence_metrics_ != nullptr;
+      std::vector<std::uint64_t> task_nanoseconds(
+          measure_tasks ? task_count : 0, 0);
+      for (std::size_t task_index = 0; task_index < task_count; ++task_index) {
+        const auto& task = task_stars[task_index];
+        futures.push_back(executor.submit([task, task_index, measure_tasks,
+                                           &process_lower_star,
+                                           &task_nanoseconds]() {
+          const auto task_start =
+              measure_tasks ? SequenceClock::now() : SequenceClock::time_point{};
+          for (std::size_t star_rank : task) {
+            process_lower_star(star_rank);
+          }
+          if (measure_tasks) {
+            task_nanoseconds[task_index] =
+                elapsed_nanoseconds(task_start, SequenceClock::now());
+          }
+        }));
+      }
+      if (sequence_metrics_ != nullptr) {
+        sequence_metrics_->process_lower_stars_parallel_tasks = futures.size();
+        sequence_metrics_->process_lower_stars_min_task_load =
+            *std::min_element(task_loads.begin(), task_loads.end());
+        sequence_metrics_->process_lower_stars_max_task_load =
+            *std::max_element(task_loads.begin(), task_loads.end());
+      }
+      for (auto& future : futures) {
+        executor.get(future);
+      }
+      if (sequence_metrics_ != nullptr) {
+        sequence_metrics_->process_lower_stars_cumulative_task_nanoseconds =
+            std::accumulate(task_nanoseconds.begin(), task_nanoseconds.end(),
+                            std::uint64_t{0});
+        sequence_metrics_->process_lower_stars_min_task_nanoseconds =
+            *std::min_element(task_nanoseconds.begin(), task_nanoseconds.end());
+        sequence_metrics_->process_lower_stars_max_task_nanoseconds =
+            *std::max_element(task_nanoseconds.begin(), task_nanoseconds.end());
+      }
+    }
+    profile_add(
+        &MorseSequenceBuildMetrics::process_lower_stars_local_wall_nanoseconds,
+        local_start);
+
+    const auto replay_start = profile_start();
+    for (const auto& events : events_by_star) {
+      for (const LowerStarEvent& event : events) {
+        if (event.type == MorseStepType::Critical) {
+          sequence.add_critical(event.sigma, complex_.level(event.sigma));
+          if (sequence_metrics_ != nullptr) {
+            ++sequence_metrics_->criticals;
+          }
+        } else {
+          sequence.add_regular_pair(event.sigma, event.tau,
+                                    complex_.level(event.tau));
+          if (sequence_metrics_ != nullptr) {
+            ++sequence_metrics_->regular_pairs;
+          }
+        }
+        callback(sequence, sequence.steps().back());
+      }
+    }
+    profile_add(&MorseSequenceBuildMetrics::process_lower_stars_replay_nanoseconds,
+                replay_start);
+
+    return sequence;
+  }
+
+  template <typename StepCallback>
   MorseSequence build_f_min_with_step_callback(StepCallback&& on_step) const {
     const std::size_t n = complex_.size();
     const auto init_start = profile_start();
@@ -1168,6 +1593,8 @@ class FSequenceBuilder {
   template <typename StepCallback>
   MorseSequence build_flooding_reduction_kernel_with_execution_options(
       ReductionKernelExecutionOptions options, StepCallback&& on_step) const {
+    options.collect_metrics = sequence_metrics_ != nullptr;
+    const auto setup_start = profile_start();
     const std::size_t n = complex_.size();
     MorseSequence sequence(n);
     auto&& callback = on_step;
@@ -1180,44 +1607,104 @@ class FSequenceBuilder {
         executor == nullptr ? 1 : executor->worker_count();
     const std::size_t level_workers = std::min(num_levels, workers);
     ReductionKernelWorkspace<ComplexView> workspace(complex_, options, executor);
-    std::vector<ReductionKernelLevelResult> level_results(num_levels);
+    std::vector<std::size_t> event_offsets(num_levels + 1, 0);
+    for (LevelId level = 0; level < num_levels; ++level) {
+      event_offsets[level + 1] =
+          event_offsets[level] + complex_.simplices_of_level(level).size();
+    }
+    const std::size_t event_capacity = event_offsets.back();
+    if (event_capacity >
+        std::numeric_limits<std::size_t>::max() /
+            sizeof(ReductionKernelEvent)) {
+      throw std::length_error("Reduction-kernel event arena is too large.");
+    }
+    std::unique_ptr<unsigned char[]> event_arena;
+    if (event_capacity > 0) {
+      event_arena.reset(
+          new unsigned char[event_capacity * sizeof(ReductionKernelEvent)]);
+    }
+    auto* level_events =
+        reinterpret_cast<ReductionKernelEvent*>(event_arena.get());
+    std::vector<std::size_t> level_event_counts(num_levels, 0);
+    std::vector<ReductionKernelMetrics> level_metrics(
+        options.collect_metrics ? num_levels : 0);
     ReductionKernelMetrics kernel_metrics;
     kernel_metrics.executor_workers = workers;
+    profile_add(&MorseSequenceBuildMetrics::reduction_kernel_setup_nanoseconds,
+                setup_start);
 
+    const auto level_start = profile_start();
     if (level_workers == 1 || num_levels <= 1) {
       for (LevelId level = 0; level < num_levels; ++level) {
-        level_results[level] = workspace.compute_level_isolated(level);
+        if (options.collect_metrics) {
+          level_metrics[level] = workspace.compute_level_isolated_into(
+              level, 0, level_events + event_offsets[level],
+              event_offsets[level + 1] - event_offsets[level],
+              level_event_counts[level]);
+        } else {
+          workspace.compute_level_isolated_into_unprofiled(
+              level, 0, level_events + event_offsets[level],
+              event_offsets[level + 1] - event_offsets[level],
+              level_event_counts[level]);
+        }
       }
     } else {
-      for (std::size_t first = 0; first < num_levels;
-           first += level_workers) {
-        const std::size_t count =
-            std::min(level_workers, num_levels - first);
+      // Levels own disjoint workspace entries. Long-lived tasks dynamically
+      // claim levels so the executor sees only one task per worker and balance
+      // follows actual kernel cost rather than a simplex-count proxy. Nested
+      // facet tasks are disabled on this path; a single large plateau still
+      // uses the intra-level parallel algorithm.
+      const std::size_t task_count = std::min(level_workers, num_levels);
+      std::atomic<LevelId> next_level{0};
+      if (options.collect_metrics) {
         ++kernel_metrics.parallel_level_batches;
-        kernel_metrics.max_parallel_levels =
-            std::max(kernel_metrics.max_parallel_levels, count);
-        std::vector<std::future<ReductionKernelLevelResult>> futures;
-        futures.reserve(count);
-        for (std::size_t offset = 0; offset < count; ++offset) {
-          const LevelId level = static_cast<LevelId>(first + offset);
-          futures.push_back(executor->submit([level, &workspace]() {
-            return workspace.compute_level_isolated(level);
-          }));
-        }
-        for (std::size_t offset = 0; offset < count; ++offset) {
-          level_results[first + offset] = executor->get(futures[offset]);
-        }
+        kernel_metrics.max_parallel_levels = task_count;
+      }
+      std::vector<std::future<void>> futures;
+      futures.reserve(task_count);
+      for (std::size_t task = 0; task < task_count; ++task) {
+        futures.push_back(executor->submit(
+            [task, &next_level, num_levels, &workspace, &event_offsets,
+             level_events, &level_event_counts, &level_metrics,
+             collect_metrics = options.collect_metrics]() {
+              while (true) {
+                const LevelId level = next_level.fetch_add(
+                    1, std::memory_order_relaxed);
+                if (level >= num_levels) {
+                  return;
+                }
+                if (collect_metrics) {
+                  level_metrics[level] = workspace.compute_level_isolated_into(
+                      level, task, level_events + event_offsets[level],
+                      event_offsets[level + 1] - event_offsets[level],
+                      level_event_counts[level], false);
+                } else {
+                  workspace.compute_level_isolated_into_unprofiled(
+                      level, task, level_events + event_offsets[level],
+                      event_offsets[level + 1] - event_offsets[level],
+                      level_event_counts[level], false);
+                }
+              }
+            }));
+      }
+      for (auto& future : futures) {
+        executor->get(future);
       }
     }
+    profile_add(
+        &MorseSequenceBuildMetrics::reduction_kernel_level_wall_nanoseconds,
+        level_start);
 
+    const auto replay_start = profile_start();
     for (LevelId level = 0; level < num_levels; ++level) {
-      auto& level_result = level_results[level];
-      ReductionKernelWorkspace<ComplexView>::accumulate_metrics(
-          kernel_metrics, level_result.metrics);
-      const auto& events = level_result.events;
-      for (std::size_t index = events.size(); index > 0; --index) {
-        const auto& event = events[index - 1];
-        if (event.type == ReductionKernelEventType::Perforation) {
+      if (options.collect_metrics) {
+        ReductionKernelWorkspace<ComplexView>::accumulate_metrics(
+            kernel_metrics, level_metrics[level]);
+      }
+      const std::size_t first = event_offsets[level];
+      for (std::size_t index = level_event_counts[level]; index > 0; --index) {
+        const auto& event = level_events[first + index - 1];
+        if (event.is_perforation()) {
           sequence.add_critical(event.sigma, level);
           if (sequence_metrics_ != nullptr) {
             ++sequence_metrics_->criticals;
@@ -1231,6 +1718,9 @@ class FSequenceBuilder {
         callback(sequence, sequence.steps().back());
       }
     }
+    profile_add(
+        &MorseSequenceBuildMetrics::reduction_kernel_replay_nanoseconds,
+        replay_start);
 
     if (sequence_metrics_ != nullptr) {
       sequence_metrics_->reduction_kernel_facet_nanoseconds =
@@ -1245,6 +1735,8 @@ class FSequenceBuilder {
           kernel_metrics.aggregation_nanoseconds;
       sequence_metrics_->reduction_kernel_merge_nanoseconds =
           kernel_metrics.merge_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_nanoseconds =
+          kernel_metrics.closure_nanoseconds;
       sequence_metrics_->reduction_kernel_levels = kernel_metrics.levels;
       sequence_metrics_->reduction_kernel_rounds = kernel_metrics.kernel_rounds;
       sequence_metrics_->reduction_kernel_facet_kernels =
@@ -1271,6 +1763,22 @@ class FSequenceBuilder {
           kernel_metrics.aggregation_rounds;
       sequence_metrics_->reduction_kernel_aggregation_parallel_tasks =
           kernel_metrics.aggregation_parallel_tasks;
+      sequence_metrics_->reduction_kernel_facet_discovery_coboundary_visits =
+          kernel_metrics.facet_discovery_coboundary_visits;
+      sequence_metrics_->reduction_kernel_incidence_cell_visits =
+          kernel_metrics.incidence_cell_visits;
+      sequence_metrics_->reduction_kernel_facet_cell_visits =
+          kernel_metrics.facet_cell_visits;
+      sequence_metrics_->reduction_kernel_local_candidate_visits =
+          kernel_metrics.local_candidate_visits;
+      sequence_metrics_->reduction_kernel_local_coboundary_visits =
+          kernel_metrics.local_coboundary_visits;
+      sequence_metrics_->reduction_kernel_local_membership_tests =
+          kernel_metrics.local_membership_tests;
+      sequence_metrics_->reduction_kernel_inline_cell_overflows =
+          kernel_metrics.inline_cell_overflows;
+      sequence_metrics_->reduction_kernel_inline_event_overflows =
+          kernel_metrics.inline_event_overflows;
     }
 
     return sequence;

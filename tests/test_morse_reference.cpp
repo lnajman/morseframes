@@ -702,6 +702,108 @@ void test_f_sequence_builder_accepts_simplex_tree_view() {
   assert(frame.references == references);
 }
 
+void test_process_lower_stars_triangle_boundary() {
+  FilteredSimplicialComplex complex;
+  add_simplex(complex, {0}, 2.0);
+  add_simplex(complex, {1}, 1.0);
+  add_simplex(complex, {2}, 0.0);
+  add_simplex(complex, {0, 1}, 2.0);
+  add_simplex(complex, {0, 2}, 2.0);
+  add_simplex(complex, {1, 2}, 1.0);
+  complex.finalize();
+
+  const auto sequence = FSequenceBuilder(complex).build_process_lower_stars();
+  morseframes::validate_morse_sequence(complex, sequence);
+  assert(sequence.steps().size() == 4);
+
+  const auto v0 = complex.find_simplex({0});
+  const auto v1 = complex.find_simplex({1});
+  const auto v2 = complex.find_simplex({2});
+  const auto e01 = complex.find_simplex({0, 1});
+  const auto e02 = complex.find_simplex({0, 2});
+  const auto e12 = complex.find_simplex({1, 2});
+  const auto& steps = sequence.steps();
+  assert(steps[0].type == morseframes::MorseStepType::Critical &&
+         steps[0].sigma == v2);
+  assert(steps[1].type == morseframes::MorseStepType::RegularPair &&
+         steps[1].sigma == v1 && steps[1].tau == e12);
+  assert(steps[2].type == morseframes::MorseStepType::RegularPair &&
+         steps[2].sigma == v0 && steps[2].tau == e02);
+  assert(steps[3].type == morseframes::MorseStepType::Critical &&
+         steps[3].sigma == e01);
+
+  morseframes::MorseSequenceBuildMetrics parallel_metrics;
+  const auto parallel_sequence =
+      FSequenceBuilder(complex, &parallel_metrics)
+          .build_process_lower_stars_parallel(2);
+  morseframes::validate_morse_sequence(complex, parallel_sequence);
+  assert(sequence.steps().size() == parallel_sequence.steps().size());
+  for (std::size_t index = 0; index < sequence.steps().size(); ++index) {
+    const auto& expected = sequence.steps()[index];
+    const auto& actual = parallel_sequence.steps()[index];
+    assert(expected.type == actual.type);
+    assert(expected.sigma == actual.sigma);
+    assert(expected.tau == actual.tau);
+    assert(expected.level == actual.level);
+  }
+  assert(parallel_metrics.process_lower_stars_executor_workers == 2);
+  assert(parallel_metrics.process_lower_stars_parallel_tasks == 2);
+  assert(parallel_metrics.process_lower_stars_count == 3);
+  assert(parallel_metrics.process_lower_stars_max_star_size == 3);
+  assert(parallel_metrics.process_lower_stars_min_task_load == 3);
+  assert(parallel_metrics.process_lower_stars_max_task_load == 3);
+  assert(parallel_metrics.process_lower_stars_setup_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_local_wall_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_replay_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_cumulative_task_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_max_task_nanoseconds >=
+         parallel_metrics.process_lower_stars_min_task_nanoseconds);
+  const auto single_worker_sequence =
+      FSequenceBuilder(complex).build_process_lower_stars_parallel(1);
+  assert(single_worker_sequence.steps().size() == sequence.steps().size());
+  for (std::size_t index = 0; index < sequence.steps().size(); ++index) {
+    assert(single_worker_sequence.steps()[index].type == steps[index].type);
+    assert(single_worker_sequence.steps()[index].sigma == steps[index].sigma);
+    assert(single_worker_sequence.steps()[index].tau == steps[index].tau);
+  }
+
+  const auto diagram = morseframes::compute_morse_reference_persistence(
+      complex, morseframes::MorseSequenceStrategy::ProcessLowerStars);
+  assert_same_barcode(diagram,
+                      morseframes::compute_standard_z2_persistence(complex));
+  assert(morseframes::morse_sequence_strategy_from_name("process-lower-stars") ==
+         morseframes::MorseSequenceStrategy::ProcessLowerStars);
+  assert(morseframes::morse_sequence_strategy_from_name(
+             "process-lower-stars-parallel") ==
+         morseframes::MorseSequenceStrategy::ProcessLowerStarsParallel);
+
+  FilteredSimplicialComplex tied_vertices;
+  add_simplex(tied_vertices, {0}, 0.0);
+  add_simplex(tied_vertices, {1}, 0.0);
+  add_simplex(tied_vertices, {0, 1}, 0.0);
+  tied_vertices.finalize();
+  bool rejected_tie = false;
+  try {
+    (void)FSequenceBuilder(tied_vertices).build_process_lower_stars();
+  } catch (const std::invalid_argument&) {
+    rejected_tie = true;
+  }
+  assert(rejected_tie);
+
+  FilteredSimplicialComplex delayed_edge;
+  add_simplex(delayed_edge, {0}, 0.0);
+  add_simplex(delayed_edge, {1}, 1.0);
+  add_simplex(delayed_edge, {0, 1}, 2.0);
+  delayed_edge.finalize();
+  bool rejected_extension = false;
+  try {
+    (void)FSequenceBuilder(delayed_edge).build_process_lower_stars();
+  } catch (const std::invalid_argument&) {
+    rejected_extension = true;
+  }
+  assert(rejected_extension);
+}
+
 void test_one_vertex() {
   FilteredSimplicialComplex complex;
   add_simplex(complex, {0}, 0.0);
@@ -1113,6 +1215,13 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   assert_same_sequence(multilevel_sequence, multilevel_parallel_sequence);
   assert(multilevel_parallel_metrics
              .reduction_kernel_parallel_level_batches > 0);
+  assert(multilevel_parallel_metrics
+             .reduction_kernel_facet_discovery_parallel_tasks == 0);
+  assert(multilevel_parallel_metrics
+             .reduction_kernel_essential_parallel_tasks == 0);
+  assert(multilevel_parallel_metrics.reduction_kernel_parallel_batches == 0);
+  assert(multilevel_parallel_metrics
+             .reduction_kernel_aggregation_parallel_tasks == 0);
   assert(multilevel_parallel_metrics.reduction_kernel_max_parallel_levels ==
          std::min<std::size_t>(multilevel_complex.num_levels(), 4));
   assert(multilevel_parallel_metrics.reduction_kernel_executor_workers == 4);
@@ -1143,8 +1252,9 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   morseframes::validate_morse_sequence(four_facet_complex,
                                        four_facet_parallel_sequence);
   assert_same_sequence(four_facet_sequence, four_facet_parallel_sequence);
+  assert(four_facet_parallel_metrics.reduction_kernel_aggregation_rounds > 0);
   assert(four_facet_parallel_metrics
-             .reduction_kernel_aggregation_parallel_tasks > 0);
+             .reduction_kernel_aggregation_parallel_tasks == 0);
 
   const auto strategy =
       morseframes::morse_sequence_strategy_from_name("reduction-kernel");
@@ -1221,6 +1331,7 @@ int main() {
   test_simplex_tree_builder_explicit_insert_can_be_nonclosed();
   test_filtered_complex_from_simplex_tree_adapter();
   test_f_sequence_builder_accepts_simplex_tree_view();
+  test_process_lower_stars_triangle_boundary();
   test_one_vertex();
   test_reducer_skips_initially_zero_boundaries();
   test_two_vertices_joined_by_later_edge();

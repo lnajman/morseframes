@@ -69,6 +69,26 @@ builder.insert([0, 1, 2], 2.0, include_faces=True)
 complex_ = builder.finalize()
 ```
 
+When the same owning complex will be processed by sequential ReductionKernel
+more than once, its native same-level closures and coboundary adjacency can be
+cached explicitly:
+
+```python
+cache = complex_.prepare_reduction_kernel_cache()
+print(cache["build_nanoseconds"], cache["bytes"])
+sequence = mf.compute_morse_sequence(
+    complex_, algorithm="flooding-reduction-kernel"
+)
+```
+
+Cache construction is not hidden in gradient timing. The method requires the
+native backend and reports its build cost, closure-entry count,
+`coboundary_entries`, and memory footprint.
+Multiworker ReductionKernel currently ignores the cache because disjoint level
+workers build their small closures concurrently and shared-cache access did not
+improve wall time.
+Call `complex_.clear_reduction_kernel_cache()` to release the optional cache.
+
 ## Sequence Strategies
 
 Most high-level functions accept an `algorithm` keyword. The currently exposed
@@ -285,6 +305,23 @@ benchmarks = mf.benchmark_sequence_algorithms(
     repeats=3,
 )
 ```
+
+Each benchmark reports compression as well as time:
+
+```python
+for benchmark in benchmarks:
+    print(
+        benchmark.sequence_algorithm,
+        benchmark.critical_simplices_by_dimension,
+        benchmark.critical_ratio,
+        benchmark.sequence_seconds,
+        benchmark.persistence_seconds,
+        benchmark.total_seconds,
+    )
+```
+
+`sequence_seconds_per_eliminated_simplex` normalizes construction time by the
+number of simplices removed through regular pairs.
 
 The adaptive entry point can choose between Morse persistence and ordinary
 persistence:

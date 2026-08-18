@@ -1,6 +1,7 @@
 import random
 import unittest
 from itertools import combinations
+from unittest.mock import patch
 
 import morseframes as mp
 
@@ -27,6 +28,77 @@ def filled_triangle_complex():
             ([0, 1, 2], 2.0),
         ]
     )
+
+
+def injective_triangle_boundary_complex():
+    return mp.FilteredComplex.from_simplices(
+        [
+            ([0], 2.0),
+            ([1], 1.0),
+            ([2], 0.0),
+            ([0, 1], 2.0),
+            ([0, 2], 2.0),
+            ([1, 2], 1.0),
+        ]
+    )
+
+
+def process_lower_stars_oracle(complex_):
+    """Small recomputing oracle for Robins' lower-star priority rules."""
+    vertex_order = tuple(
+        simplex
+        for simplex in complex_.filtration_order
+        if complex_.dimension(simplex) == 0
+    )
+    vertex_rank = {
+        complex_.vertices(simplex)[0]: rank
+        for rank, simplex in enumerate(vertex_order)
+    }
+    robins_key = {}
+    lower_stars = {vertex: set() for vertex in vertex_order}
+    for simplex in range(complex_.size):
+        ranks = tuple(
+            sorted(
+                (vertex_rank[vertex] for vertex in complex_.vertices(simplex)),
+                reverse=True,
+            )
+        )
+        simplex_owner = vertex_order[ranks[0]]
+        robins_key[simplex] = ranks
+        lower_stars[simplex_owner].add(simplex)
+
+    events = []
+    classified = set()
+    for star_vertex in vertex_order:
+        remaining = lower_stars[star_vertex]
+        while remaining:
+            missing = {
+                simplex: tuple(
+                    face
+                    for face in complex_.boundary(simplex)
+                    if face not in classified and face in remaining
+                )
+                for simplex in remaining
+            }
+            pairable = [
+                simplex for simplex, faces in missing.items() if len(faces) == 1
+            ]
+            if pairable:
+                tau = min(pairable, key=lambda simplex: robins_key[simplex])
+                sigma = missing[tau][0]
+                events.append((mp.REGULAR_PAIR, sigma, tau))
+                remaining.remove(sigma)
+                remaining.remove(tau)
+                classified.update((sigma, tau))
+                continue
+            fillable = [
+                simplex for simplex, faces in missing.items() if not faces
+            ]
+            critical = min(fillable, key=lambda simplex: robins_key[simplex])
+            events.append((mp.CRITICAL, critical, None))
+            remaining.remove(critical)
+            classified.add(critical)
+    return tuple(events)
 
 
 def plateau_complex():
@@ -78,6 +150,190 @@ def _gudhi_available():
 
 
 class PythonApiTest(unittest.TestCase):
+    def test_gradient_profile_python_fallback(self):
+        complex_ = injective_triangle_boundary_complex()
+        with patch.object(mp, "_morse_core", None):
+            profile = mp.profile_morse_sequence(
+                complex_, algorithm=mp.PROCESS_LOWER_STARS_SEQUENCE
+            )
+        self.assertEqual(profile.num_critical_simplices, 2)
+        self.assertEqual(profile.num_regular_pairs, 2)
+        self.assertEqual(profile.critical_simplices_by_dimension, (1, 1))
+        self.assertGreater(profile.construction_seconds, 0.0)
+        self.assertEqual(profile.metrics, {})
+
+    def test_process_lower_stars_exact_order_and_contract(self):
+        complex_ = injective_triangle_boundary_complex()
+        sequence = mp.compute_morse_sequence(
+            complex_, algorithm="process-lower-stars"
+        )
+        parallel_sequences = tuple(
+            mp.compute_morse_sequence(
+                complex_,
+                algorithm="process-lower-stars-parallel",
+                max_workers=workers,
+            )
+            for workers in (1, 2, 4)
+        )
+        actual = tuple(
+            (
+                step.type,
+                complex_.vertices(step.sigma),
+                None if step.tau is None else complex_.vertices(step.tau),
+            )
+            for step in sequence.steps
+        )
+        self.assertEqual(
+            actual,
+            (
+                (mp.CRITICAL, (2,), None),
+                (mp.REGULAR_PAIR, (1,), (1, 2)),
+                (mp.REGULAR_PAIR, (0,), (0, 2)),
+                (mp.CRITICAL, (0, 1), None),
+            ),
+        )
+        for parallel_sequence in parallel_sequences:
+            self.assertEqual(parallel_sequence.steps, sequence.steps)
+            self.assertEqual(
+                parallel_sequence.algorithm,
+                mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+            )
+        parallel_frame = mp.compute_morse_sequence_and_reference_map(
+            complex_,
+            algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+            max_workers=2,
+        )
+        self.assertEqual(parallel_frame.sequence.steps, sequence.steps)
+        parallel_profile = mp.profile_morse_reference_frame(
+            complex_,
+            algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+            max_workers=2,
+        )
+        gradient_profile = mp.profile_morse_sequence(
+            complex_,
+            algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+            max_workers=2,
+        )
+        self.assertEqual(gradient_profile.num_critical_simplices, 2)
+        self.assertEqual(gradient_profile.num_regular_pairs, 2)
+        self.assertEqual(gradient_profile.critical_simplices_by_dimension, (1, 1))
+        self.assertGreater(gradient_profile.construction_seconds, 0.0)
+        self.assertNotIn("reference_update_nanoseconds", gradient_profile.metrics)
+        if mp.cpp_backend_active(complex_):
+            self.assertGreater(gradient_profile.builder_init_seconds, 0.0)
+            self.assertEqual(
+                gradient_profile.metrics["process_lower_stars_count"], 3
+            )
+        for metric in (
+            "sequence_process_lower_stars_count",
+            "sequence_process_lower_stars_max_star_size",
+            "sequence_process_lower_stars_executor_workers",
+            "sequence_process_lower_stars_setup_parallel_tasks",
+            "sequence_process_lower_stars_parallel_tasks",
+            "sequence_process_lower_stars_min_task_load",
+            "sequence_process_lower_stars_max_task_load",
+            "sequence_process_lower_stars_builder_init_nanoseconds",
+            "sequence_process_lower_stars_setup_nanoseconds",
+            "sequence_process_lower_stars_local_wall_nanoseconds",
+            "sequence_process_lower_stars_replay_nanoseconds",
+            "sequence_process_lower_stars_cumulative_task_nanoseconds",
+            "sequence_process_lower_stars_min_task_nanoseconds",
+            "sequence_process_lower_stars_max_task_nanoseconds",
+        ):
+            self.assertIn(metric, parallel_profile.frame_metrics)
+        self.assertEqual(
+            parallel_profile.frame_metrics["sequence_process_lower_stars_count"],
+            3,
+        )
+        self.assertEqual(
+            parallel_profile.frame_metrics[
+                "sequence_process_lower_stars_max_star_size"
+            ],
+            3,
+        )
+        self.assertGreaterEqual(
+            parallel_profile.frame_metrics[
+                "sequence_process_lower_stars_max_task_load"
+            ],
+            parallel_profile.frame_metrics[
+                "sequence_process_lower_stars_min_task_load"
+            ],
+        )
+        if complex_.cpp_backend_active():
+            self.assertGreater(
+                parallel_profile.frame_metrics[
+                    "sequence_process_lower_stars_builder_init_nanoseconds"
+                ],
+                0,
+            )
+            self.assertGreater(
+                parallel_profile.frame_metrics[
+                    "sequence_process_lower_stars_setup_nanoseconds"
+                ],
+                0,
+            )
+        self.assertGreaterEqual(
+            parallel_profile.frame_metrics[
+                "sequence_process_lower_stars_max_task_nanoseconds"
+            ],
+            parallel_profile.frame_metrics[
+                "sequence_process_lower_stars_min_task_nanoseconds"
+            ],
+        )
+        self.assertEqual(
+            mp.compute_morse_persistence(
+                complex_, algorithm="process-lower-star"
+            ).finite_barcode(),
+            mp.compute_standard_persistence(complex_).finite_barcode(),
+        )
+        self.assertIn(
+            mp.PROCESS_LOWER_STARS_SEQUENCE, mp.MORSE_SEQUENCE_ALGORITHMS
+        )
+        self.assertIn(
+            mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+            mp.MORSE_SEQUENCE_ALGORITHMS,
+        )
+        self.assertNotIn(
+            mp.PROCESS_LOWER_STARS_SEQUENCE,
+            mp.DEFAULT_MORSE_ALGORITHM_PORTFOLIO,
+        )
+        sequential_benchmark = mp.benchmark_persistence(
+            complex_,
+            repeats=1,
+            sequence_algorithm=mp.PROCESS_LOWER_STARS_SEQUENCE,
+            materialize_barcodes=False,
+        )
+        parallel_benchmark = mp.benchmark_persistence(
+            complex_,
+            repeats=1,
+            sequence_algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+            materialize_barcodes=False,
+        )
+        self.assertEqual(
+            parallel_benchmark.num_critical_simplices,
+            sequential_benchmark.num_critical_simplices,
+        )
+        self.assertEqual(
+            parallel_benchmark.critical_simplices_by_dimension,
+            sequential_benchmark.critical_simplices_by_dimension,
+        )
+        self.assertEqual(
+            parallel_benchmark.num_regular_pairs,
+            sequential_benchmark.num_regular_pairs,
+        )
+
+        tied = mp.FilteredComplex.from_simplices(
+            [([0], 0.0), ([1], 0.0), ([0, 1], 0.0)]
+        )
+        with self.assertRaisesRegex(ValueError, "injective vertex filtration"):
+            mp.compute_morse_sequence(tied, algorithm="process-lower-stars")
+
+        delayed = mp.FilteredComplex.from_simplices(
+            [([0], 0.0), ([1], 1.0), ([0, 1], 2.0)]
+        )
+        with self.assertRaisesRegex(ValueError, "max-vertex lower-star extension"):
+            mp.compute_morse_sequence(delayed, algorithm="process-lower-stars")
+
     def test_cpp_backend_is_stateful_when_available(self):
         if not mp.cpp_backend_available():
             self.skipTest("C++ backend is not built")
@@ -92,6 +348,33 @@ class PythonApiTest(unittest.TestCase):
         self.assertEqual(sequence.algorithm, mp.SATURATED_SEQUENCE)
         self.assertEqual(mp.compute_reference_map(complex_, sequence), ((0,), (2,), (1,)))
         self.assertEqual(mp.compute_morse_persistence(complex_, sequence).finite_barcode(), ((0, 0.0, 1.0),))
+
+    def test_reduction_kernel_cache_when_available(self):
+        if not mp.cpp_backend_available():
+            self.skipTest("C++ backend is not built")
+
+        complex_ = filled_triangle_complex()
+        uncached = mp.compute_morse_sequence(
+            complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_SEQUENCE
+        )
+        self.assertFalse(complex_.reduction_kernel_cache_ready)
+        cache = complex_.prepare_reduction_kernel_cache()
+        self.assertTrue(complex_.reduction_kernel_cache_ready)
+        self.assertGreater(cache["entries"], 0)
+        self.assertGreaterEqual(cache["coboundary_entries"], 0)
+        self.assertGreater(cache["bytes"], 0)
+        cached = mp.compute_morse_sequence(
+            complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_SEQUENCE
+        )
+        parallel = mp.compute_morse_sequence(
+            complex_,
+            algorithm=mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+            max_workers=2,
+        )
+        self.assertEqual(uncached.steps, cached.steps)
+        self.assertEqual(uncached.steps, parallel.steps)
+        complex_.clear_reduction_kernel_cache()
+        self.assertFalse(complex_.reduction_kernel_cache_ready)
 
     def test_low_level_cpp_api_when_available(self):
         if not mp.cpp_backend_available():
@@ -346,6 +629,7 @@ class PythonApiTest(unittest.TestCase):
             parallel_kernel_profile = mp.profile_morse_reference_frame(
                 complex_,
                 algorithm="flooding-reduction-kernel-parallel",
+                max_workers=2,
             )
             self.assertEqual(
                 parallel_kernel_profile.sequence_algorithm,
@@ -365,6 +649,12 @@ class PythonApiTest(unittest.TestCase):
                 ],
                 1,
             )
+            self.assertLessEqual(
+                parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_executor_workers"
+                ],
+                2,
+            )
             self.assertIn(
                 "sequence_reduction_kernel_essential_nanoseconds",
                 parallel_kernel_profile.frame_metrics,
@@ -379,18 +669,21 @@ class PythonApiTest(unittest.TestCase):
                 ]
                 > 1
             ):
-                self.assertGreater(
-                    parallel_kernel_profile.frame_metrics[
-                        "sequence_reduction_kernel_facet_discovery_parallel_tasks"
-                    ],
-                    0,
-                )
-                self.assertGreater(
-                    parallel_kernel_profile.frame_metrics[
-                        "sequence_reduction_kernel_essential_parallel_tasks"
-                    ],
-                    0,
-                )
+                level_batches = parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_parallel_level_batches"
+                ]
+                facet_tasks = parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_facet_discovery_parallel_tasks"
+                ]
+                essential_tasks = parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_essential_parallel_tasks"
+                ]
+                self.assertTrue(level_batches > 0 or facet_tasks > 0)
+                if level_batches > 0:
+                    self.assertEqual(facet_tasks, 0)
+                    self.assertEqual(essential_tasks, 0)
+                else:
+                    self.assertGreater(essential_tasks, 0)
 
     def test_morse_sequence_algorithm_rejects_unknown_or_reserved_names(self):
         complex_ = edge_complex()
@@ -1119,6 +1412,46 @@ class PythonApiTest(unittest.TestCase):
                 if _gudhi_available():
                     mp.assert_matches_gudhi(complex_)
 
+    def test_random_injective_process_lower_stars_matches_standard(self):
+        for seed in range(20):
+            with self.subTest(seed=seed):
+                rng = random.Random(1000 + seed)
+                n = rng.randint(3, 7)
+                facets = [[vertex] for vertex in range(n)]
+                for _ in range(rng.randint(1, 8)):
+                    size = rng.randint(2, min(4, n))
+                    facets.append(rng.sample(range(n), size))
+                order = list(range(n))
+                rng.shuffle(order)
+                vertex_values = {
+                    vertex: float(rank) for rank, vertex in enumerate(order)
+                }
+                complex_ = mp.FilteredComplex.from_lower_star(
+                    facets, vertex_values
+                )
+
+                sequence = mp.compute_morse_sequence(
+                    complex_, algorithm=mp.PROCESS_LOWER_STARS_SEQUENCE
+                )
+                parallel_sequence = mp.compute_morse_sequence(
+                    complex_,
+                    algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+                    max_workers=4,
+                )
+                self.assertEqual(
+                    tuple((step.type, step.sigma, step.tau) for step in sequence.steps),
+                    process_lower_stars_oracle(complex_),
+                )
+                self.assertEqual(parallel_sequence.steps, sequence.steps)
+                self.assertEqual(
+                    mp.compute_morse_persistence(complex_, sequence).finite_barcode(),
+                    mp.compute_standard_persistence(complex_).finite_barcode(),
+                )
+                self.assertEqual(
+                    mp.compute_morse_persistence(complex_, sequence).essential_barcode(),
+                    mp.compute_standard_persistence(complex_).essential_barcode(),
+                )
+
     def test_random_graphs_match_oracles(self):
         for seed in range(20, 40):
             with self.subTest(seed=seed):
@@ -1215,6 +1548,37 @@ class PythonApiTest(unittest.TestCase):
                 if _gudhi_available():
                     mp.assert_matches_gudhi(complex_)
 
+    def test_reduction_kernel_high_dimensional_inline_overflow(self):
+        vertices = tuple(range(5))
+        simplices = [
+            (simplex, 0.0)
+            for size in range(1, len(vertices) + 1)
+            for simplex in combinations(vertices, size)
+        ]
+        complex_ = mp.FilteredComplex.from_simplices(simplices)
+
+        sequential = mp.compute_morse_sequence(
+            complex_, algorithm="flooding-reduction-kernel"
+        )
+        parallel = mp.compute_morse_sequence(
+            complex_,
+            algorithm="flooding-reduction-kernel-parallel",
+            max_workers=4,
+        )
+
+        self.assertEqual(len(sequential.steps), 16)
+        self.assertEqual(sequential.steps, parallel.steps)
+        if mp.cpp_backend_available() and complex_.cpp_backend_active():
+            profile = mp.profile_morse_sequence(
+                complex_, algorithm="flooding-reduction-kernel"
+            )
+            self.assertGreater(
+                profile.metrics["reduction_kernel_inline_cell_overflows"], 0
+            )
+            self.assertGreater(
+                profile.metrics["reduction_kernel_inline_event_overflows"], 0
+            )
+
     def test_benchmark_persistence_lower_star(self):
         complex_ = mp.FilteredComplex.from_lower_star(
             [[0, 1, 2, 3], [1, 3, 4]],
@@ -1226,6 +1590,22 @@ class PythonApiTest(unittest.TestCase):
         self.assertEqual(result.num_simplices, complex_.size)
         self.assertEqual(result.num_levels, complex_.num_levels)
         self.assertGreater(result.num_critical_simplices, 0)
+        self.assertEqual(
+            sum(result.critical_simplices_by_dimension),
+            result.num_critical_simplices,
+        )
+        self.assertEqual(
+            2 * result.num_regular_pairs + result.num_critical_simplices,
+            result.num_simplices,
+        )
+        self.assertAlmostEqual(
+            result.critical_ratio,
+            result.num_critical_simplices / result.num_simplices,
+        )
+        self.assertEqual(
+            result.eliminated_simplices,
+            2 * result.num_regular_pairs,
+        )
         self.assertEqual(result.sequence_algorithm, mp.SATURATED_SEQUENCE)
         self.assertEqual(result.frame_mode, mp.FUSED_FRAME)
         self.assertTrue(result.barcodes_materialized)
@@ -1262,11 +1642,17 @@ class PythonApiTest(unittest.TestCase):
         self.assertGreaterEqual(result.reducer_xor_inserted_labels, 0)
         self.assertGreaterEqual(result.reducer_xor_removed_labels, 0)
         self.assertGreaterEqual(result.sequence_seconds, 0.0)
+        self.assertGreaterEqual(result.sequence_seconds_per_eliminated_simplex, 0.0)
         self.assertGreaterEqual(result.reference_seconds, 0.0)
         self.assertGreaterEqual(result.morse_reduction_seconds, 0.0)
+        self.assertAlmostEqual(
+            result.persistence_seconds,
+            result.reference_seconds + result.morse_reduction_seconds,
+        )
         self.assertGreaterEqual(result.reducer_setup_seconds, 0.0)
         self.assertGreaterEqual(result.reducer_compute_seconds, 0.0)
         self.assertGreaterEqual(result.morse_seconds, 0.0)
+        self.assertEqual(result.total_seconds, result.morse_seconds)
         self.assertGreaterEqual(result.standard_seconds, 0.0)
         self.assertAlmostEqual(
             result.morse_seconds,

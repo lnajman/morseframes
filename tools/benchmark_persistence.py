@@ -56,6 +56,10 @@ class BenchmarkRow:
     num_simplices: int
     num_levels: int
     num_critical_simplices: int
+    critical_simplices_by_dimension: tuple[int, ...]
+    num_regular_pairs: int
+    critical_ratio: float
+    eliminated_simplices: int
     sequence_algorithm: str
     frame_mode: str
     validation_mode: str
@@ -99,8 +103,11 @@ class BenchmarkRow:
     essential_intervals: int
     repeats: int
     sequence_seconds: float
+    sequence_seconds_per_eliminated_simplex: float
     reference_seconds: float
     morse_reduction_seconds: float
+    persistence_seconds: float
+    total_seconds: float
     reducer_setup_seconds: float
     reducer_compute_seconds: float
     morse_seconds: float
@@ -1138,6 +1145,10 @@ def benchmark_complex_case(
         num_simplices=result.num_simplices,
         num_levels=result.num_levels,
         num_critical_simplices=result.num_critical_simplices,
+        critical_simplices_by_dimension=result.critical_simplices_by_dimension,
+        num_regular_pairs=result.num_regular_pairs,
+        critical_ratio=result.critical_ratio,
+        eliminated_simplices=result.eliminated_simplices,
         sequence_algorithm=result.sequence_algorithm,
         frame_mode=result.frame_mode,
         validation_mode=result.validation_mode,
@@ -1203,8 +1214,13 @@ def benchmark_complex_case(
         essential_intervals=result.essential_interval_count,
         repeats=result.repeats,
         sequence_seconds=result.sequence_seconds,
+        sequence_seconds_per_eliminated_simplex=(
+            result.sequence_seconds_per_eliminated_simplex
+        ),
         reference_seconds=result.reference_seconds,
         morse_reduction_seconds=result.morse_reduction_seconds,
+        persistence_seconds=result.persistence_seconds,
+        total_seconds=result.total_seconds,
         reducer_setup_seconds=result.reducer_setup_seconds,
         reducer_compute_seconds=result.reducer_compute_seconds,
         morse_seconds=result.morse_seconds,

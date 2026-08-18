@@ -272,6 +272,10 @@ as well as time spent finding facets, computing facet incidence, constructing
 cells, computing local reductions, aggregating facet results, and merging a
 round.
 
+Round merging visits only the simplices named by accepted reduction events.
+Their conflict markers are reset as they are removed, avoiding bucket-wide
+marker clearing and removal scans while preserving deterministic event order.
+
 For repeated sequential gradients on an owning `FilteredComplex`, callers may
 invoke `complex_.prepare_reduction_kernel_cache()` once. ReductionKernel then
 reads immutable, precomputed same-level closure ranges and coboundary adjacency

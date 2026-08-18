@@ -195,6 +195,10 @@ class ReductionKernelWorkspace {
         facets.reserve(bucket_size);
       }
       facet_results.clear();
+      round_removed_simplices.clear();
+      if (round_removed_simplices.capacity() < bucket_size) {
+        round_removed_simplices.reserve(bucket_size);
+      }
       included.resize(bucket_size);
       cell_indices.clear();
       if (cell_indices.capacity() < kInlineCellCapacity) {
@@ -211,6 +215,7 @@ class ReductionKernelWorkspace {
     std::vector<std::size_t> coboundary_visits;
     std::vector<SimplexId> facets;
     std::vector<FacetKernelResult> facet_results;
+    std::vector<SimplexId> round_removed_simplices;
     LevelCells level_cells;
     std::vector<std::uint8_t> included;
     std::vector<std::size_t> cell_indices;
@@ -430,9 +435,7 @@ class ReductionKernelWorkspace {
             allow_intra_level_parallelism);
         profile_add<CollectMetrics>(metrics.essential_nanoseconds,
                                     essential_start);
-        for (SimplexId simplex : bucket) {
-          round_removed_[simplex] = 0;
-        }
+        scratch.round_removed_simplices.clear();
 
         const auto& facet_results = execute_facets<CollectMetrics>(
             level, facets, bucket, level_cells, scratch.facet_results,
@@ -473,21 +476,21 @@ class ReductionKernelWorkspace {
             }
             round_removed_[event.sigma] = 1;
             round_removed_[event.tau] = 1;
+            scratch.round_removed_simplices.push_back(event.sigma);
+            scratch.round_removed_simplices.push_back(event.tau);
           }
         }
         profile_add<CollectMetrics>(metrics.aggregation_nanoseconds,
                                     aggregation_start);
 
         const auto merge_start = profile_start<CollectMetrics>();
-        for (SimplexId simplex : bucket) {
-          if (!round_removed_[simplex]) {
-            continue;
-          }
+        for (SimplexId simplex : scratch.round_removed_simplices) {
           if (!active_[simplex]) {
             throw std::logic_error(
                 "A reduction-kernel round removed an inactive simplex.");
           }
           active_[simplex] = 0;
+          round_removed_[simplex] = 0;
           --remaining;
           kernel_round_changed = true;
         }

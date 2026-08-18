@@ -218,11 +218,12 @@ class PythonApiTest(unittest.TestCase):
         self.assertEqual(gradient_profile.num_regular_pairs, 2)
         self.assertEqual(gradient_profile.critical_simplices_by_dimension, (1, 1))
         self.assertGreater(gradient_profile.construction_seconds, 0.0)
-        self.assertGreater(gradient_profile.builder_init_seconds, 0.0)
         self.assertNotIn("reference_update_nanoseconds", gradient_profile.metrics)
-        self.assertEqual(
-            gradient_profile.metrics["process_lower_stars_count"], 3
-        )
+        if mp.cpp_backend_active(complex_):
+            self.assertGreater(gradient_profile.builder_init_seconds, 0.0)
+            self.assertEqual(
+                gradient_profile.metrics["process_lower_stars_count"], 3
+            )
         for metric in (
             "sequence_process_lower_stars_count",
             "sequence_process_lower_stars_max_star_size",

@@ -226,6 +226,8 @@ class PersistenceBenchmark:
     num_simplices: int
     num_levels: int
     num_critical_simplices: int
+    critical_simplices_by_dimension: tuple[int, ...]
+    num_regular_pairs: int
     sequence_algorithm: str
     frame_mode: str
     reference_final_live_nonempty_annotations: int
@@ -283,6 +285,30 @@ class PersistenceBenchmark:
         if self.morse_seconds == 0.0:
             return inf
         return self.standard_seconds / self.morse_seconds
+
+    @property
+    def critical_ratio(self) -> float:
+        if self.num_simplices == 0:
+            return 0.0
+        return float(self.num_critical_simplices) / float(self.num_simplices)
+
+    @property
+    def eliminated_simplices(self) -> int:
+        return self.num_simplices - self.num_critical_simplices
+
+    @property
+    def sequence_seconds_per_eliminated_simplex(self) -> float:
+        if self.eliminated_simplices == 0:
+            return inf
+        return self.sequence_seconds / float(self.eliminated_simplices)
+
+    @property
+    def persistence_seconds(self) -> float:
+        return self.reference_seconds + self.morse_reduction_seconds
+
+    @property
+    def total_seconds(self) -> float:
+        return self.morse_seconds
 
 
 @dataclass(frozen=True)
@@ -4116,6 +4142,10 @@ def benchmark_persistence(
             return _make_persistence_benchmark(
                 complex_,
                 num_critical_simplices=int(best_core_result["num_critical_simplices"]),
+                critical_simplices_by_dimension=tuple(
+                    int(count)
+                    for count in best_core_result["critical_simplices_by_dimension"]
+                ),
                 sequence_algorithm=sequence_algorithm,
                 frame_mode=str(best_core_result["frame_mode"]),
                 frame_metrics=best_core_result["frame_metrics"],  # type: ignore[arg-type]
@@ -4250,6 +4280,20 @@ def benchmark_persistence(
     return _make_persistence_benchmark(
         complex_,
         num_critical_simplices=len(sequence.critical_simplices),
+        critical_simplices_by_dimension=tuple(
+            sum(
+                1
+                for simplex in sequence.critical_simplices
+                if complex_.dimension(simplex) == dimension
+            )
+            for dimension in range(
+                1
+                + max(
+                    (complex_.dimension(simplex) for simplex in range(complex_.size)),
+                    default=-1,
+                )
+            )
+        ),
         sequence_algorithm=sequence_algorithm,
         frame_mode=measured_frame_mode,
         frame_metrics=_empty_frame_metrics(),
@@ -4344,6 +4388,7 @@ def _make_persistence_benchmark(
     complex_: FilteredComplex,
     *,
     num_critical_simplices: int,
+    critical_simplices_by_dimension: tuple[int, ...],
     sequence_algorithm: str,
     frame_mode: str,
     frame_metrics: dict[str, object],
@@ -4366,6 +4411,8 @@ def _make_persistence_benchmark(
         num_simplices=complex_.size,
         num_levels=complex_.num_levels,
         num_critical_simplices=num_critical_simplices,
+        critical_simplices_by_dimension=critical_simplices_by_dimension,
+        num_regular_pairs=(complex_.size - num_critical_simplices) // 2,
         sequence_algorithm=sequence_algorithm,
         frame_mode=frame_mode,
         reference_final_live_nonempty_annotations=int(

@@ -238,6 +238,30 @@ class PythonApiTest(unittest.TestCase):
             mp.PROCESS_LOWER_STARS_SEQUENCE,
             mp.DEFAULT_MORSE_ALGORITHM_PORTFOLIO,
         )
+        sequential_benchmark = mp.benchmark_persistence(
+            complex_,
+            repeats=1,
+            sequence_algorithm=mp.PROCESS_LOWER_STARS_SEQUENCE,
+            materialize_barcodes=False,
+        )
+        parallel_benchmark = mp.benchmark_persistence(
+            complex_,
+            repeats=1,
+            sequence_algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+            materialize_barcodes=False,
+        )
+        self.assertEqual(
+            parallel_benchmark.num_critical_simplices,
+            sequential_benchmark.num_critical_simplices,
+        )
+        self.assertEqual(
+            parallel_benchmark.critical_simplices_by_dimension,
+            sequential_benchmark.critical_simplices_by_dimension,
+        )
+        self.assertEqual(
+            parallel_benchmark.num_regular_pairs,
+            sequential_benchmark.num_regular_pairs,
+        )
 
         tied = mp.FilteredComplex.from_simplices(
             [([0], 0.0), ([1], 0.0), ([0, 1], 0.0)]
@@ -1439,6 +1463,22 @@ class PythonApiTest(unittest.TestCase):
         self.assertEqual(result.num_simplices, complex_.size)
         self.assertEqual(result.num_levels, complex_.num_levels)
         self.assertGreater(result.num_critical_simplices, 0)
+        self.assertEqual(
+            sum(result.critical_simplices_by_dimension),
+            result.num_critical_simplices,
+        )
+        self.assertEqual(
+            2 * result.num_regular_pairs + result.num_critical_simplices,
+            result.num_simplices,
+        )
+        self.assertAlmostEqual(
+            result.critical_ratio,
+            result.num_critical_simplices / result.num_simplices,
+        )
+        self.assertEqual(
+            result.eliminated_simplices,
+            2 * result.num_regular_pairs,
+        )
         self.assertEqual(result.sequence_algorithm, mp.SATURATED_SEQUENCE)
         self.assertEqual(result.frame_mode, mp.FUSED_FRAME)
         self.assertTrue(result.barcodes_materialized)
@@ -1475,11 +1515,17 @@ class PythonApiTest(unittest.TestCase):
         self.assertGreaterEqual(result.reducer_xor_inserted_labels, 0)
         self.assertGreaterEqual(result.reducer_xor_removed_labels, 0)
         self.assertGreaterEqual(result.sequence_seconds, 0.0)
+        self.assertGreaterEqual(result.sequence_seconds_per_eliminated_simplex, 0.0)
         self.assertGreaterEqual(result.reference_seconds, 0.0)
         self.assertGreaterEqual(result.morse_reduction_seconds, 0.0)
+        self.assertAlmostEqual(
+            result.persistence_seconds,
+            result.reference_seconds + result.morse_reduction_seconds,
+        )
         self.assertGreaterEqual(result.reducer_setup_seconds, 0.0)
         self.assertGreaterEqual(result.reducer_compute_seconds, 0.0)
         self.assertGreaterEqual(result.morse_seconds, 0.0)
+        self.assertEqual(result.total_seconds, result.morse_seconds)
         self.assertGreaterEqual(result.standard_seconds, 0.0)
         self.assertAlmostEqual(
             result.morse_seconds,

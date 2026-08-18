@@ -286,6 +286,23 @@ benchmarks = mf.benchmark_sequence_algorithms(
 )
 ```
 
+Each benchmark reports compression as well as time:
+
+```python
+for benchmark in benchmarks:
+    print(
+        benchmark.sequence_algorithm,
+        benchmark.critical_simplices_by_dimension,
+        benchmark.critical_ratio,
+        benchmark.sequence_seconds,
+        benchmark.persistence_seconds,
+        benchmark.total_seconds,
+    )
+```
+
+`sequence_seconds_per_eliminated_simplex` normalizes construction time by the
+number of simplices removed through regular pairs.
+
 The adaptive entry point can choose between Morse persistence and ordinary
 persistence:
 

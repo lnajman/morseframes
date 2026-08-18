@@ -423,10 +423,27 @@ std::vector<EssentialBarcodeKey> essential_barcode_signature(
   return signature;
 }
 
+std::vector<std::size_t> critical_simplices_by_dimension(
+    const morseframes::FilteredSimplicialComplex& complex,
+    const morseframes::MorseSequence& sequence) {
+  std::size_t max_dimension = 0;
+  for (morseframes::SimplexId simplex = 0; simplex < complex.size(); ++simplex) {
+    max_dimension = std::max<std::size_t>(max_dimension,
+                                         complex.dimension(simplex));
+  }
+  std::vector<std::size_t> counts(max_dimension + 1, 0);
+  for (morseframes::SimplexId simplex : sequence.critical_simplices()) {
+    const std::size_t dimension = complex.dimension(simplex);
+    ++counts[dimension];
+  }
+  return counts;
+}
+
 nb::dict core_benchmark_result_to_python(
     const morseframes::MorseReferenceReductionResult& morse_result,
     const morseframes::PersistenceDiagram& standard_diagram,
     std::size_t num_critical_simplices,
+    const std::vector<std::size_t>& critical_counts,
     std::uint64_t sequence_nanoseconds,
     std::uint64_t reference_nanoseconds,
     std::uint64_t morse_reduction_nanoseconds,
@@ -441,6 +458,7 @@ nb::dict core_benchmark_result_to_python(
 
   nb::dict result;
   result["num_critical_simplices"] = num_critical_simplices;
+  result["critical_simplices_by_dimension"] = critical_counts;
   result["frame_mode"] = frame_mode;
   result["sequence_nanoseconds"] = sequence_nanoseconds;
   result["reference_nanoseconds"] = reference_nanoseconds;
@@ -1026,6 +1044,7 @@ nb::dict benchmark_morse_reference_core(const PyFilteredComplex& complex,
   std::uint64_t reference_nanoseconds = 0;
   std::uint64_t morse_reduction_nanoseconds = 0;
   std::size_t num_critical_simplices = 0;
+  std::vector<std::size_t> critical_counts;
   morseframes::MorseReferenceFrameMetrics frame_metrics;
 
   if (normalized_frame_mode == "fused") {
@@ -1072,6 +1091,8 @@ nb::dict benchmark_morse_reference_core(const PyFilteredComplex& complex,
     sequence_nanoseconds = elapsed_nanoseconds(morse_started, references_finished);
     reference_nanoseconds = 0;
     num_critical_simplices = input.sequence.critical_simplices().size();
+    critical_counts =
+        critical_simplices_by_dimension(complex.complex, input.sequence);
     frame_metrics = input.frame_metrics;
 
     const auto setup_started = Clock::now();
@@ -1125,6 +1146,7 @@ nb::dict benchmark_morse_reference_core(const PyFilteredComplex& complex,
     sequence_nanoseconds = elapsed_nanoseconds(morse_started, sequence_finished);
     reference_nanoseconds = elapsed_nanoseconds(sequence_finished, references_finished);
     num_critical_simplices = sequence.critical_simplices().size();
+    critical_counts = critical_simplices_by_dimension(complex.complex, sequence);
 
     const auto setup_started = Clock::now();
     morseframes::MorseReferencePersistenceReducer reducer(
@@ -1151,6 +1173,7 @@ nb::dict benchmark_morse_reference_core(const PyFilteredComplex& complex,
       morse_result,
       standard_diagram,
       num_critical_simplices,
+      critical_counts,
       sequence_nanoseconds,
       reference_nanoseconds,
       morse_reduction_nanoseconds,

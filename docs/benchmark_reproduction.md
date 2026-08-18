@@ -106,6 +106,14 @@ PYTHONPATH=python python3 tools/render_synthetic_scale_table.py \
 The table reports `Std/Morse`, so values above `1` mean the Morse pipeline is
 faster than ordinary full-complex persistence for that row.
 
+CSV and JSON rows also retain gradient quality, rather than reporting timing
+alone. The fields include the total critical count,
+`critical_simplices_by_dimension`, `critical_ratio`, `num_regular_pairs`, and
+`sequence_seconds_per_eliminated_simplex`. Timing is split into sequence and
+downstream persistence phases, with `total_seconds` recording their complete
+end-to-end pipeline. This makes comparisons between strategies meaningful even
+when a faster constructor produces a larger Morse complex.
+
 The tracked synthetic table is a native-backed core-mode benchmark. Before
 replacing it, make sure the backend check above prints `True`; otherwise the CSV
 will contain `cpp_backend=False` rows and the timing will describe the

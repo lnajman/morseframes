@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import itertools
 import json
 import math
 import random
@@ -143,16 +144,14 @@ def make_injective_terrain(seed: int, grid_size: int) -> mp.FilteredComplex:
             )
             for center_x, center_y, weight, sigma in bumps:
                 squared_distance = (x - center_x) ** 2 + (y - center_y) ** 2
-                value += weight * math.exp(
-                    -squared_distance / (2.0 * sigma * sigma)
-                )
+                value += weight * math.exp(-squared_distance / (2.0 * sigma * sigma))
             value += rng.uniform(-0.03, 0.03)
             raw_values[vertex_id(row, col)] = value
 
-    ranked_vertices = sorted(raw_values, key=lambda vertex: (raw_values[vertex], vertex))
-    vertex_values = {
-        vertex: float(rank) for rank, vertex in enumerate(ranked_vertices)
-    }
+    ranked_vertices = sorted(
+        raw_values, key=lambda vertex: (raw_values[vertex], vertex)
+    )
+    vertex_values = {vertex: float(rank) for rank, vertex in enumerate(ranked_vertices)}
     facets: list[tuple[int, int, int]] = []
     for row in range(grid_size - 1):
         for col in range(grid_size - 1):
@@ -164,6 +163,76 @@ def make_injective_terrain(seed: int, grid_size: int) -> mp.FilteredComplex:
                 facets.extend(((v00, v10, v11), (v00, v11, v01)))
             else:
                 facets.extend(((v00, v10, v01), (v10, v11, v01)))
+    return mp.FilteredComplex.from_lower_star(facets, vertex_values)
+
+
+def make_injective_volume(seed: int, grid_size: int) -> mp.FilteredComplex:
+    """Create a tetrahedral volume with a strict lower-star filtration."""
+
+    if grid_size < 2:
+        raise ValueError("grid_size must be at least 2")
+    rng = random.Random(seed)
+    bumps = [
+        (
+            rng.random(),
+            rng.random(),
+            rng.random(),
+            rng.uniform(-0.8, 0.8),
+            rng.uniform(0.10, 0.24),
+        )
+        for _ in range(7)
+    ]
+
+    def vertex_id(x: int, y: int, z: int) -> int:
+        return (x * grid_size + y) * grid_size + z
+
+    raw_values: dict[int, float] = {}
+    for x_index in range(grid_size):
+        x = x_index / float(grid_size - 1)
+        for y_index in range(grid_size):
+            y = y_index / float(grid_size - 1)
+            for z_index in range(grid_size):
+                z = z_index / float(grid_size - 1)
+                value = (
+                    0.25 * x
+                    + 0.18 * y
+                    + 0.12 * z
+                    + 0.30 * math.sin(2.0 * math.pi * (x + 0.13 * seed))
+                    + 0.22 * math.cos(2.0 * math.pi * (1.4 * y - 0.09 * seed))
+                    + 0.18 * math.sin(2.0 * math.pi * (x + y + z))
+                )
+                for center_x, center_y, center_z, weight, sigma in bumps:
+                    squared_distance = (
+                        (x - center_x) ** 2 + (y - center_y) ** 2 + (z - center_z) ** 2
+                    )
+                    value += weight * math.exp(
+                        -squared_distance / (2.0 * sigma * sigma)
+                    )
+                value += rng.uniform(-0.03, 0.03)
+                raw_values[vertex_id(x_index, y_index, z_index)] = value
+
+    ranked_vertices = sorted(
+        raw_values, key=lambda vertex: (raw_values[vertex], vertex)
+    )
+    vertex_values = {vertex: float(rank) for rank, vertex in enumerate(ranked_vertices)}
+
+    axes = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
+    facets: list[tuple[int, int, int, int]] = []
+    for x in range(grid_size - 1):
+        for y in range(grid_size - 1):
+            for z in range(grid_size - 1):
+                for order in itertools.permutations(range(3)):
+                    coordinates = [x, y, z]
+                    vertices = [vertex_id(*coordinates)]
+                    for axis_index in order:
+                        coordinates = [
+                            coordinate + step
+                            for coordinate, step in zip(
+                                coordinates, axes[axis_index], strict=True
+                            )
+                        ]
+                        vertices.append(vertex_id(*coordinates))
+                    facets.append(tuple(vertices))
     return mp.FilteredComplex.from_lower_star(facets, vertex_values)
 
 
@@ -205,10 +274,14 @@ def _critical_counts(
     return tuple(counts)
 
 
-def benchmark_terrain(
+def _benchmark_complex(
+    complex_: mp.FilteredComplex,
+    *,
+    family: str,
+    name: str,
     seed: int,
     grid_size: int,
-    *,
+    num_vertices: int,
     algorithms: Iterable[str] = DEFAULT_ALGORITHMS,
     parallel_workers: int = 8,
     repeats: int = 3,
@@ -224,7 +297,6 @@ def benchmark_terrain(
     if mp.F_MAX_SEQUENCE not in selected_algorithms:
         raise ValueError("The F-Max baseline must be included")
 
-    complex_ = make_injective_terrain(seed, grid_size)
     standard = mp.compute_standard_persistence(complex_)
     standard_finite = standard.finite_barcode()
     standard_essential = standard.essential_barcode()
@@ -297,8 +369,8 @@ def benchmark_terrain(
         kernel_metrics = measurement.frame_metrics
         rows.append(
             SimplicialStrategyBenchmarkRow(
-                family="injective-terrain",
-                name=f"injective-terrain-n{grid_size}-seed{seed}",
+                family=family,
+                name=name,
                 seed=seed,
                 grid_size=grid_size,
                 algorithm=measurement.algorithm,
@@ -307,7 +379,7 @@ def benchmark_terrain(
                 warmups=warmups,
                 cpp_backend=complex_.cpp_backend_active(),
                 num_simplices=complex_.size,
-                num_vertices=grid_size * grid_size,
+                num_vertices=num_vertices,
                 num_levels=complex_.num_levels,
                 max_dimension=max_dimension,
                 num_critical_simplices=critical_count,
@@ -316,9 +388,7 @@ def benchmark_terrain(
                 ),
                 num_regular_pairs=eliminated // 2,
                 critical_ratio=float(critical_count) / complex_.size,
-                critical_count_delta_vs_f_max=(
-                    critical_count - f_max_critical_count
-                ),
+                critical_count_delta_vs_f_max=(critical_count - f_max_critical_count),
                 critical_count_ratio_vs_f_max=(
                     float(critical_count) / f_max_critical_count
                     if f_max_critical_count
@@ -354,9 +424,7 @@ def benchmark_terrain(
                 reduction_kernel_facet_kernels=_metric_int(
                     kernel_metrics, "facet_kernels"
                 ),
-                reduction_kernel_reductions=_metric_int(
-                    kernel_metrics, "reductions"
-                ),
+                reduction_kernel_reductions=_metric_int(kernel_metrics, "reductions"),
                 reduction_kernel_perforations=_metric_int(
                     kernel_metrics, "perforations"
                 ),
@@ -408,6 +476,52 @@ def benchmark_terrain(
             )
         )
     return rows
+
+
+def benchmark_terrain(
+    seed: int,
+    grid_size: int,
+    *,
+    algorithms: Iterable[str] = DEFAULT_ALGORITHMS,
+    parallel_workers: int = 8,
+    repeats: int = 3,
+    warmups: int = 1,
+) -> list[SimplicialStrategyBenchmarkRow]:
+    return _benchmark_complex(
+        make_injective_terrain(seed, grid_size),
+        family="injective-terrain",
+        name=f"injective-terrain-n{grid_size}-seed{seed}",
+        seed=seed,
+        grid_size=grid_size,
+        num_vertices=grid_size**2,
+        algorithms=algorithms,
+        parallel_workers=parallel_workers,
+        repeats=repeats,
+        warmups=warmups,
+    )
+
+
+def benchmark_volume(
+    seed: int,
+    grid_size: int,
+    *,
+    algorithms: Iterable[str] = DEFAULT_ALGORITHMS,
+    parallel_workers: int = 8,
+    repeats: int = 3,
+    warmups: int = 1,
+) -> list[SimplicialStrategyBenchmarkRow]:
+    return _benchmark_complex(
+        make_injective_volume(seed, grid_size),
+        family="injective-volume",
+        name=f"injective-volume-n{grid_size}-seed{seed}",
+        seed=seed,
+        grid_size=grid_size,
+        num_vertices=grid_size**3,
+        algorithms=algorithms,
+        parallel_workers=parallel_workers,
+        repeats=repeats,
+        warmups=warmups,
+    )
 
 
 def write_rows(

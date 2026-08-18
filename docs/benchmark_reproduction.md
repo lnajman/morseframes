@@ -218,6 +218,56 @@ operation and scheduling counters in `docs/reduction_kernel_metrics_table.tex`.
 This is a MorseFrames-internal comparison; it does not replace the planned
 external benchmark against Robins' ProcessLowerStars implementation.
 
+## Tetrahedral Strategy Comparison
+
+The three-dimensional companion uses a conforming Freudenthal triangulation:
+each grid cube is split into the six tetrahedra defined by the permutations of
+the coordinate axes. The same smooth-field ranking makes all vertex values
+distinct, and the lower-star extension assigns every edge, triangle, and
+tetrahedron the value of its maximum vertex. Sizes 4, 8, and 12 contain 883,
+9,843, and 36,851 simplices, respectively, so they span approximately the same
+range as the two-dimensional corpus.
+
+```sh
+PYTHONPATH=python python3 tools/benchmark_tetrahedral_strategies.py \
+  --sizes 4 8 12 \
+  --seeds 0 1 2 \
+  --parallel-workers 8 \
+  --repeats 5 \
+  --warmups 1 \
+  --format csv \
+  --output ../work/tetrahedral_strategy_benchmark.csv
+
+MPLCONFIGDIR=../work/matplotlib-cache \
+  python3 tools/render_simplicial_strategy_benchmark.py \
+  --input ../work/tetrahedral_strategy_benchmark.csv \
+  --figure-output docs/tetrahedral_strategy_comparison.svg \
+  --table-output docs/tetrahedral_strategy_comparison_table.tex \
+  --kernel-table-output docs/tetrahedral_reduction_kernel_metrics_table.tex \
+  --title "MorseFrames strategies on injective tetrahedral volumes"
+```
+
+The runner preserves the two-dimensional timing boundaries and correctness
+checks. In particular, every strategy must reproduce the ordinary-persistence
+barcode, while sequential and parallel versions of each new construction must
+produce the same dimension-wise critical counts.
+
+On the Apple M1 Max, the nine-case run finds identical critical counts for
+ProcessLowerStars, reduction kernels, both eight-worker versions, F-Max, F-Min,
+and Saturated. Same-level reduction creates a median of 7.57 times as many
+critical simplices. Relative to F-Max, median end-to-end time is 2.32 times as
+large for sequential ProcessLowerStars and 3.25 times as large for sequential
+reduction kernels. The eight-worker versions reduce those ratios to 1.53 and
+1.30, respectively. Thus the current reduction-kernel parallelization recovers
+most, but not all, of the gap to the highly optimized sequential F-Max path in
+three dimensions.
+
+![Tetrahedral strategy comparison](tetrahedral_strategy_comparison.svg)
+
+The grid-size aggregates are generated in
+`docs/tetrahedral_strategy_comparison_table.tex`, with reduction-kernel counters
+in `docs/tetrahedral_reduction_kernel_metrics_table.tex`.
+
 ## Reduction-Kernel Scaling
 
 The optimized parallel scheduler assigns one load-balanced group of filtration

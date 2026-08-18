@@ -32,6 +32,61 @@ class SimplicialStrategyBenchmarkTest(unittest.TestCase):
             )
             self.assertEqual(complex_.filtration(simplex), maximum)
 
+    def test_injective_volume_contract(self):
+        grid_size = 3
+        complex_ = bench.make_injective_volume(seed=0, grid_size=grid_size)
+        vertex_values = [
+            complex_.filtration(simplex)
+            for simplex in range(complex_.size)
+            if complex_.dimension(simplex) == 0
+        ]
+        tetrahedra = [
+            simplex
+            for simplex in range(complex_.size)
+            if complex_.dimension(simplex) == 3
+        ]
+
+        self.assertEqual(len(vertex_values), grid_size**3)
+        self.assertEqual(len(set(vertex_values)), len(vertex_values))
+        self.assertEqual(complex_.num_levels, len(vertex_values))
+        self.assertEqual(len(tetrahedra), 6 * (grid_size - 1) ** 3)
+        for simplex in range(complex_.size):
+            maximum = max(
+                complex_.filtration(complex_.find_simplex((vertex,)))
+                for vertex in complex_.vertices(simplex)
+            )
+            self.assertEqual(complex_.filtration(simplex), maximum)
+
+    def test_tetrahedral_strategy_comparison(self):
+        algorithms = (
+            "process-lower-stars",
+            "process-lower-stars-parallel",
+            "flooding-reduction-kernel",
+            "flooding-reduction-kernel-parallel",
+            "f-max",
+        )
+        rows = bench.benchmark_volume(
+            seed=0,
+            grid_size=3,
+            algorithms=algorithms,
+            parallel_workers=2,
+            repeats=1,
+            warmups=0,
+        )
+
+        self.assertTrue(all(row.family == "injective-volume" for row in rows))
+        self.assertTrue(all(row.max_dimension == 3 for row in rows))
+        self.assertTrue(all(row.num_vertices == 27 for row in rows))
+        self.assertTrue(all(row.barcode_matches_standard for row in rows))
+        self.assertEqual(
+            rows[0].critical_simplices_by_dimension,
+            rows[1].critical_simplices_by_dimension,
+        )
+        self.assertEqual(
+            rows[2].critical_simplices_by_dimension,
+            rows[3].critical_simplices_by_dimension,
+        )
+
     def test_strategy_comparison_tracks_critical_quality(self):
         algorithms = (
             "process-lower-stars",
@@ -72,9 +127,7 @@ class SimplicialStrategyBenchmarkTest(unittest.TestCase):
             self.assertTrue(kernel.reduction_kernel_metrics_available)
             self.assertTrue(parallel_kernel.reduction_kernel_metrics_available)
             self.assertGreater(kernel.reduction_kernel_rounds, 0)
-            self.assertLessEqual(
-                parallel_kernel.reduction_kernel_executor_workers, 2
-            )
+            self.assertLessEqual(parallel_kernel.reduction_kernel_executor_workers, 2)
         else:
             self.assertFalse(kernel.reduction_kernel_metrics_available)
         for row in rows:

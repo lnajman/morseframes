@@ -50,7 +50,12 @@ def _summary(values: list[float]) -> tuple[float, float, float]:
     return min(values), statistics.median(values), max(values)
 
 
-def render_figure(rows: list[dict[str, str]], output: Path) -> None:
+def render_figure(
+    rows: list[dict[str, str]],
+    output: Path,
+    *,
+    title: str = "MorseFrames strategies on injective simplicial terrains",
+) -> None:
     try:
         import matplotlib.pyplot as plt
     except ImportError as exc:
@@ -61,16 +66,24 @@ def render_figure(rows: list[dict[str, str]], output: Path) -> None:
     for row in rows:
         by_algorithm[row["algorithm"]].append(row)
 
-    algorithms = [algorithm for algorithm in ALGORITHM_ORDER if algorithm in by_algorithm]
+    algorithms = [
+        algorithm for algorithm in ALGORITHM_ORDER if algorithm in by_algorithm
+    ]
     quality = {
         algorithm: _summary(
-            [float(row["critical_count_ratio_vs_f_max"]) for row in by_algorithm[algorithm]]
+            [
+                float(row["critical_count_ratio_vs_f_max"])
+                for row in by_algorithm[algorithm]
+            ]
         )
         for algorithm in algorithms
     }
     time_ratio = {
         algorithm: _summary(
-            [1.0 / float(row["total_speedup_vs_f_max"]) for row in by_algorithm[algorithm]]
+            [
+                1.0 / float(row["total_speedup_vs_f_max"])
+                for row in by_algorithm[algorithm]
+            ]
         )
         for algorithm in algorithms
     }
@@ -78,11 +91,15 @@ def render_figure(rows: list[dict[str, str]], output: Path) -> None:
     figure, axes = plt.subplots(1, 2, figsize=(11.2, 5.6), sharey=True)
     y_positions = list(range(len(algorithms)))
     colors = [
-        "#174A7E"
-        if algorithm.startswith("process-lower-stars")
-        else "#B4473D"
-        if algorithm.startswith("flooding-reduction-kernel")
-        else "#60656F"
+        (
+            "#174A7E"
+            if algorithm.startswith("process-lower-stars")
+            else (
+                "#B4473D"
+                if algorithm.startswith("flooding-reduction-kernel")
+                else "#60656F"
+            )
+        )
         for algorithm in algorithms
     ]
     markers = ["o", "s", "D", "X", "P", "^", "v", "h"]
@@ -149,16 +166,22 @@ def render_figure(rows: list[dict[str, str]], output: Path) -> None:
     axes[0].invert_yaxis()
     axes[1].tick_params(axis="y", labelleft=False)
     figure.suptitle(
-        "MorseFrames strategies on injective simplicial terrains",
+        title,
         x=0.08,
         y=0.97,
         ha="left",
         fontsize=15,
     )
+    cases = {(row["family"], row["name"]) for row in rows}
+    sizes = {int(row["grid_size"]) for row in rows}
+    seeds = {int(row["seed"]) for row in rows}
     figure.text(
         0.08,
         0.91,
-        "Median and min-max range across 9 cases (3 sizes x 3 seeds); F-Max = 1",
+        (
+            f"Median and min-max range across {len(cases)} cases "
+            f"({len(sizes)} sizes x {len(seeds)} seeds); F-Max = 1"
+        ),
         ha="left",
         fontsize=9,
         color="#50555C",
@@ -167,11 +190,13 @@ def render_figure(rows: list[dict[str, str]], output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(
         output,
-        metadata={"Title": "Simplicial strategy comparison", "Date": None},
+        metadata={"Title": title, "Date": None},
     )
     plt.close(figure)
     if output.suffix.lower() == ".svg":
-        normalized = "\n".join(line.rstrip() for line in output.read_text().splitlines())
+        normalized = "\n".join(
+            line.rstrip() for line in output.read_text().splitlines()
+        )
         output.write_text(normalized + "\n")
 
 
@@ -272,13 +297,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--kernel-table-output", type=Path, default=DEFAULT_KERNEL_TABLE
     )
+    parser.add_argument(
+        "--title",
+        default="MorseFrames strategies on injective simplicial terrains",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     rows = read_rows(args.input)
-    render_figure(rows, args.figure_output)
+    render_figure(rows, args.figure_output, title=args.title)
     render_table(rows, args.table_output)
     render_kernel_table(rows, args.kernel_table_output)
     return 0

@@ -752,6 +752,12 @@ void test_process_lower_stars_triangle_boundary() {
   assert(parallel_metrics.process_lower_stars_max_star_size == 3);
   assert(parallel_metrics.process_lower_stars_min_task_load == 3);
   assert(parallel_metrics.process_lower_stars_max_task_load == 3);
+  assert(parallel_metrics.process_lower_stars_setup_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_local_wall_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_replay_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_cumulative_task_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_max_task_nanoseconds >=
+         parallel_metrics.process_lower_stars_min_task_nanoseconds);
   const auto single_worker_sequence =
       FSequenceBuilder(complex).build_process_lower_stars_parallel(1);
   assert(single_worker_sequence.steps().size() == sequence.steps().size());

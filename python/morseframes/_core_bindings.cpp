@@ -327,6 +327,20 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
       metrics.sequence_reduction_kernel_aggregation_nanoseconds;
   result["sequence_reduction_kernel_merge_nanoseconds"] =
       metrics.sequence_reduction_kernel_merge_nanoseconds;
+  result["sequence_process_lower_stars_builder_init_nanoseconds"] =
+      metrics.sequence_process_lower_stars_builder_init_nanoseconds;
+  result["sequence_process_lower_stars_setup_nanoseconds"] =
+      metrics.sequence_process_lower_stars_setup_nanoseconds;
+  result["sequence_process_lower_stars_local_wall_nanoseconds"] =
+      metrics.sequence_process_lower_stars_local_wall_nanoseconds;
+  result["sequence_process_lower_stars_replay_nanoseconds"] =
+      metrics.sequence_process_lower_stars_replay_nanoseconds;
+  result["sequence_process_lower_stars_cumulative_task_nanoseconds"] =
+      metrics.sequence_process_lower_stars_cumulative_task_nanoseconds;
+  result["sequence_process_lower_stars_min_task_nanoseconds"] =
+      metrics.sequence_process_lower_stars_min_task_nanoseconds;
+  result["sequence_process_lower_stars_max_task_nanoseconds"] =
+      metrics.sequence_process_lower_stars_max_task_nanoseconds;
   result["sequence_candidate_pushes"] = metrics.sequence_candidate_pushes;
   result["sequence_candidate_pops"] = metrics.sequence_candidate_pops;
   result["sequence_stale_candidate_skips"] = metrics.sequence_stale_candidate_skips;

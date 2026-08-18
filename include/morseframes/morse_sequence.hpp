@@ -59,6 +59,13 @@ struct MorseSequenceBuildMetrics {
   std::uint64_t reduction_kernel_local_reduction_nanoseconds = 0;
   std::uint64_t reduction_kernel_aggregation_nanoseconds = 0;
   std::uint64_t reduction_kernel_merge_nanoseconds = 0;
+  std::uint64_t process_lower_stars_builder_init_nanoseconds = 0;
+  std::uint64_t process_lower_stars_setup_nanoseconds = 0;
+  std::uint64_t process_lower_stars_local_wall_nanoseconds = 0;
+  std::uint64_t process_lower_stars_replay_nanoseconds = 0;
+  std::uint64_t process_lower_stars_cumulative_task_nanoseconds = 0;
+  std::uint64_t process_lower_stars_min_task_nanoseconds = 0;
+  std::uint64_t process_lower_stars_max_task_nanoseconds = 0;
   std::size_t candidate_pushes = 0;
   std::size_t candidate_pops = 0;
   std::size_t stale_candidate_skips = 0;
@@ -1006,6 +1013,7 @@ class FSequenceBuilder {
   template <typename StepCallback>
   MorseSequence build_process_lower_stars_with_execution_options(
       StepCallback&& on_step, std::size_t max_workers) const {
+    const auto setup_start = profile_start();
     const std::size_t n = complex_.size();
     MorseSequence sequence(n);
     auto&& callback = on_step;
@@ -1230,6 +1238,9 @@ class FSequenceBuilder {
       }
       sequence_metrics_->process_lower_stars_executor_workers = worker_count;
     }
+    profile_add(&MorseSequenceBuildMetrics::process_lower_stars_setup_nanoseconds,
+                setup_start);
+    const auto local_start = profile_start();
     if (worker_count <= 1 || vertex_order.size() <= 1) {
       for (std::size_t star_rank = 0; star_rank < vertex_order.size(); ++star_rank) {
         process_lower_star(star_rank);
@@ -1237,6 +1248,14 @@ class FSequenceBuilder {
       if (sequence_metrics_ != nullptr) {
         sequence_metrics_->process_lower_stars_min_task_load = n;
         sequence_metrics_->process_lower_stars_max_task_load = n;
+        const auto task_nanoseconds =
+            elapsed_nanoseconds(local_start, SequenceClock::now());
+        sequence_metrics_->process_lower_stars_cumulative_task_nanoseconds =
+            task_nanoseconds;
+        sequence_metrics_->process_lower_stars_min_task_nanoseconds =
+            task_nanoseconds;
+        sequence_metrics_->process_lower_stars_max_task_nanoseconds =
+            task_nanoseconds;
       }
     } else {
       const std::size_t task_count = std::min(worker_count, vertex_order.size());
@@ -1262,10 +1281,22 @@ class FSequenceBuilder {
 
       std::vector<std::future<void>> futures;
       futures.reserve(task_count);
-      for (const auto& task : task_stars) {
-        futures.push_back(executor.submit([task, &process_lower_star]() {
+      const bool measure_tasks = sequence_metrics_ != nullptr;
+      std::vector<std::uint64_t> task_nanoseconds(
+          measure_tasks ? task_count : 0, 0);
+      for (std::size_t task_index = 0; task_index < task_count; ++task_index) {
+        const auto& task = task_stars[task_index];
+        futures.push_back(executor.submit([task, task_index, measure_tasks,
+                                           &process_lower_star,
+                                           &task_nanoseconds]() {
+          const auto task_start =
+              measure_tasks ? SequenceClock::now() : SequenceClock::time_point{};
           for (std::size_t star_rank : task) {
             process_lower_star(star_rank);
+          }
+          if (measure_tasks) {
+            task_nanoseconds[task_index] =
+                elapsed_nanoseconds(task_start, SequenceClock::now());
           }
         }));
       }
@@ -1279,8 +1310,21 @@ class FSequenceBuilder {
       for (auto& future : futures) {
         executor.get(future);
       }
+      if (sequence_metrics_ != nullptr) {
+        sequence_metrics_->process_lower_stars_cumulative_task_nanoseconds =
+            std::accumulate(task_nanoseconds.begin(), task_nanoseconds.end(),
+                            std::uint64_t{0});
+        sequence_metrics_->process_lower_stars_min_task_nanoseconds =
+            *std::min_element(task_nanoseconds.begin(), task_nanoseconds.end());
+        sequence_metrics_->process_lower_stars_max_task_nanoseconds =
+            *std::max_element(task_nanoseconds.begin(), task_nanoseconds.end());
+      }
     }
+    profile_add(
+        &MorseSequenceBuildMetrics::process_lower_stars_local_wall_nanoseconds,
+        local_start);
 
+    const auto replay_start = profile_start();
     for (const auto& events : events_by_star) {
       for (const LowerStarEvent& event : events) {
         if (event.type == MorseStepType::Critical) {
@@ -1298,6 +1342,8 @@ class FSequenceBuilder {
         callback(sequence, sequence.steps().back());
       }
     }
+    profile_add(&MorseSequenceBuildMetrics::process_lower_stars_replay_nanoseconds,
+                replay_start);
 
     return sequence;
   }

@@ -308,6 +308,47 @@ work limit end-to-end scaling for both algorithms.
 The grid-size aggregates are generated in
 `docs/tetrahedral_worker_scaling_table.tex`.
 
+## Tetrahedral Phase Profile
+
+The native profiler separates ProcessLowerStars into builder initialization,
+global lower-star setup, local-star processing, and ordered event replay. For
+parallel runs it also records cumulative, minimum, and maximum task times in
+addition to the existing simplex-load counters. The comparison uses the same
+one- and eight-worker configurations for ProcessLowerStars and reduction
+kernels.
+
+```sh
+PYTHONPATH=python python3 tools/benchmark_tetrahedral_phase_profile.py \
+  --sizes 4 8 12 \
+  --seeds 0 1 2 \
+  --workers 1 8 \
+  --repeats 5 \
+  --format csv \
+  --output ../work/tetrahedral_phase_profile.csv
+
+python3 tools/render_tetrahedral_phase_profile.py \
+  --input ../work/tetrahedral_phase_profile.csv \
+  --table-output docs/tetrahedral_phase_profile_table.tex
+```
+
+At eight workers, median ProcessLowerStars time is 51.1 percent global setup,
+22.3 percent parallel local-star processing, 17.4 percent ordered replay, and
+1.5 percent builder initialization. The local tasks achieve 5.70-fold effective
+overlap. Their median simplex-load imbalance is only 1.0008, although measured
+task-time imbalance is 1.54, so load partitioning is not the principal scaling
+limit. On the largest volumes, setup alone rises to 53.0 percent while local
+work falls to 20.7 percent.
+
+For the reduction kernel, the callback share grows from 4.3 percent at one
+worker to 17.3 percent at eight workers, and to 19.6 percent on the largest
+volumes. These measurements identify different next optimization targets:
+parallelize or reduce ProcessLowerStars ownership/key setup first, while future
+reduction-kernel work should focus on serial replay/reference updates and the
+downstream persistence stage.
+
+The phase and concurrency aggregates are generated in
+`docs/tetrahedral_phase_profile_table.tex`.
+
 ## Reduction-Kernel Scaling
 
 The optimized parallel scheduler assigns one load-balanced group of filtration

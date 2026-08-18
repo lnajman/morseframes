@@ -203,6 +203,13 @@ class PythonApiTest(unittest.TestCase):
             "sequence_process_lower_stars_parallel_tasks",
             "sequence_process_lower_stars_min_task_load",
             "sequence_process_lower_stars_max_task_load",
+            "sequence_process_lower_stars_builder_init_nanoseconds",
+            "sequence_process_lower_stars_setup_nanoseconds",
+            "sequence_process_lower_stars_local_wall_nanoseconds",
+            "sequence_process_lower_stars_replay_nanoseconds",
+            "sequence_process_lower_stars_cumulative_task_nanoseconds",
+            "sequence_process_lower_stars_min_task_nanoseconds",
+            "sequence_process_lower_stars_max_task_nanoseconds",
         ):
             self.assertIn(metric, parallel_profile.frame_metrics)
         self.assertEqual(
@@ -221,6 +228,27 @@ class PythonApiTest(unittest.TestCase):
             ],
             parallel_profile.frame_metrics[
                 "sequence_process_lower_stars_min_task_load"
+            ],
+        )
+        if complex_.cpp_backend_active():
+            self.assertGreater(
+                parallel_profile.frame_metrics[
+                    "sequence_process_lower_stars_builder_init_nanoseconds"
+                ],
+                0,
+            )
+            self.assertGreater(
+                parallel_profile.frame_metrics[
+                    "sequence_process_lower_stars_setup_nanoseconds"
+                ],
+                0,
+            )
+        self.assertGreaterEqual(
+            parallel_profile.frame_metrics[
+                "sequence_process_lower_stars_max_task_nanoseconds"
+            ],
+            parallel_profile.frame_metrics[
+                "sequence_process_lower_stars_min_task_nanoseconds"
             ],
         )
         self.assertEqual(

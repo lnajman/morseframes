@@ -100,6 +100,13 @@ struct MorseReferenceFrameMetrics {
   std::uint64_t sequence_reduction_kernel_local_reduction_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_aggregation_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_merge_nanoseconds = 0;
+  std::uint64_t sequence_process_lower_stars_builder_init_nanoseconds = 0;
+  std::uint64_t sequence_process_lower_stars_setup_nanoseconds = 0;
+  std::uint64_t sequence_process_lower_stars_local_wall_nanoseconds = 0;
+  std::uint64_t sequence_process_lower_stars_replay_nanoseconds = 0;
+  std::uint64_t sequence_process_lower_stars_cumulative_task_nanoseconds = 0;
+  std::uint64_t sequence_process_lower_stars_min_task_nanoseconds = 0;
+  std::uint64_t sequence_process_lower_stars_max_task_nanoseconds = 0;
   std::size_t sequence_candidate_pushes = 0;
   std::size_t sequence_candidate_pops = 0;
   std::size_t sequence_stale_candidate_skips = 0;
@@ -653,9 +660,15 @@ class MorseReferenceFrameBuilder {
   MorseReferenceReductionInput build_process_lower_stars_reduction_input() const {
     return build_reduction_input_with([&](auto&& step_callback,
                                           auto* sequence_metrics) {
-      return FSequenceBuilder(complex_, sequence_metrics)
-          .build_process_lower_stars_with_step_callback(
-              std::forward<decltype(step_callback)>(step_callback));
+      const auto builder_start =
+          sequence_metrics != nullptr ? Clock::now() : Clock::time_point{};
+      FSequenceBuilder builder(complex_, sequence_metrics);
+      if (sequence_metrics != nullptr) {
+        sequence_metrics->process_lower_stars_builder_init_nanoseconds =
+            elapsed_nanoseconds(builder_start, Clock::now());
+      }
+      return builder.build_process_lower_stars_with_step_callback(
+          std::forward<decltype(step_callback)>(step_callback));
     });
   }
 
@@ -663,10 +676,15 @@ class MorseReferenceFrameBuilder {
       std::size_t max_workers = 0) const {
     return build_reduction_input_with([&](auto&& step_callback,
                                           auto* sequence_metrics) {
-      return FSequenceBuilder(complex_, sequence_metrics)
-          .build_process_lower_stars_parallel_with_step_callback(
-              std::forward<decltype(step_callback)>(step_callback),
-              max_workers);
+      const auto builder_start =
+          sequence_metrics != nullptr ? Clock::now() : Clock::time_point{};
+      FSequenceBuilder builder(complex_, sequence_metrics);
+      if (sequence_metrics != nullptr) {
+        sequence_metrics->process_lower_stars_builder_init_nanoseconds =
+            elapsed_nanoseconds(builder_start, Clock::now());
+      }
+      return builder.build_process_lower_stars_parallel_with_step_callback(
+          std::forward<decltype(step_callback)>(step_callback), max_workers);
     });
   }
 
@@ -1108,6 +1126,20 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.reduction_kernel_aggregation_nanoseconds;
       frame_metrics.sequence_reduction_kernel_merge_nanoseconds =
           sequence_build_metrics.reduction_kernel_merge_nanoseconds;
+      frame_metrics.sequence_process_lower_stars_builder_init_nanoseconds =
+          sequence_build_metrics.process_lower_stars_builder_init_nanoseconds;
+      frame_metrics.sequence_process_lower_stars_setup_nanoseconds =
+          sequence_build_metrics.process_lower_stars_setup_nanoseconds;
+      frame_metrics.sequence_process_lower_stars_local_wall_nanoseconds =
+          sequence_build_metrics.process_lower_stars_local_wall_nanoseconds;
+      frame_metrics.sequence_process_lower_stars_replay_nanoseconds =
+          sequence_build_metrics.process_lower_stars_replay_nanoseconds;
+      frame_metrics.sequence_process_lower_stars_cumulative_task_nanoseconds =
+          sequence_build_metrics.process_lower_stars_cumulative_task_nanoseconds;
+      frame_metrics.sequence_process_lower_stars_min_task_nanoseconds =
+          sequence_build_metrics.process_lower_stars_min_task_nanoseconds;
+      frame_metrics.sequence_process_lower_stars_max_task_nanoseconds =
+          sequence_build_metrics.process_lower_stars_max_task_nanoseconds;
       frame_metrics.sequence_candidate_pushes =
           sequence_build_metrics.candidate_pushes;
       frame_metrics.sequence_candidate_pops =

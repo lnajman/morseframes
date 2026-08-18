@@ -1,0 +1,36 @@
+\begin{tabular}{rlrrrrrr}
+\toprule
+Grid & Strategy & Workers & Simplices & Sequence (ms) & Sequence speedup & Total (ms) & Total speedup \\
+\midrule
+4 & ProcessLowerStars & 1 & 883 & 3.66 & 1.00 & 4.69 & 1.00 \\
+4 & ProcessLowerStars & 2 & 883 & 2.77 & 1.32 & 3.78 & 1.24 \\
+4 & ProcessLowerStars & 4 & 883 & 2.45 & 1.51 & 3.45 & 1.36 \\
+4 & ProcessLowerStars & 8 & 883 & 2.22 & 1.65 & 3.19 & 1.45 \\
+\addlinespace
+4 & Reduction kernel & 1 & 883 & 5.98 & 1.00 & 6.93 & 1.00 \\
+4 & Reduction kernel & 2 & 883 & 3.99 & 1.60 & 4.94 & 1.48 \\
+4 & Reduction kernel & 4 & 883 & 2.83 & 2.18 & 3.82 & 1.90 \\
+4 & Reduction kernel & 8 & 883 & 2.61 & 2.51 & 3.65 & 2.06 \\
+\addlinespace
+8 & ProcessLowerStars & 1 & 9,843 & 42.45 & 1.00 & 53.25 & 1.00 \\
+8 & ProcessLowerStars & 2 & 9,843 & 30.79 & 1.36 & 41.70 & 1.28 \\
+8 & ProcessLowerStars & 4 & 9,843 & 25.48 & 1.67 & 36.54 & 1.46 \\
+8 & ProcessLowerStars & 8 & 9,843 & 22.46 & 1.85 & 33.42 & 1.56 \\
+\addlinespace
+8 & Reduction kernel & 1 & 9,843 & 67.25 & 1.00 & 77.78 & 1.00 \\
+8 & Reduction kernel & 2 & 9,843 & 38.17 & 1.77 & 48.96 & 1.59 \\
+8 & Reduction kernel & 4 & 9,843 & 23.21 & 2.87 & 34.16 & 2.28 \\
+8 & Reduction kernel & 8 & 9,843 & 16.33 & 4.12 & 27.32 & 2.84 \\
+\addlinespace
+12 & ProcessLowerStars & 1 & 36,851 & 160.22 & 1.00 & 221.83 & 1.00 \\
+12 & ProcessLowerStars & 2 & 36,851 & 115.85 & 1.38 & 175.83 & 1.26 \\
+12 & ProcessLowerStars & 4 & 36,851 & 95.93 & 1.68 & 156.46 & 1.42 \\
+12 & ProcessLowerStars & 8 & 36,851 & 85.62 & 1.87 & 146.56 & 1.51 \\
+\addlinespace
+12 & Reduction kernel & 1 & 36,851 & 235.81 & 1.00 & 299.71 & 1.00 \\
+12 & Reduction kernel & 2 & 36,851 & 132.51 & 1.78 & 195.89 & 1.52 \\
+12 & Reduction kernel & 4 & 36,851 & 82.69 & 2.85 & 145.31 & 2.06 \\
+12 & Reduction kernel & 8 & 36,851 & 59.46 & 4.00 & 122.93 & 2.40 \\
+\addlinespace
+\bottomrule
+\end{tabular}

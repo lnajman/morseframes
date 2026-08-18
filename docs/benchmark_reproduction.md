@@ -268,6 +268,46 @@ The grid-size aggregates are generated in
 `docs/tetrahedral_strategy_comparison_table.tex`, with reduction-kernel counters
 in `docs/tetrahedral_reduction_kernel_metrics_table.tex`.
 
+## Tetrahedral Worker Scaling
+
+The focused 3D scaling study compares the parallel ProcessLowerStars and
+reduction-kernel implementations at one, two, four, and eight workers. Each
+algorithm uses its own one-worker parallel execution as the speedup baseline;
+every measured sequence is checked for exact agreement with the corresponding
+sequential implementation.
+
+```sh
+PYTHONPATH=python python3 tools/benchmark_tetrahedral_worker_scaling.py \
+  --sizes 4 8 12 \
+  --seeds 0 1 2 \
+  --workers 1 2 4 8 \
+  --repeats 5 \
+  --warmups 1 \
+  --format csv \
+  --output ../work/tetrahedral_worker_scaling.csv
+
+MPLCONFIGDIR=../work/matplotlib-cache \
+  python3 tools/render_tetrahedral_worker_scaling.py \
+  --input ../work/tetrahedral_worker_scaling.csv \
+  --figure-output docs/tetrahedral_worker_scaling.svg \
+  --table-output docs/tetrahedral_worker_scaling_table.tex
+```
+
+Across the nine cases, eight-worker ProcessLowerStars reaches median
+construction and end-to-end speedups of 1.85 and 1.51, respectively. The
+reduction kernel reaches 3.95 and 2.40. Its median end-to-end time at eight
+workers is 1.19 times the F-Max time across the complete corpus, falling to
+1.09 on the largest volumes. ProcessLowerStars reaches 1.43 times F-Max across
+the corpus and 1.32 on the largest volumes. This supports the interpretation
+that coarse independent-level scheduling is better matched to this machine
+than the finer ProcessLowerStars workload, while persistence and other serial
+work limit end-to-end scaling for both algorithms.
+
+![Tetrahedral worker scaling](tetrahedral_worker_scaling.svg)
+
+The grid-size aggregates are generated in
+`docs/tetrahedral_worker_scaling_table.tex`.
+
 ## Reduction-Kernel Scaling
 
 The optimized parallel scheduler assigns one load-balanced group of filtration

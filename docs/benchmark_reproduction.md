@@ -178,7 +178,7 @@ compared with F-Max.
 ```sh
 PYTHONPATH=python python3 tools/benchmark_gradient_strategies.py \
   --terrain-sizes 16 32 64 \
-  --volume-sizes 4 8 12 \
+  --volume-sizes 4 8 12 16 \
   --seeds 0 1 2 \
   --workers 1 2 4 8 \
   --repeats 5 \
@@ -193,24 +193,26 @@ MPLCONFIGDIR=../work/matplotlib-cache \
   --table-output docs/gradient_strategy_comparison_table.tex
 ```
 
-The run contains 18 complexes and 198 measured rows. All parallel gradients
+The run contains 21 complexes and 231 measured rows. All parallel gradients
 match their sequential counterpart exactly, and all five approaches have zero
 critical-count difference from F-Max in every case. In 2D, sequential
-ProcessLowerStars and ReductionKernel take median times of 6.93 and 6.53 times
-the F-Max time. At eight workers these ratios fall to 2.12 and 1.48, so the
+ProcessLowerStars and ReductionKernel take median times of 6.62 and 5.51 times
+the F-Max time. At eight workers these ratios fall to 3.51 and 2.14, so the
 parallel ReductionKernel is the faster of the two. In 3D, the corresponding
-sequential ratios are 6.04 and 6.06; at eight workers they fall to 1.53 and
-1.09. ReductionKernel is therefore the faster parallel method in both
-dimensions. On the largest 3D volumes it reaches 0.88 times the F-Max time.
-ReductionKernel scales from one to eight workers by 4.64-fold in 2D and
-5.18-fold in 3D, versus 3.22-fold and 3.78-fold for ProcessLowerStars.
+sequential ratios are 4.72 and 3.74; at eight workers they fall to 1.90 and
+0.94. ReductionKernel is therefore the faster parallel method in both
+dimensions and is faster than F-Max over the aggregate 3D corpus. At grid
+sizes 12 and 16 it reaches 0.81 and 0.64 times the F-Max time, respectively.
+ReductionKernel scales from one to eight workers by 2.42-fold in 2D and
+4.04-fold in 3D, versus 1.71-fold and 2.55-fold for ProcessLowerStars.
 
 The profiler times an uninstrumented construction and collects detailed phase
 counters in a separate diagnostic run. This prevents high-frequency timing
 calls inside ReductionKernel facet tasks from biasing the comparison. The
 optimized kernel caches compact same-level face closures for triangular and
-tetrahedral sections and uses contiguous local removal lists instead of a hash
-table for the small per-facet cells.
+tetrahedral sections, uses a compact per-facet removal mask, and concatenates
+facet events once in deterministic order instead of repeatedly rebuilding
+intermediate event vectors.
 
 ![Gradient-only strategy comparison](gradient_strategy_comparison.svg)
 
@@ -284,7 +286,7 @@ range as the two-dimensional corpus.
 
 ```sh
 PYTHONPATH=python python3 tools/benchmark_tetrahedral_strategies.py \
-  --sizes 4 8 12 \
+  --sizes 4 8 12 16 \
   --seeds 0 1 2 \
   --parallel-workers 8 \
   --repeats 5 \
@@ -348,11 +350,11 @@ MPLCONFIGDIR=../work/matplotlib-cache \
   --table-output docs/tetrahedral_worker_scaling_table.tex
 ```
 
-Across the nine cases, eight-worker ProcessLowerStars reaches a median
-gradient-construction speedup of 3.69, versus 4.66 for the reduction kernel.
-The corresponding median construction times are 9.39 ms and 7.72 ms, so the
+Across the twelve cases, eight-worker ProcessLowerStars reaches a median
+gradient-construction speedup of 2.58, versus 4.14 for the reduction kernel.
+The corresponding median construction times are 3.16 ms and 1.62 ms, so the
 optimized ReductionKernel is now faster in absolute time. Median eight-worker
-efficiencies are 0.46 and 0.58, respectively.
+efficiencies are 0.32 and 0.52, respectively.
 
 ![Tetrahedral worker scaling](tetrahedral_worker_scaling.svg)
 
@@ -371,7 +373,7 @@ the corresponding sequential result.
 
 ```sh
 PYTHONPATH=python python3 tools/benchmark_tetrahedral_phase_profile.py \
-  --sizes 4 8 12 \
+  --sizes 4 8 12 16 \
   --seeds 0 1 2 \
   --workers 1 8 \
   --repeats 5 \
@@ -383,16 +385,20 @@ python3 tools/render_tetrahedral_phase_profile.py \
   --table-output docs/tetrahedral_phase_profile_table.tex
 ```
 
-Across the nine cases, eight-worker ProcessLowerStars reaches a 4.10-fold
-gradient-construction speedup; ReductionKernel reaches 5.37-fold. Their median
-eight-worker construction times are 8.51 ms and 6.59 ms, respectively. At
-eight workers, ProcessLowerStars spends 38.7 percent in global setup, 42.1
-percent in parallel local-star processing, 2.3 percent in ordered replay, and
-4.6 percent in builder initialization. ReductionKernel spends 93.4 percent of
-its diagnostic wall time processing levels; setup and replay account for 4.4
-and 2.1 percent. Its next optimization target is therefore still inside the
-level kernels rather than scheduling or output assembly. These figures
-deliberately make no claim about persistence performance.
+Across the twelve cases, eight-worker ProcessLowerStars reaches a 3.01-fold
+gradient-construction speedup; ReductionKernel reaches 3.78-fold. Their median
+eight-worker construction times are 3.08 ms and 1.82 ms, respectively. At
+eight workers, ProcessLowerStars spends 33.7 percent in global setup, 34.1
+percent in parallel local-star processing, 2.5 percent in ordered replay, and
+4.5 percent in builder initialization. ReductionKernel spends 90.1 percent of
+its diagnostic wall time processing levels; setup and replay account for 7.3
+and 2.6 percent. The CSV now also records kernel rounds, facet kernels, facet
+discovery scans, cached-cell visits, local candidate scans, coboundary scans,
+and membership tests. For the `n=16` volumes, the medians include roughly
+458,000 local candidate visits but only 70,000 membership tests, confirming
+that preserving the short-circuit local scan is preferable to eagerly building
+all local incidences. These figures deliberately make no claim about
+persistence performance.
 
 The phase and concurrency aggregates are generated in
 `docs/tetrahedral_phase_profile_table.tex`.

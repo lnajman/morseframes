@@ -72,6 +72,14 @@ class TetrahedralPhaseProfileRow:
     reduction_kernel_replay_seconds: float
     reduction_kernel_replay_share: float
     reduction_kernel_closure_seconds: float
+    reduction_kernel_rounds: int
+    reduction_kernel_facet_kernels: int
+    reduction_kernel_facet_discovery_coboundary_visits: int
+    reduction_kernel_incidence_cell_visits: int
+    reduction_kernel_facet_cell_visits: int
+    reduction_kernel_local_candidate_visits: int
+    reduction_kernel_local_coboundary_visits: int
+    reduction_kernel_local_membership_tests: int
 
 
 def _seconds(metrics: dict[str, object], name: str) -> float:
@@ -256,6 +264,33 @@ def benchmark_profile(
                     ),
                     reduction_kernel_closure_seconds=_seconds(
                         metrics, "reduction_kernel_closure_nanoseconds"
+                    ),
+                    reduction_kernel_rounds=int(
+                        metrics.get("reduction_kernel_rounds", 0)
+                    ),
+                    reduction_kernel_facet_kernels=int(
+                        metrics.get("reduction_kernel_facet_kernels", 0)
+                    ),
+                    reduction_kernel_facet_discovery_coboundary_visits=int(
+                        metrics.get(
+                            "reduction_kernel_facet_discovery_coboundary_visits",
+                            0,
+                        )
+                    ),
+                    reduction_kernel_incidence_cell_visits=int(
+                        metrics.get("reduction_kernel_incidence_cell_visits", 0)
+                    ),
+                    reduction_kernel_facet_cell_visits=int(
+                        metrics.get("reduction_kernel_facet_cell_visits", 0)
+                    ),
+                    reduction_kernel_local_candidate_visits=int(
+                        metrics.get("reduction_kernel_local_candidate_visits", 0)
+                    ),
+                    reduction_kernel_local_coboundary_visits=int(
+                        metrics.get("reduction_kernel_local_coboundary_visits", 0)
+                    ),
+                    reduction_kernel_local_membership_tests=int(
+                        metrics.get("reduction_kernel_local_membership_tests", 0)
                     ),
                 )
             )

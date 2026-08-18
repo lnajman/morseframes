@@ -65,6 +65,13 @@ class TetrahedralPhaseProfileRow:
     process_lower_stars_setup_parallel_tasks: int
     process_lower_stars_parallel_tasks: int
     reduction_kernel_max_parallel_levels: int
+    reduction_kernel_setup_seconds: float
+    reduction_kernel_setup_share: float
+    reduction_kernel_level_wall_seconds: float
+    reduction_kernel_level_wall_share: float
+    reduction_kernel_replay_seconds: float
+    reduction_kernel_replay_share: float
+    reduction_kernel_closure_seconds: float
 
 
 def _seconds(metrics: dict[str, object], name: str) -> float:
@@ -138,6 +145,18 @@ def benchmark_profile(
             min_load = int(metrics.get("process_lower_stars_min_task_load", 0))
             max_load = int(metrics.get("process_lower_stars_max_task_load", 0))
             is_process_lower_stars = strategy == "process-lower-stars"
+            kernel_setup = _seconds(
+                metrics, "reduction_kernel_setup_nanoseconds"
+            )
+            kernel_level_wall = _seconds(
+                metrics, "reduction_kernel_level_wall_nanoseconds"
+            )
+            kernel_replay = _seconds(
+                metrics, "reduction_kernel_replay_nanoseconds"
+            )
+            kernel_diagnostic_total = (
+                kernel_setup + kernel_level_wall + kernel_replay
+            )
             parallel_steps = mp.compute_morse_sequence(
                 complex_, algorithm=algorithm, max_workers=worker_count
             ).steps
@@ -216,6 +235,27 @@ def benchmark_profile(
                     ),
                     reduction_kernel_max_parallel_levels=int(
                         metrics.get("reduction_kernel_max_parallel_levels", 0)
+                    ),
+                    reduction_kernel_setup_seconds=kernel_setup,
+                    reduction_kernel_setup_share=(
+                        _ratio(kernel_setup, kernel_diagnostic_total)
+                        if not is_process_lower_stars
+                        else math.nan
+                    ),
+                    reduction_kernel_level_wall_seconds=kernel_level_wall,
+                    reduction_kernel_level_wall_share=(
+                        _ratio(kernel_level_wall, kernel_diagnostic_total)
+                        if not is_process_lower_stars
+                        else math.nan
+                    ),
+                    reduction_kernel_replay_seconds=kernel_replay,
+                    reduction_kernel_replay_share=(
+                        _ratio(kernel_replay, kernel_diagnostic_total)
+                        if not is_process_lower_stars
+                        else math.nan
+                    ),
+                    reduction_kernel_closure_seconds=_seconds(
+                        metrics, "reduction_kernel_closure_nanoseconds"
                     ),
                 )
             )

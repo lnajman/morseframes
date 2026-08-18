@@ -53,6 +53,12 @@ class TetrahedralPhaseProfileBenchmarkTest(unittest.TestCase):
         self.assertTrue(
             all(math.isnan(row.process_lower_stars_setup_share) for row in kernel_rows)
         )
+        self.assertTrue(
+            all(row.reduction_kernel_level_wall_seconds > 0.0 for row in kernel_rows)
+        )
+        self.assertTrue(
+            all(row.reduction_kernel_level_wall_share > 0.0 for row in kernel_rows)
+        )
 
         output = StringIO()
         bench.write_rows(rows, output, "csv")

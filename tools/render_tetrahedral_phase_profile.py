@@ -54,7 +54,7 @@ def render_table(rows: list[dict[str, str]], output: Path) -> None:
         r"\toprule",
         (
             r"Grid & Strategy & Workers & Gradient (ms) & Build (\%) & M simplex/s & "
-            r"Builder (\%) & Setup (\%) & Local (\%) & Replay (\%) & Task parallelism \\"
+            r"Builder (\%) & Setup (\%) & Level/local (\%) & Replay (\%) & Task parallelism \\"
         ),
         r"\midrule",
     ]
@@ -64,6 +64,22 @@ def render_table(rows: list[dict[str, str]], output: Path) -> None:
                 key[2] for key in grouped if key[:2] == (grid_size, strategy)
             ):
                 group = grouped[(grid_size, strategy, workers)]
+                process_lower_stars = strategy == "process-lower-stars"
+                setup_column = (
+                    "process_lower_stars_setup_share"
+                    if process_lower_stars
+                    else "reduction_kernel_setup_share"
+                )
+                work_column = (
+                    "process_lower_stars_local_wall_share"
+                    if process_lower_stars
+                    else "reduction_kernel_level_wall_share"
+                )
+                replay_column = (
+                    "process_lower_stars_replay_share"
+                    if process_lower_stars
+                    else "reduction_kernel_replay_share"
+                )
                 lines.append(
                     " & ".join(
                         (
@@ -82,13 +98,9 @@ def render_table(rows: list[dict[str, str]], output: Path) -> None:
                                     "process_lower_stars_builder_init_share",
                                 )
                             ),
-                            _percent(_median(group, "process_lower_stars_setup_share")),
-                            _percent(
-                                _median(group, "process_lower_stars_local_wall_share")
-                            ),
-                            _percent(
-                                _median(group, "process_lower_stars_replay_share")
-                            ),
+                            _percent(_median(group, setup_column)),
+                            _percent(_median(group, work_column)),
+                            _percent(_median(group, replay_column)),
                             _ratio(
                                 _median(group, "process_lower_stars_task_parallelism")
                             ),

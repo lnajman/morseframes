@@ -327,6 +327,14 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
       metrics.sequence_reduction_kernel_aggregation_nanoseconds;
   result["sequence_reduction_kernel_merge_nanoseconds"] =
       metrics.sequence_reduction_kernel_merge_nanoseconds;
+  result["sequence_reduction_kernel_closure_nanoseconds"] =
+      metrics.sequence_reduction_kernel_closure_nanoseconds;
+  result["sequence_reduction_kernel_setup_nanoseconds"] =
+      metrics.sequence_reduction_kernel_setup_nanoseconds;
+  result["sequence_reduction_kernel_level_wall_nanoseconds"] =
+      metrics.sequence_reduction_kernel_level_wall_nanoseconds;
+  result["sequence_reduction_kernel_replay_nanoseconds"] =
+      metrics.sequence_reduction_kernel_replay_nanoseconds;
   result["sequence_process_lower_stars_builder_init_nanoseconds"] =
       metrics.sequence_process_lower_stars_builder_init_nanoseconds;
   result["sequence_process_lower_stars_setup_nanoseconds"] =
@@ -418,6 +426,14 @@ nb::dict sequence_metrics_to_python(const morseframes::MorseSequenceBuildMetrics
       metrics.reduction_kernel_aggregation_nanoseconds;
   result["reduction_kernel_merge_nanoseconds"] =
       metrics.reduction_kernel_merge_nanoseconds;
+  result["reduction_kernel_closure_nanoseconds"] =
+      metrics.reduction_kernel_closure_nanoseconds;
+  result["reduction_kernel_setup_nanoseconds"] =
+      metrics.reduction_kernel_setup_nanoseconds;
+  result["reduction_kernel_level_wall_nanoseconds"] =
+      metrics.reduction_kernel_level_wall_nanoseconds;
+  result["reduction_kernel_replay_nanoseconds"] =
+      metrics.reduction_kernel_replay_nanoseconds;
   result["process_lower_stars_builder_init_nanoseconds"] =
       metrics.process_lower_stars_builder_init_nanoseconds;
   result["process_lower_stars_setup_nanoseconds"] =
@@ -764,37 +780,56 @@ nb::dict profile_morse_sequence_core(const PyFilteredComplex& complex,
     throw std::invalid_argument("Unknown Morse sequence algorithm: " + algorithm);
   }
 
-  morseframes::MorseSequenceBuildMetrics metrics;
+  auto run_algorithm = [&](auto& builder) -> morseframes::MorseSequence {
+    return normalized == "plateau-greedy" ? builder.build_plateau_greedy()
+        : normalized == "same-level-reduction"
+            ? builder.build_same_level_reduction()
+        : normalized == "f-max" ? builder.build_f_max()
+        : normalized == "process-lower-stars"
+            ? builder.build_process_lower_stars()
+        : normalized == "process-lower-stars-parallel"
+            ? builder.build_process_lower_stars_parallel(max_workers)
+        : normalized == "f-min" ? builder.build_f_min()
+        : normalized == "flooding-max" ? builder.build_flooding_max()
+        : normalized == "flooding-min" ? builder.build_flooding_min()
+        : normalized == "flooding-reduction-kernel"
+            ? builder.build_flooding_reduction_kernel()
+        : normalized == "flooding-reduction-kernel-parallel"
+            ? builder.build_flooding_reduction_kernel_parallel(max_workers)
+        : normalized == "flooding-minmax" ? builder.build_flooding_minmax()
+        : normalized == "flooding-maxmin" ? builder.build_flooding_maxmin()
+                                            : builder.build_saturated();
+  };
+
   const auto total_started = Clock::now();
   const auto builder_started = Clock::now();
-  morseframes::FSequenceBuilder builder(complex.complex, &metrics);
+  morseframes::FSequenceBuilder builder(complex.complex);
   const auto builder_finished = Clock::now();
   const auto builder_nanoseconds =
       elapsed_nanoseconds(builder_started, builder_finished);
-  if (normalized == "process-lower-stars" ||
-      normalized == "process-lower-stars-parallel") {
-    metrics.process_lower_stars_builder_init_nanoseconds = builder_nanoseconds;
-  }
 
   const auto build_started = Clock::now();
-  morseframes::MorseSequence sequence =
-      normalized == "plateau-greedy" ? builder.build_plateau_greedy()
-      : normalized == "same-level-reduction" ? builder.build_same_level_reduction()
-      : normalized == "f-max" ? builder.build_f_max()
-      : normalized == "process-lower-stars" ? builder.build_process_lower_stars()
-      : normalized == "process-lower-stars-parallel"
-          ? builder.build_process_lower_stars_parallel(max_workers)
-      : normalized == "f-min" ? builder.build_f_min()
-      : normalized == "flooding-max" ? builder.build_flooding_max()
-      : normalized == "flooding-min" ? builder.build_flooding_min()
-      : normalized == "flooding-reduction-kernel"
-          ? builder.build_flooding_reduction_kernel()
-      : normalized == "flooding-reduction-kernel-parallel"
-          ? builder.build_flooding_reduction_kernel_parallel(max_workers)
-      : normalized == "flooding-minmax" ? builder.build_flooding_minmax()
-      : normalized == "flooding-maxmin" ? builder.build_flooding_maxmin()
-          : builder.build_saturated();
+  morseframes::MorseSequence sequence = run_algorithm(builder);
   const auto build_finished = Clock::now();
+
+  // Collect detailed counters in a separate run so high-frequency diagnostic
+  // clocks do not distort the construction time used by benchmarks.
+  morseframes::MorseSequenceBuildMetrics metrics;
+  const auto diagnostic_builder_started = Clock::now();
+  morseframes::FSequenceBuilder diagnostic_builder(complex.complex, &metrics);
+  const auto diagnostic_builder_finished = Clock::now();
+  if (normalized == "process-lower-stars" ||
+      normalized == "process-lower-stars-parallel") {
+    metrics.process_lower_stars_builder_init_nanoseconds = elapsed_nanoseconds(
+        diagnostic_builder_started, diagnostic_builder_finished);
+  }
+  const auto diagnostic_sequence = run_algorithm(diagnostic_builder);
+  if (diagnostic_sequence.steps().size() != sequence.steps().size() ||
+      diagnostic_sequence.critical_simplices().size() !=
+          sequence.critical_simplices().size()) {
+    throw std::logic_error(
+        "Instrumented Morse sequence differs from the timed sequence.");
+  }
 
   nb::dict result;
   result["num_simplices"] = complex.complex.size();

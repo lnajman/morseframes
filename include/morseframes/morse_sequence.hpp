@@ -59,6 +59,10 @@ struct MorseSequenceBuildMetrics {
   std::uint64_t reduction_kernel_local_reduction_nanoseconds = 0;
   std::uint64_t reduction_kernel_aggregation_nanoseconds = 0;
   std::uint64_t reduction_kernel_merge_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_nanoseconds = 0;
+  std::uint64_t reduction_kernel_setup_nanoseconds = 0;
+  std::uint64_t reduction_kernel_level_wall_nanoseconds = 0;
+  std::uint64_t reduction_kernel_replay_nanoseconds = 0;
   std::uint64_t process_lower_stars_builder_init_nanoseconds = 0;
   std::uint64_t process_lower_stars_setup_nanoseconds = 0;
   std::uint64_t process_lower_stars_local_wall_nanoseconds = 0;
@@ -1580,6 +1584,8 @@ class FSequenceBuilder {
   template <typename StepCallback>
   MorseSequence build_flooding_reduction_kernel_with_execution_options(
       ReductionKernelExecutionOptions options, StepCallback&& on_step) const {
+    options.collect_metrics = sequence_metrics_ != nullptr;
+    const auto setup_start = profile_start();
     const std::size_t n = complex_.size();
     MorseSequence sequence(n);
     auto&& callback = on_step;
@@ -1595,7 +1601,10 @@ class FSequenceBuilder {
     std::vector<ReductionKernelLevelResult> level_results(num_levels);
     ReductionKernelMetrics kernel_metrics;
     kernel_metrics.executor_workers = workers;
+    profile_add(&MorseSequenceBuildMetrics::reduction_kernel_setup_nanoseconds,
+                setup_start);
 
+    const auto level_start = profile_start();
     if (level_workers == 1 || num_levels <= 1) {
       for (LevelId level = 0; level < num_levels; ++level) {
         level_results[level] = workspace.compute_level_isolated(level);
@@ -1640,7 +1649,11 @@ class FSequenceBuilder {
         executor->get(future);
       }
     }
+    profile_add(
+        &MorseSequenceBuildMetrics::reduction_kernel_level_wall_nanoseconds,
+        level_start);
 
+    const auto replay_start = profile_start();
     for (LevelId level = 0; level < num_levels; ++level) {
       auto& level_result = level_results[level];
       ReductionKernelWorkspace<ComplexView>::accumulate_metrics(
@@ -1662,6 +1675,9 @@ class FSequenceBuilder {
         callback(sequence, sequence.steps().back());
       }
     }
+    profile_add(
+        &MorseSequenceBuildMetrics::reduction_kernel_replay_nanoseconds,
+        replay_start);
 
     if (sequence_metrics_ != nullptr) {
       sequence_metrics_->reduction_kernel_facet_nanoseconds =
@@ -1676,6 +1692,8 @@ class FSequenceBuilder {
           kernel_metrics.aggregation_nanoseconds;
       sequence_metrics_->reduction_kernel_merge_nanoseconds =
           kernel_metrics.merge_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_nanoseconds =
+          kernel_metrics.closure_nanoseconds;
       sequence_metrics_->reduction_kernel_levels = kernel_metrics.levels;
       sequence_metrics_->reduction_kernel_rounds = kernel_metrics.kernel_rounds;
       sequence_metrics_->reduction_kernel_facet_kernels =

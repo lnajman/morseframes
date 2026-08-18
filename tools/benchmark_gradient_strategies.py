@@ -257,6 +257,12 @@ def write_rows(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--families",
+        nargs="+",
+        choices=("terrain", "volume"),
+        default=("terrain", "volume"),
+    )
     parser.add_argument("--terrain-sizes", type=int, nargs="+", default=(16, 32, 64))
     parser.add_argument("--volume-sizes", type=int, nargs="+", default=(4, 8, 12))
     parser.add_argument("--seeds", type=int, nargs="+", default=(0, 1, 2))
@@ -275,18 +281,21 @@ def main(argv: list[str] | None = None) -> int:
         "repeats": args.repeats,
         "warmups": args.warmups,
     }
-    rows = [
-        row
-        for grid_size in args.terrain_sizes
-        for seed in args.seeds
-        for row in benchmark_terrain(seed, grid_size, **options)
-    ]
-    rows.extend(
-        row
-        for grid_size in args.volume_sizes
-        for seed in args.seeds
-        for row in benchmark_volume(seed, grid_size, **options)
-    )
+    rows: list[GradientStrategyRow] = []
+    if "terrain" in args.families:
+        rows.extend(
+            row
+            for grid_size in args.terrain_sizes
+            for seed in args.seeds
+            for row in benchmark_terrain(seed, grid_size, **options)
+        )
+    if "volume" in args.families:
+        rows.extend(
+            row
+            for grid_size in args.volume_sizes
+            for seed in args.seeds
+            for row in benchmark_volume(seed, grid_size, **options)
+        )
     if args.output is None:
         write_rows(rows, sys.stdout, args.format)
     else:

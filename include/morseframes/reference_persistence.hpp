@@ -100,6 +100,10 @@ struct MorseReferenceFrameMetrics {
   std::uint64_t sequence_reduction_kernel_local_reduction_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_aggregation_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_merge_nanoseconds = 0;
+  std::uint64_t sequence_reduction_kernel_closure_nanoseconds = 0;
+  std::uint64_t sequence_reduction_kernel_setup_nanoseconds = 0;
+  std::uint64_t sequence_reduction_kernel_level_wall_nanoseconds = 0;
+  std::uint64_t sequence_reduction_kernel_replay_nanoseconds = 0;
   std::uint64_t sequence_process_lower_stars_builder_init_nanoseconds = 0;
   std::uint64_t sequence_process_lower_stars_setup_nanoseconds = 0;
   std::uint64_t sequence_process_lower_stars_local_wall_nanoseconds = 0;
@@ -1127,6 +1131,14 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.reduction_kernel_aggregation_nanoseconds;
       frame_metrics.sequence_reduction_kernel_merge_nanoseconds =
           sequence_build_metrics.reduction_kernel_merge_nanoseconds;
+      frame_metrics.sequence_reduction_kernel_closure_nanoseconds =
+          sequence_build_metrics.reduction_kernel_closure_nanoseconds;
+      frame_metrics.sequence_reduction_kernel_setup_nanoseconds =
+          sequence_build_metrics.reduction_kernel_setup_nanoseconds;
+      frame_metrics.sequence_reduction_kernel_level_wall_nanoseconds =
+          sequence_build_metrics.reduction_kernel_level_wall_nanoseconds;
+      frame_metrics.sequence_reduction_kernel_replay_nanoseconds =
+          sequence_build_metrics.reduction_kernel_replay_nanoseconds;
       frame_metrics.sequence_process_lower_stars_builder_init_nanoseconds =
           sequence_build_metrics.process_lower_stars_builder_init_nanoseconds;
       frame_metrics.sequence_process_lower_stars_setup_nanoseconds =

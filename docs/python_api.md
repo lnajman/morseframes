@@ -70,7 +70,8 @@ complex_ = builder.finalize()
 ```
 
 When the same owning complex will be processed by sequential ReductionKernel
-more than once, its native same-level closures can be cached explicitly:
+more than once, its native same-level closures and coboundary adjacency can be
+cached explicitly:
 
 ```python
 cache = complex_.prepare_reduction_kernel_cache()
@@ -81,7 +82,8 @@ sequence = mf.compute_morse_sequence(
 ```
 
 Cache construction is not hidden in gradient timing. The method requires the
-native backend and reports its build cost, entry count, and memory footprint.
+native backend and reports its build cost, closure-entry count,
+`coboundary_entries`, and memory footprint.
 Multiworker ReductionKernel currently ignores the cache because disjoint level
 workers build their small closures concurrently and shared-cache access did not
 improve wall time.

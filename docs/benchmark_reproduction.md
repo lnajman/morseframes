@@ -249,13 +249,13 @@ and wins 89 comparisons. Median improvements are 7.7 percent sequentially and
 15.2 percent at eight workers in 2D, and 5.9 and 6.4 percent, respectively, in
 3D. The few regressions are concentrated in the smallest sub-millisecond cases.
 
-### Reusable ReductionKernel Closure Cache
+### Reusable ReductionKernel Topology Cache
 
 The owning `FilteredComplex` can explicitly precompute immutable same-level
-closure ranges for repeated sequential ReductionKernel gradients. The focused
-benchmark constructs separate cached and uncached copies, alternates their
-measurement order, verifies identical sequences, and reports cache build time
-and memory separately:
+closure ranges and coboundary adjacency for repeated sequential ReductionKernel
+gradients. The focused benchmark constructs separate cached and uncached
+copies, alternates their measurement order, verifies identical sequences, and
+reports cache build time and memory separately:
 
 ```sh
 PYTHONPATH=python python3 tools/benchmark_reduction_kernel_cache.py \
@@ -269,13 +269,13 @@ PYTHONPATH=python python3 tools/benchmark_reduction_kernel_cache.py \
 
 Across all 21 cases, every cached gradient exactly matches its uncached
 counterpart and every cached run is faster. Median sequential speedup is
-1.21-fold on terrains and 1.26-fold on tetrahedral volumes. Median cache build
-costs are 0.15 ms and 1.02 ms, with median allocated footprints of 0.15 MiB and
-0.98 MiB, respectively. The build cost is recovered after median counts of
-1.97 terrain gradients and 1.46 volume gradients. The largest `n=16` volume
-cache occupies 3.40 MiB. Multiworker ReductionKernel deliberately retains
-worker-local closure construction because cached access did not improve its
-wall time.
+1.41-fold on terrains and 1.49-fold on tetrahedral volumes. Median cache build
+costs are 0.23 ms and 1.53 ms, with median allocated footprints of 0.27 MiB and
+1.65 MiB, respectively. The build cost is recovered after median counts of
+1.43 terrain gradients and 1.26 volume gradients. The largest `n=16` volume
+cache occupies 5.80 MiB. Multiworker ReductionKernel deliberately retains
+worker-local topology construction because shared-cache access did not improve
+its wall time.
 
 ![Gradient-only strategy comparison](gradient_strategy_comparison.svg)
 

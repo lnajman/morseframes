@@ -118,6 +118,8 @@ class FilteredSimplicialComplex {
 
     same_level_closure_entries_.clear();
     same_level_closure_ranges_.assign(size(), {0, 0});
+    same_level_coboundary_entries_.clear();
+    same_level_coboundary_ranges_.assign(size(), {0, 0});
     std::vector<std::size_t> bucket_index(
         size(), std::numeric_limits<std::size_t>::max());
     std::vector<std::uint8_t> included;
@@ -164,6 +166,16 @@ class FilteredSimplicialComplex {
             {first, same_level_closure_entries_.size()};
       }
     }
+    for (SimplexId simplex = 0; simplex < size(); ++simplex) {
+      const std::size_t first = same_level_coboundary_entries_.size();
+      for (SimplexId coface : coboundary(simplex)) {
+        if (level(coface) == level(simplex)) {
+          same_level_coboundary_entries_.push_back(coface);
+        }
+      }
+      same_level_coboundary_ranges_[simplex] =
+          {first, same_level_coboundary_entries_.size()};
+    }
     same_level_closure_cache_ready_ = true;
   }
 
@@ -186,9 +198,27 @@ class FilteredSimplicialComplex {
     return same_level_closure_ranges_;
   }
 
+  const std::vector<SimplexId>& same_level_coboundary_entries() const {
+    if (!same_level_closure_cache_ready_) {
+      throw std::logic_error("Same-level closure cache is not prepared.");
+    }
+    return same_level_coboundary_entries_;
+  }
+
+  const std::vector<std::pair<std::size_t, std::size_t>>&
+  same_level_coboundary_ranges() const {
+    if (!same_level_closure_cache_ready_) {
+      throw std::logic_error("Same-level closure cache is not prepared.");
+    }
+    return same_level_coboundary_ranges_;
+  }
+
   std::size_t same_level_closure_cache_bytes() const {
     return same_level_closure_entries_.capacity() * sizeof(SimplexId) +
            same_level_closure_ranges_.capacity() *
+               sizeof(std::pair<std::size_t, std::size_t>) +
+           same_level_coboundary_entries_.capacity() * sizeof(SimplexId) +
+           same_level_coboundary_ranges_.capacity() *
                sizeof(std::pair<std::size_t, std::size_t>);
   }
 
@@ -211,6 +241,8 @@ class FilteredSimplicialComplex {
     same_level_closure_cache_ready_ = false;
     same_level_closure_entries_ = {};
     same_level_closure_ranges_ = {};
+    same_level_coboundary_entries_ = {};
+    same_level_coboundary_ranges_ = {};
   }
 
   struct VectorLess {
@@ -339,6 +371,9 @@ class FilteredSimplicialComplex {
   std::vector<SimplexId> same_level_closure_entries_;
   std::vector<std::pair<std::size_t, std::size_t>>
       same_level_closure_ranges_;
+  std::vector<SimplexId> same_level_coboundary_entries_;
+  std::vector<std::pair<std::size_t, std::size_t>>
+      same_level_coboundary_ranges_;
   std::vector<SimplexId> filtration_order_;
 };
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark explicit ReductionKernel closure-cache construction and reuse."""
+"""Benchmark explicit ReductionKernel cache construction and reuse."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ class CacheBenchmarkRow:
     warmups: int
     cache_build_seconds: float
     cache_entries: int
+    cache_coboundary_entries: int
     cache_bytes: int
     uncached_gradient_seconds: float
     cached_gradient_seconds: float
@@ -103,6 +104,7 @@ def benchmark_case(
         warmups=warmups,
         cache_build_seconds=cache_build_seconds,
         cache_entries=cache["entries"],
+        cache_coboundary_entries=cache["coboundary_entries"],
         cache_bytes=cache["bytes"],
         uncached_gradient_seconds=uncached_median,
         cached_gradient_seconds=cached_median,

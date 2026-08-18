@@ -361,6 +361,7 @@ class PythonApiTest(unittest.TestCase):
         cache = complex_.prepare_reduction_kernel_cache()
         self.assertTrue(complex_.reduction_kernel_cache_ready)
         self.assertGreater(cache["entries"], 0)
+        self.assertGreaterEqual(cache["coboundary_entries"], 0)
         self.assertGreater(cache["bytes"], 0)
         cached = mp.compute_morse_sequence(
             complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_SEQUENCE

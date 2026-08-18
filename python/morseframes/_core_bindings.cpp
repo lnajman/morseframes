@@ -1626,6 +1626,8 @@ NB_MODULE(_morse_core, m) {
         result["build_nanoseconds"] = elapsed_nanoseconds(start, stop);
         result["entries"] =
             self.complex.same_level_closure_entries().size();
+        result["coboundary_entries"] =
+            self.complex.same_level_coboundary_entries().size();
         result["bytes"] = self.complex.same_level_closure_cache_bytes();
         return result;
       })

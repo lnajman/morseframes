@@ -940,10 +940,12 @@ class FilteredComplex:
         return self._cpp is not None
 
     def prepare_reduction_kernel_cache(self) -> dict[str, int]:
-        """Precompute immutable same-level closures for repeated gradients.
+        """Precompute immutable same-level topology for repeated gradients.
 
         Cache construction is explicit so callers can account for its time and
-        memory separately from ReductionKernel gradient construction.
+        memory separately from ReductionKernel gradient construction. The
+        returned mapping reports closure entries, coboundary entries, bytes,
+        and build time in nanoseconds.
         """
         self._ensure_finalized()
         if self._cpp is None:
@@ -965,7 +967,7 @@ class FilteredComplex:
         return bool(getattr(self._cpp, "reduction_kernel_cache_ready", False))
 
     def clear_reduction_kernel_cache(self) -> None:
-        """Release the optional native ReductionKernel closure cache."""
+        """Release the optional native ReductionKernel topology cache."""
         self._ensure_finalized()
         if self._cpp is not None:
             clear = getattr(self._cpp, "clear_reduction_kernel_cache", None)

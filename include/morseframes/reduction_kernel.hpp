@@ -99,7 +99,11 @@ class ReductionKernelWorkspace {
           decltype(std::declval<const View&>()
                        .same_level_closure_entries()),
           decltype(std::declval<const View&>()
-                       .same_level_closure_ranges())>> : std::true_type {};
+                       .same_level_closure_ranges()),
+          decltype(std::declval<const View&>()
+                       .same_level_coboundary_entries()),
+          decltype(std::declval<const View&>()
+                       .same_level_coboundary_ranges())>> : std::true_type {};
 
   using Clock = std::chrono::steady_clock;
   // A tetrahedron has 15 nonempty faces and admits at most seven local pairs.
@@ -585,6 +589,40 @@ class ReductionKernelWorkspace {
     return cells.ranges[bucket_index_[simplex]];
   }
 
+  bool use_precomputed_cache() const {
+    if constexpr (HasSameLevelClosureCache<ComplexView>::value) {
+      const bool parallel_levels =
+          options_.policy == ReductionKernelExecutionPolicy::Parallel &&
+          executor_ != nullptr && executor_->worker_count() > 1;
+      return !parallel_levels && complex_.has_same_level_closure_cache();
+    }
+    return false;
+  }
+
+  template <typename Function>
+  void visit_same_level_coboundary(
+      SimplexId simplex, LevelId level, bool use_cache,
+      Function&& function) const {
+    if constexpr (HasSameLevelClosureCache<ComplexView>::value) {
+      if (use_cache) {
+        const auto& ranges = complex_.same_level_coboundary_ranges();
+        const auto& entries = complex_.same_level_coboundary_entries();
+        const auto [first, last] = ranges[simplex];
+        for (std::size_t index = first; index < last; ++index) {
+          if (!function(entries[index])) {
+            return;
+          }
+        }
+        return;
+      }
+    }
+    for (SimplexId coface : complex_.coboundary(simplex)) {
+      if (complex_.level(coface) == level && !function(coface)) {
+        return;
+      }
+    }
+  }
+
   void build_level_cells(
       const std::vector<SimplexId>& bucket, bool enabled,
       LevelScratch& scratch, LevelCells& cells) const {
@@ -593,10 +631,7 @@ class ReductionKernelWorkspace {
       return;
     }
     if constexpr (HasSameLevelClosureCache<ComplexView>::value) {
-      const bool parallel_levels =
-          options_.policy == ReductionKernelExecutionPolicy::Parallel &&
-          executor_ != nullptr && executor_->worker_count() > 1;
-      if (!parallel_levels && complex_.has_same_level_closure_cache()) {
+      if (use_precomputed_cache()) {
         cells.cached_entries = &complex_.same_level_closure_entries();
         cells.cached_ranges = &complex_.same_level_closure_ranges();
         return;
@@ -688,22 +723,30 @@ class ReductionKernelWorkspace {
       bool allow_parallelism) const {
     auto& facet_flags = scratch.facet_flags;
     auto& coboundary_visits = scratch.coboundary_visits;
+    const bool use_cache = use_precomputed_cache();
     std::fill(facet_flags.begin(), facet_flags.end(), 0);
     std::fill(coboundary_visits.begin(), coboundary_visits.end(), 0);
     const std::size_t parallel_tasks = parallel_for_indices(
         bucket.size(), [this, level, &bucket, &facet_flags,
-                        &coboundary_visits](std::size_t index) {
+                        &coboundary_visits, use_cache](std::size_t index) {
           const SimplexId simplex = bucket[index];
           if (!active_[simplex]) {
             return;
           }
-          for (SimplexId coface : complex_.coboundary(simplex)) {
-            if constexpr (CollectMetrics) {
-              ++coboundary_visits[index];
-            }
-            if (complex_.level(coface) == level && active_[coface]) {
-              return;
-            }
+          bool has_active_coface = false;
+          visit_same_level_coboundary(
+              simplex, level, use_cache, [&](SimplexId coface) {
+                if constexpr (CollectMetrics) {
+                  ++coboundary_visits[index];
+                }
+                if (active_[coface]) {
+                  has_active_coface = true;
+                  return false;
+                }
+                return true;
+              });
+          if (has_active_coface) {
+            return;
           }
           facet_flags[index] = 1;
         }, allow_parallelism);
@@ -823,6 +866,7 @@ class ReductionKernelWorkspace {
     }
 
     const auto reduction_start = profile_start<CollectMetrics>();
+    const bool use_cache = use_precomputed_cache();
     std::array<std::uint8_t, kInlineCellCapacity> inline_removed{};
     std::vector<std::uint8_t> overflow_removed(
         cell.size() > inline_removed.size() ? cell.size() : 0, 0);
@@ -858,30 +902,29 @@ class ReductionKernelWorkspace {
         SimplexId unique_coface = kInvalidSimplex;
         std::size_t unique_coface_index = cell.size();
         std::size_t coface_count = 0;
-        for (SimplexId coface : complex_.coboundary(sigma)) {
-          if constexpr (CollectMetrics) {
-            ++result.local_coboundary_visits;
-          }
-          if (complex_.level(coface) != level || !active_[coface]) {
-            continue;
-          }
-          if constexpr (CollectMetrics) {
-            ++result.local_membership_tests;
-          }
-          const std::size_t coface_index = cell.index_of(coface);
-          if (coface_index == cell.size()) {
-            continue;
-          }
-          if (is_locally_removed(coface_index)) {
-            continue;
-          }
-          unique_coface = coface;
-          unique_coface_index = coface_index;
-          ++coface_count;
-          if (coface_count > 1) {
-            break;
-          }
-        }
+        visit_same_level_coboundary(
+            sigma, level, use_cache, [&](SimplexId coface) {
+              if constexpr (CollectMetrics) {
+                ++result.local_coboundary_visits;
+              }
+              if (!active_[coface]) {
+                return true;
+              }
+              if constexpr (CollectMetrics) {
+                ++result.local_membership_tests;
+              }
+              const std::size_t coface_index = cell.index_of(coface);
+              if (coface_index == cell.size()) {
+                return true;
+              }
+              if (is_locally_removed(coface_index)) {
+                return true;
+              }
+              unique_coface = coface;
+              unique_coface_index = coface_index;
+              ++coface_count;
+              return coface_count <= 1;
+            });
         if (coface_count == 1 && facet_incidence_[unique_coface] == 1) {
           reduction_sigma = sigma;
           reduction_tau = unique_coface;

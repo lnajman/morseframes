@@ -36,6 +36,8 @@ class SimplicialStrategyBenchmarkTest(unittest.TestCase):
         algorithms = (
             "process-lower-stars",
             "process-lower-stars-parallel",
+            "flooding-reduction-kernel",
+            "flooding-reduction-kernel-parallel",
             "f-max",
             "f-min",
         )
@@ -52,12 +54,29 @@ class SimplicialStrategyBenchmarkTest(unittest.TestCase):
         self.assertTrue(all(row.barcode_matches_standard for row in rows))
         process = rows[0]
         parallel = rows[1]
+        kernel = rows[2]
+        parallel_kernel = rows[3]
         self.assertTrue(process.sequence_matches_process_lower_stars)
         self.assertTrue(parallel.sequence_matches_process_lower_stars)
         self.assertEqual(
             process.critical_simplices_by_dimension,
             parallel.critical_simplices_by_dimension,
         )
+        self.assertEqual(parallel.max_workers, 2)
+        self.assertEqual(parallel_kernel.max_workers, 2)
+        self.assertEqual(
+            kernel.critical_simplices_by_dimension,
+            parallel_kernel.critical_simplices_by_dimension,
+        )
+        if process.cpp_backend:
+            self.assertTrue(kernel.reduction_kernel_metrics_available)
+            self.assertTrue(parallel_kernel.reduction_kernel_metrics_available)
+            self.assertGreater(kernel.reduction_kernel_rounds, 0)
+            self.assertLessEqual(
+                parallel_kernel.reduction_kernel_executor_workers, 2
+            )
+        else:
+            self.assertFalse(kernel.reduction_kernel_metrics_available)
         for row in rows:
             self.assertEqual(
                 sum(row.critical_simplices_by_dimension),
@@ -82,6 +101,14 @@ class SimplicialStrategyBenchmarkTest(unittest.TestCase):
             table = table_path.read_text()
         self.assertIn("Critical/F-Max", table)
         self.assertIn("ProcessLowerStars", table)
+        self.assertIn("Reduction kernel", table)
+
+        with tempfile.TemporaryDirectory() as directory:
+            kernel_table_path = Path(directory) / "kernel.tex"
+            render.render_kernel_table(serialized, kernel_table_path)
+            kernel_table = kernel_table_path.read_text()
+        self.assertIn("Facet batches", kernel_table)
+        self.assertIn("Reduction kernel", kernel_table)
 
 
 if __name__ == "__main__":

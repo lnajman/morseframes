@@ -24,6 +24,8 @@ import morseframes as mp  # noqa: E402
 DEFAULT_ALGORITHMS = (
     mp.PROCESS_LOWER_STARS_SEQUENCE,
     mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+    mp.FLOODING_REDUCTION_KERNEL_SEQUENCE,
+    mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
     mp.F_MAX_SEQUENCE,
     mp.F_MIN_SEQUENCE,
     mp.COREDUCTION_SEQUENCE,
@@ -60,6 +62,24 @@ class SimplicialStrategyBenchmarkRow:
     sequence_seconds_per_eliminated_simplex: float
     sequence_speedup_vs_f_max: float
     total_speedup_vs_f_max: float
+    reduction_kernel_metrics_available: bool
+    reduction_kernel_levels: int
+    reduction_kernel_rounds: int
+    reduction_kernel_facet_kernels: int
+    reduction_kernel_reductions: int
+    reduction_kernel_perforations: int
+    reduction_kernel_parallel_batches: int
+    reduction_kernel_max_parallel_facets: int
+    reduction_kernel_parallel_level_batches: int
+    reduction_kernel_max_parallel_levels: int
+    reduction_kernel_executor_workers: int
+    reduction_kernel_aggregation_rounds: int
+    reduction_kernel_cumulative_facet_seconds: float
+    reduction_kernel_cumulative_essential_seconds: float
+    reduction_kernel_cumulative_core_seconds: float
+    reduction_kernel_cumulative_local_reduction_seconds: float
+    reduction_kernel_cumulative_aggregation_seconds: float
+    reduction_kernel_cumulative_merge_seconds: float
 
 
 @dataclass(frozen=True)
@@ -70,6 +90,21 @@ class _Measurement:
     sequence_seconds: float
     persistence_seconds: float
     total_seconds: float
+    frame_metrics: dict[str, object]
+
+
+PARALLEL_ALGORITHMS = {
+    mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+    mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+}
+
+
+def _metric_int(metrics: dict[str, object], name: str) -> int:
+    return int(metrics.get(f"sequence_reduction_kernel_{name}", 0))
+
+
+def _metric_seconds(metrics: dict[str, object], name: str) -> float:
+    return 1.0e-9 * _metric_int(metrics, f"{name}_nanoseconds")
 
 
 def make_injective_terrain(seed: int, grid_size: int) -> mp.FilteredComplex:
@@ -196,11 +231,7 @@ def benchmark_terrain(
     measurements: list[_Measurement] = []
 
     for algorithm in selected_algorithms:
-        max_workers = (
-            parallel_workers
-            if algorithm == mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE
-            else None
-        )
+        max_workers = parallel_workers if algorithm in PARALLEL_ALGORITHMS else None
         for _ in range(warmups):
             _run_pipeline(complex_, algorithm, max_workers)
 
@@ -221,12 +252,26 @@ def benchmark_terrain(
                 sequence_seconds=sequence_seconds,
                 persistence_seconds=persistence_seconds,
                 total_seconds=total_seconds,
+                frame_metrics={},
             )
             if best is None or measurement.total_seconds < best.total_seconds:
                 best = measurement
         if best is None:
             raise RuntimeError("Benchmark did not run")
-        measurements.append(best)
+        profile = mp.profile_morse_reference_frame(
+            complex_, algorithm=algorithm, max_workers=max_workers
+        )
+        measurements.append(
+            _Measurement(
+                algorithm=best.algorithm,
+                max_workers=best.max_workers,
+                sequence=best.sequence,
+                sequence_seconds=best.sequence_seconds,
+                persistence_seconds=best.persistence_seconds,
+                total_seconds=best.total_seconds,
+                frame_metrics=profile.frame_metrics,
+            )
+        )
 
     f_max = next(
         measurement
@@ -242,6 +287,11 @@ def benchmark_terrain(
     for measurement in measurements:
         critical_count = len(measurement.sequence.critical_simplices)
         eliminated = complex_.size - critical_count
+        kernel_algorithm = measurement.algorithm in {
+            mp.FLOODING_REDUCTION_KERNEL_SEQUENCE,
+            mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+        }
+        kernel_metrics = measurement.frame_metrics
         rows.append(
             SimplicialStrategyBenchmarkRow(
                 family="injective-terrain",
@@ -292,6 +342,56 @@ def benchmark_terrain(
                     f_max.total_seconds / measurement.total_seconds
                     if measurement.total_seconds
                     else math.inf
+                ),
+                reduction_kernel_metrics_available=(
+                    kernel_algorithm and complex_.cpp_backend_active()
+                ),
+                reduction_kernel_levels=_metric_int(kernel_metrics, "levels"),
+                reduction_kernel_rounds=_metric_int(kernel_metrics, "rounds"),
+                reduction_kernel_facet_kernels=_metric_int(
+                    kernel_metrics, "facet_kernels"
+                ),
+                reduction_kernel_reductions=_metric_int(
+                    kernel_metrics, "reductions"
+                ),
+                reduction_kernel_perforations=_metric_int(
+                    kernel_metrics, "perforations"
+                ),
+                reduction_kernel_parallel_batches=_metric_int(
+                    kernel_metrics, "parallel_batches"
+                ),
+                reduction_kernel_max_parallel_facets=_metric_int(
+                    kernel_metrics, "max_parallel_facets"
+                ),
+                reduction_kernel_parallel_level_batches=_metric_int(
+                    kernel_metrics, "parallel_level_batches"
+                ),
+                reduction_kernel_max_parallel_levels=_metric_int(
+                    kernel_metrics, "max_parallel_levels"
+                ),
+                reduction_kernel_executor_workers=_metric_int(
+                    kernel_metrics, "executor_workers"
+                ),
+                reduction_kernel_aggregation_rounds=_metric_int(
+                    kernel_metrics, "aggregation_rounds"
+                ),
+                reduction_kernel_cumulative_facet_seconds=_metric_seconds(
+                    kernel_metrics, "facet"
+                ),
+                reduction_kernel_cumulative_essential_seconds=_metric_seconds(
+                    kernel_metrics, "essential"
+                ),
+                reduction_kernel_cumulative_core_seconds=_metric_seconds(
+                    kernel_metrics, "core"
+                ),
+                reduction_kernel_cumulative_local_reduction_seconds=_metric_seconds(
+                    kernel_metrics, "local_reduction"
+                ),
+                reduction_kernel_cumulative_aggregation_seconds=_metric_seconds(
+                    kernel_metrics, "aggregation"
+                ),
+                reduction_kernel_cumulative_merge_seconds=_metric_seconds(
+                    kernel_metrics, "merge"
                 ),
             )
         )

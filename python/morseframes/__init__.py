@@ -3277,20 +3277,26 @@ def profile_morse_reference_frame(
     complex_: FilteredComplex,
     *,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    max_workers: int | None = None,
 ) -> MorseReferenceProfile:
     """Profile a Morse-reference frame without running the pivot reduction."""
 
     algorithm = _normalize_morse_sequence_algorithm(algorithm)
+    native_max_workers = _normalize_parallel_max_workers(algorithm, max_workers)
     core_profiler = (
         getattr(_morse_core, "profile_morse_reference_frame_core", None)
         if _morse_core is not None and complex_._cpp is not None
         else None
     )
     if core_profiler is not None:
-        return _make_morse_reference_profile(dict(core_profiler(complex_._cpp, algorithm)))
+        return _make_morse_reference_profile(
+            dict(core_profiler(complex_._cpp, algorithm, native_max_workers))
+        )
 
     started = perf_counter()
-    frame = compute_morse_sequence_and_reference_map(complex_, algorithm=algorithm)
+    frame = compute_morse_sequence_and_reference_map(
+        complex_, algorithm=algorithm, max_workers=max_workers
+    )
     payload = _profile_morse_reference_frame_python(
         complex_,
         frame.sequence,
@@ -3756,13 +3762,21 @@ def cpp_profile_morse_reference_frame(
     cpp_complex: object,
     *,
     algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    max_workers: int | None = None,
 ) -> MorseReferenceProfile:
     _require_cpp_backend()
     profiler = getattr(_morse_core, "profile_morse_reference_frame_core", None)
     if profiler is None:
         raise RuntimeError("The C++ backend does not expose Morse reference profiling.")
+    normalized_algorithm = _normalize_morse_sequence_algorithm(algorithm)
     return _make_morse_reference_profile(
-        dict(profiler(cpp_complex, _normalize_morse_sequence_algorithm(algorithm)))
+        dict(
+            profiler(
+                cpp_complex,
+                normalized_algorithm,
+                _normalize_parallel_max_workers(normalized_algorithm, max_workers),
+            )
+        )
     )
 
 

@@ -186,30 +186,38 @@ MPLCONFIGDIR=../work/matplotlib-cache \
   python3 tools/render_simplicial_strategy_benchmark.py \
   --input ../work/simplicial_strategy_benchmark.csv \
   --figure-output docs/simplicial_strategy_comparison.svg \
-  --table-output docs/simplicial_strategy_comparison_table.tex
+  --table-output docs/simplicial_strategy_comparison_table.tex \
+  --kernel-table-output docs/reduction_kernel_metrics_table.tex
 ```
 
 Every measured Morse pipeline is checked against ordinary persistence for the
 same barcode. The output records critical counts by dimension, regular-pair
 counts, exact sequence agreement with ProcessLowerStars, and both construction
-and end-to-end timings. Each reported case uses the fastest of five measured
-runs after one warm-up.
+and end-to-end timings. Dedicated reduction-kernel fields record its levels,
+rounds, facet kernels, reductions, perforations, parallel batches, concurrency,
+and instrumented phase work. The phase durations are cumulative across tasks;
+for a parallel row they are not wall-clock durations. Each reported case uses
+the fastest of five measured runs after one warm-up.
 
 The initial Apple M1 Max run covers nine cases (three sizes by three seeds).
-ProcessLowerStars, its eight-worker version, F-Max, F-Min, and Saturated produce
-the same critical count in every case. Same-level reduction produces a median
-of 3.95 times as many critical simplices. Relative to F-Max, median end-to-end
-time is 2.32 times as large for sequential ProcessLowerStars and 1.56 times as
-large with eight workers. Thus the present implementation preserves F-Max's
-compression quality on this corpus, while parallel lower-star processing
-narrows but does not yet close the runtime gap.
+ProcessLowerStars, reduction kernels, both eight-worker versions, F-Max, F-Min,
+and Saturated produce the same critical count in every case. Same-level
+reduction produces a median of 3.95 times as many critical simplices. Relative
+to F-Max, median end-to-end time is 2.44 times as large for sequential
+ProcessLowerStars and 2.39 times as large for sequential reduction kernels.
+Eight-worker ProcessLowerStars improves to 1.57 times the F-Max time, whereas
+the current eight-worker reduction-kernel implementation grows to 8.22 times
+the F-Max time. Its unchanged structural counters, together with thousands of
+small parallel batches, point to parallel overhead rather than a different
+Morse complex.
 
 ![Simplicial strategy comparison](simplicial_strategy_comparison.svg)
 
 The grid-size aggregates are generated in
-`docs/simplicial_strategy_comparison_table.tex`. This is a MorseFrames-internal
-comparison; it does not replace the planned external benchmark against Robins'
-ProcessLowerStars implementation.
+`docs/simplicial_strategy_comparison_table.tex`, and the reduction-kernel
+operation and scheduling counters in `docs/reduction_kernel_metrics_table.tex`.
+This is a MorseFrames-internal comparison; it does not replace the planned
+external benchmark against Robins' ProcessLowerStars implementation.
 
 ## Roadmap and External Data
 

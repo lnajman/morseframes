@@ -14,10 +14,13 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = ROOT.parent / "simplicial_strategy_benchmark.csv"
 DEFAULT_FIGURE = ROOT / "docs" / "simplicial_strategy_comparison.svg"
 DEFAULT_TABLE = ROOT / "docs" / "simplicial_strategy_comparison_table.tex"
+DEFAULT_KERNEL_TABLE = ROOT / "docs" / "reduction_kernel_metrics_table.tex"
 
 ALGORITHM_ORDER = (
     "process-lower-stars",
     "process-lower-stars-parallel",
+    "flooding-reduction-kernel",
+    "flooding-reduction-kernel-parallel",
     "f-max",
     "f-min",
     "same-level-reduction",
@@ -26,6 +29,8 @@ ALGORITHM_ORDER = (
 ALGORITHM_LABELS = {
     "process-lower-stars": "ProcessLowerStars",
     "process-lower-stars-parallel": "ProcessLowerStars (8 workers)",
+    "flooding-reduction-kernel": "Reduction kernel",
+    "flooding-reduction-kernel-parallel": "Reduction kernel (8 workers)",
     "f-max": "F-Max",
     "f-min": "F-Min",
     "same-level-reduction": "Same-level reduction",
@@ -70,27 +75,34 @@ def render_figure(rows: list[dict[str, str]], output: Path) -> None:
         for algorithm in algorithms
     }
 
-    figure, axes = plt.subplots(1, 2, figsize=(10.6, 4.8), sharey=True)
+    figure, axes = plt.subplots(1, 2, figsize=(11.2, 5.6), sharey=True)
     y_positions = list(range(len(algorithms)))
     colors = [
-        "#174A7E" if algorithm.startswith("process-lower-stars") else "#60656F"
+        "#174A7E"
+        if algorithm.startswith("process-lower-stars")
+        else "#B4473D"
+        if algorithm.startswith("flooding-reduction-kernel")
+        else "#60656F"
         for algorithm in algorithms
     ]
-    markers = ["o", "s", "D", "^", "v", "P"]
-    for axis, summaries, title, xlabel in (
+    markers = ["o", "s", "D", "X", "P", "^", "v", "h"]
+    for axis, summaries, title, xlabel, logarithmic in (
         (
             axes[0],
             quality,
             "Critical simplices relative to F-Max",
             "Critical-count ratio (lower is better)",
+            False,
         ),
         (
             axes[1],
             time_ratio,
             "End-to-end time relative to F-Max",
             "Time ratio (lower is better)",
+            True,
         ),
     ):
+        panel_minimum = min(summary[0] for summary in summaries.values())
         panel_maximum = max(summary[2] for summary in summaries.values())
         for index, algorithm in enumerate(algorithms):
             minimum, median, maximum = summaries[algorithm]
@@ -121,7 +133,14 @@ def render_figure(rows: list[dict[str, str]], output: Path) -> None:
         axis.set_xlabel(xlabel)
         axis.set_yticks(y_positions)
         axis.set_yticklabels([ALGORITHM_LABELS[algorithm] for algorithm in algorithms])
-        axis.set_xlim(0, panel_maximum * 1.12)
+        if logarithmic:
+            axis.set_xscale("log", base=2)
+            axis.set_xlim(panel_minimum * 0.85, panel_maximum * 1.12)
+            ticks = [tick for tick in (1, 2, 4, 8, 16) if tick <= panel_maximum * 1.12]
+            axis.set_xticks(ticks)
+            axis.set_xticklabels([str(tick) for tick in ticks])
+        else:
+            axis.set_xlim(0, panel_maximum * 1.12)
         axis.grid(axis="x", color="#D9DDE3", linewidth=0.8)
         axis.spines["top"].set_visible(False)
         axis.spines["right"].set_visible(False)
@@ -197,11 +216,62 @@ def render_table(rows: list[dict[str, str]], output: Path) -> None:
     output.write_text("\n".join(lines) + "\n")
 
 
+def render_kernel_table(rows: list[dict[str, str]], output: Path) -> None:
+    kernel_algorithms = (
+        "flooding-reduction-kernel",
+        "flooding-reduction-kernel-parallel",
+    )
+    grouped: dict[tuple[int, str], list[dict[str, str]]] = defaultdict(list)
+    for row in rows:
+        if row["algorithm"] in kernel_algorithms:
+            grouped[(int(row["grid_size"]), row["algorithm"])].append(row)
+
+    lines = [
+        r"\begin{tabular}{rlrrrrrrrr}",
+        r"\toprule",
+        (
+            r"Grid & Strategy & Levels & Rounds & Facet kernels & Reductions & "
+            r"Perforations & Level batches & Facet batches & Max facets \\"
+        ),
+        r"\midrule",
+    ]
+    median = statistics.median
+    for grid_size in sorted({key[0] for key in grouped}):
+        for algorithm in kernel_algorithms:
+            group = grouped.get((grid_size, algorithm))
+            if not group:
+                continue
+            lines.append(
+                " & ".join(
+                    (
+                        str(grid_size),
+                        ALGORITHM_LABELS[algorithm],
+                        f'{median(int(row["reduction_kernel_levels"]) for row in group):.0f}',
+                        f'{median(int(row["reduction_kernel_rounds"]) for row in group):.0f}',
+                        f'{median(int(row["reduction_kernel_facet_kernels"]) for row in group):.0f}',
+                        f'{median(int(row["reduction_kernel_reductions"]) for row in group):.0f}',
+                        f'{median(int(row["reduction_kernel_perforations"]) for row in group):.0f}',
+                        f'{median(int(row["reduction_kernel_parallel_level_batches"]) for row in group):.0f}',
+                        f'{median(int(row["reduction_kernel_parallel_batches"]) for row in group):.0f}',
+                        f'{median(int(row["reduction_kernel_max_parallel_facets"]) for row in group):.0f}',
+                    )
+                )
+                + r" \\"
+            )
+        lines.append(r"\addlinespace")
+    lines.extend((r"\bottomrule", r"\end{tabular}"))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("\n".join(lines) + "\n")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--figure-output", type=Path, default=DEFAULT_FIGURE)
     parser.add_argument("--table-output", type=Path, default=DEFAULT_TABLE)
+    parser.add_argument(
+        "--kernel-table-output", type=Path, default=DEFAULT_KERNEL_TABLE
+    )
     return parser.parse_args()
 
 
@@ -210,6 +280,7 @@ def main() -> int:
     rows = read_rows(args.input)
     render_figure(rows, args.figure_output)
     render_table(rows, args.table_output)
+    render_kernel_table(rows, args.kernel_table_output)
     return 0
 
 

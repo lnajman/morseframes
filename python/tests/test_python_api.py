@@ -192,7 +192,9 @@ class PythonApiTest(unittest.TestCase):
         )
         self.assertEqual(parallel_frame.sequence.steps, sequence.steps)
         parallel_profile = mp.profile_morse_reference_frame(
-            complex_, algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE
+            complex_,
+            algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+            max_workers=2,
         )
         for metric in (
             "sequence_process_lower_stars_count",
@@ -543,6 +545,7 @@ class PythonApiTest(unittest.TestCase):
             parallel_kernel_profile = mp.profile_morse_reference_frame(
                 complex_,
                 algorithm="flooding-reduction-kernel-parallel",
+                max_workers=2,
             )
             self.assertEqual(
                 parallel_kernel_profile.sequence_algorithm,
@@ -561,6 +564,12 @@ class PythonApiTest(unittest.TestCase):
                     "sequence_reduction_kernel_executor_workers"
                 ],
                 1,
+            )
+            self.assertLessEqual(
+                parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_executor_workers"
+                ],
+                2,
             )
             self.assertIn(
                 "sequence_reduction_kernel_essential_nanoseconds",

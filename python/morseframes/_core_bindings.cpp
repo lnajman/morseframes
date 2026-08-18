@@ -1184,7 +1184,8 @@ nb::dict benchmark_morse_reference_core(const PyFilteredComplex& complex,
 }
 
 nb::dict profile_morse_reference_frame_core(const PyFilteredComplex& complex,
-                                            const std::string& algorithm) {
+                                            const std::string& algorithm,
+                                            std::size_t max_workers) {
   require_finalized(complex);
   const std::string normalized_algorithm = normalize_sequence_algorithm(algorithm);
   if (normalized_algorithm == "flooding" || normalized_algorithm == "stack-flooding") {
@@ -1207,7 +1208,8 @@ nb::dict profile_morse_reference_frame_core(const PyFilteredComplex& complex,
       : normalized_algorithm == "process-lower-stars"
           ? frame_builder.build_process_lower_stars_reduction_input()
       : normalized_algorithm == "process-lower-stars-parallel"
-          ? frame_builder.build_process_lower_stars_parallel_reduction_input()
+          ? frame_builder.build_process_lower_stars_parallel_reduction_input(
+                max_workers)
       : normalized_algorithm == "f-min"
           ? frame_builder.build_f_min_reduction_input()
       : normalized_algorithm == "flooding-max"
@@ -1217,7 +1219,9 @@ nb::dict profile_morse_reference_frame_core(const PyFilteredComplex& complex,
       : normalized_algorithm == "flooding-reduction-kernel"
           ? frame_builder.build_flooding_reduction_kernel_reduction_input()
       : normalized_algorithm == "flooding-reduction-kernel-parallel"
-          ? frame_builder.build_flooding_reduction_kernel_parallel_reduction_input()
+          ? frame_builder
+                .build_flooding_reduction_kernel_parallel_reduction_input(
+                    max_workers)
       : normalized_algorithm == "flooding-minmax"
           ? frame_builder.build_flooding_minmax_reduction_input()
       : normalized_algorithm == "flooding-maxmin"
@@ -1604,7 +1608,8 @@ NB_MODULE(_morse_core, m) {
   m.def("profile_morse_reference_frame_core",
         &profile_morse_reference_frame_core,
         nb::arg("complex"),
-        nb::arg("algorithm") = "saturated");
+        nb::arg("algorithm") = "saturated",
+        nb::arg("max_workers") = 0);
   m.def("benchmark_coreduction_directions_core",
         &benchmark_coreduction_directions_core,
         nb::arg("complex"));

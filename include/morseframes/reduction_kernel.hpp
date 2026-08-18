@@ -194,6 +194,10 @@ class ReductionKernelWorkspace {
       if (facets.capacity() < bucket_size) {
         facets.reserve(bucket_size);
       }
+      active_simplices.clear();
+      if (active_simplices.capacity() < bucket_size) {
+        active_simplices.reserve(bucket_size);
+      }
       facet_results.clear();
       round_removed_simplices.clear();
       if (round_removed_simplices.capacity() < bucket_size) {
@@ -214,6 +218,7 @@ class ReductionKernelWorkspace {
     std::vector<std::uint8_t> facet_flags;
     std::vector<std::size_t> coboundary_visits;
     std::vector<SimplexId> facets;
+    std::vector<SimplexId> active_simplices;
     std::vector<FacetKernelResult> facet_results;
     std::vector<SimplexId> round_removed_simplices;
     LevelCells level_cells;
@@ -409,6 +414,7 @@ class ReductionKernelWorkspace {
           return complex_.dimension(simplex) >= 2;
         });
     scratch.prepare(bucket.size(), CollectMetrics);
+    scratch.active_simplices.assign(bucket.begin(), bucket.end());
     auto& level_cells = scratch.level_cells;
     build_level_cells(bucket, cache_level_cells, scratch, level_cells);
     profile_add<CollectMetrics>(metrics.closure_nanoseconds, closure_start);
@@ -431,15 +437,15 @@ class ReductionKernelWorkspace {
         }
         const auto essential_start = profile_start<CollectMetrics>();
         compute_facet_incidence<CollectMetrics>(
-            facets, bucket, level_cells, metrics,
+            facets, scratch.active_simplices, level_cells, metrics,
             allow_intra_level_parallelism);
         profile_add<CollectMetrics>(metrics.essential_nanoseconds,
                                     essential_start);
         scratch.round_removed_simplices.clear();
 
         const auto& facet_results = execute_facets<CollectMetrics>(
-            level, facets, bucket, level_cells, scratch.facet_results,
-            metrics, allow_intra_level_parallelism);
+            level, facets, scratch.active_simplices, level_cells,
+            scratch.facet_results, metrics, allow_intra_level_parallelism);
         const auto aggregation_start = profile_start<CollectMetrics>();
         if constexpr (CollectMetrics) {
           if (facet_results.size() > 1) {
@@ -724,9 +730,44 @@ class ReductionKernelWorkspace {
       LevelScratch& scratch,
       ReductionKernelMetrics& metrics,
       bool allow_parallelism) const {
+    auto& facets = scratch.facets;
+    facets.clear();
+    const std::size_t workers =
+        executor_ == nullptr ? 1 : executor_->worker_count();
+    const bool sequential_scan =
+        !allow_parallelism ||
+        options_.policy == ReductionKernelExecutionPolicy::Sequential ||
+        workers <= 1;
+    const bool use_cache = use_precomputed_cache();
+    if (sequential_scan) {
+      std::size_t active_count = 0;
+      for (SimplexId simplex : scratch.active_simplices) {
+        if (!active_[simplex]) {
+          continue;
+        }
+        scratch.active_simplices[active_count++] = simplex;
+        bool has_active_coface = false;
+        visit_same_level_coboundary(
+            simplex, level, use_cache, [&](SimplexId coface) {
+              if constexpr (CollectMetrics) {
+                ++metrics.facet_discovery_coboundary_visits;
+              }
+              if (active_[coface]) {
+                has_active_coface = true;
+                return false;
+              }
+              return true;
+            });
+        if (!has_active_coface) {
+          facets.push_back(simplex);
+        }
+      }
+      scratch.active_simplices.resize(active_count);
+      return facets;
+    }
+
     auto& facet_flags = scratch.facet_flags;
     auto& coboundary_visits = scratch.coboundary_visits;
-    const bool use_cache = use_precomputed_cache();
     std::fill(facet_flags.begin(), facet_flags.end(), 0);
     std::fill(coboundary_visits.begin(), coboundary_visits.end(), 0);
     const std::size_t parallel_tasks = parallel_for_indices(
@@ -760,8 +801,6 @@ class ReductionKernelWorkspace {
       }
     }
 
-    auto& facets = scratch.facets;
-    facets.clear();
     for (std::size_t index = 0; index < bucket.size(); ++index) {
       if (facet_flags[index]) {
         facets.push_back(bucket[index]);

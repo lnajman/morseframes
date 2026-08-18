@@ -252,6 +252,11 @@ Kernel-round merging is event-driven: only simplices named by accepted facet
 reductions are visited and cleared, avoiding two full level-bucket passes per
 round. Against the preceding topology-cache implementation, this reduces
 median cached gradient time by 7.1 percent in 2D and 5.7 percent in 3D.
+Sequential facet discovery also maintains an ordered compact list of active
+simplices. Removed entries are discarded while discovering the next facets,
+and the same list bounds incidence reset and low-dimensional cell construction.
+In the initial seven-repeat comparison against event-driven merging alone,
+cached median time falls by another 7.8 percent in 2D and 11.9 percent in 3D.
 
 ### Reusable ReductionKernel Topology Cache
 
@@ -266,17 +271,17 @@ PYTHONPATH=python python3 tools/benchmark_reduction_kernel_cache.py \
   --terrain-sizes 16 32 64 \
   --volume-sizes 4 8 12 16 \
   --seeds 0 1 2 \
-  --repeats 7 \
-  --warmups 1 \
+  --repeats 11 \
+  --warmups 2 \
   --output ../work/reduction_kernel_cache.csv
 ```
 
 Across all 21 cases, every cached gradient exactly matches its uncached
 counterpart and every cached run is faster. Median sequential speedup is
-1.42-fold on terrains and 1.51-fold on tetrahedral volumes. Median cache build
-costs are 0.23 ms and 1.57 ms, with median allocated footprints of 0.27 MiB and
+1.45-fold on terrains and 1.59-fold on tetrahedral volumes. Median cache build
+costs are 0.27 ms and 1.54 ms, with median allocated footprints of 0.27 MiB and
 1.65 MiB, respectively. The build cost is recovered after median counts of
-1.55 terrain gradients and 1.29 volume gradients. The largest `n=16` volume
+1.62 terrain gradients and 1.24 volume gradients. The largest `n=16` volume
 cache occupies 5.80 MiB. Multiworker ReductionKernel deliberately retains
 worker-local topology construction because shared-cache access did not improve
 its wall time.

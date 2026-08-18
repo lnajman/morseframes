@@ -275,6 +275,9 @@ round.
 Round merging visits only the simplices named by accepted reduction events.
 Their conflict markers are reset as they are removed, avoiding bucket-wide
 marker clearing and removal scans while preserving deterministic event order.
+Sequential facet discovery compacts an ordered active-simplex list in place.
+That list also bounds facet-incidence reset and uncached low-dimensional cell
+construction, so later rounds do not revisit already removed simplices.
 
 For repeated sequential gradients on an owning `FilteredComplex`, callers may
 invoke `complex_.prepare_reduction_kernel_cache()` once. ReductionKernel then

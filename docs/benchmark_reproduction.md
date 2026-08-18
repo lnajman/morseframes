@@ -196,15 +196,15 @@ MPLCONFIGDIR=../work/matplotlib-cache \
 The run contains 21 complexes and 231 measured rows. All parallel gradients
 match their sequential counterpart exactly, and all five approaches have zero
 critical-count difference from F-Max in every case. In 2D, sequential
-ProcessLowerStars and ReductionKernel take median times of 6.22 and 3.04 times
-the F-Max time. At eight workers these ratios fall to 3.51 and 1.89, so the
+ProcessLowerStars and ReductionKernel take median times of 6.20 and 3.08 times
+the F-Max time. At eight workers these ratios fall to 3.69 and 1.33, so the
 parallel ReductionKernel is the faster of the two. In 3D, the corresponding
-sequential ratios are 4.65 and 2.06; at eight workers they fall to 1.68 and
-0.68. ReductionKernel is therefore the faster parallel method in both
+sequential ratios are 4.70 and 2.14; at eight workers they fall to 1.81 and
+0.63. ReductionKernel is therefore the faster parallel method in both
 dimensions and is faster than F-Max over the aggregate 3D corpus. At grid
-sizes 12 and 16 it reaches 0.55 and 0.48 times the F-Max time, respectively.
-ReductionKernel scales from one to eight workers by 1.59-fold in 2D and
-3.18-fold in 3D, versus 1.73-fold and 2.80-fold for ProcessLowerStars. The
+sizes 12 and 16 it reaches 0.55 and 0.43 times the F-Max time, respectively.
+ReductionKernel scales from one to eight workers by 1.96-fold in 2D and
+3.42-fold in 3D, versus 1.62-fold and 2.71-fold for ProcessLowerStars. The
 lower 2D ReductionKernel speedup reflects its substantially faster one-worker
 implementation rather than a regression in eight-worker time.
 
@@ -220,6 +220,9 @@ to dynamic storage. Relative to the preceding cached-closure implementation,
 the median ReductionKernel/F-Max ratio falls from 5.51 to 3.04 sequentially in
 2D and from 3.74 to 2.06 sequentially in 3D; the eight-worker 3D ratio falls
 from 0.94 to 0.68.
+Dynamic level claiming then lowers the eight-worker ratio from 1.89 to 1.33 in
+2D and from 0.68 to 0.63 in 3D by eliminating level sorting and static
+simplex-count partitions.
 
 ![Gradient-only strategy comparison](gradient_strategy_comparison.svg)
 
@@ -358,10 +361,10 @@ MPLCONFIGDIR=../work/matplotlib-cache \
 ```
 
 Across the twelve cases, eight-worker ProcessLowerStars reaches a median
-gradient-construction speedup of 2.62, versus 3.07 for the reduction kernel.
-The corresponding median construction times are 3.00 ms and 1.22 ms, so the
+gradient-construction speedup of 2.77, versus 3.36 for the reduction kernel.
+The corresponding median construction times are 3.13 ms and 1.03 ms, so the
 optimized ReductionKernel is now faster in absolute time. Median eight-worker
-efficiencies are 0.33 and 0.38, respectively.
+efficiencies are 0.35 and 0.42, respectively.
 
 ![Tetrahedral worker scaling](tetrahedral_worker_scaling.svg)
 
@@ -392,14 +395,14 @@ python3 tools/render_tetrahedral_phase_profile.py \
   --table-output docs/tetrahedral_phase_profile_table.tex
 ```
 
-Across the twelve cases, eight-worker ProcessLowerStars reaches a 2.89-fold
-gradient-construction speedup; ReductionKernel reaches 3.62-fold. Their median
-eight-worker construction times are 3.09 ms and 1.13 ms, respectively. At
-eight workers, ProcessLowerStars spends 33.4 percent in global setup, 38.1
-percent in parallel local-star processing, 2.3 percent in ordered replay, and
-5.3 percent in builder initialization. ReductionKernel spends 84.1 percent of
-its diagnostic wall time processing levels; setup and replay account for 10.9
-and 4.2 percent. The CSV now also records kernel rounds, facet kernels, facet
+Across the twelve cases, eight-worker ProcessLowerStars reaches a 2.94-fold
+gradient-construction speedup; ReductionKernel reaches 3.65-fold. Their median
+eight-worker construction times are 3.06 ms and 1.06 ms, respectively. At
+eight workers, ProcessLowerStars spends 34.0 percent in global setup, 37.9
+percent in parallel local-star processing, 2.5 percent in ordered replay, and
+4.9 percent in builder initialization. ReductionKernel spends 82.5 percent of
+its diagnostic wall time processing levels; setup and replay account for 13.1
+and 3.9 percent. The CSV now also records kernel rounds, facet kernels, facet
 discovery scans, cached-cell visits, local candidate scans, coboundary scans,
 membership tests, and inline-buffer overflows. All measured triangular and
 tetrahedral kernels report zero inline-buffer overflows. For the `n=16`
@@ -414,10 +417,11 @@ The phase and concurrency aggregates are generated in
 
 ## Reduction-Kernel Scaling
 
-The optimized parallel scheduler assigns one load-balanced group of filtration
-levels to each worker. It disables nested facet tasks while multiple levels are
-running concurrently, avoiding thousands of tasks whose individual levels
-contain only a handful of simplices. A single large plateau still uses the
+The optimized parallel scheduler launches one long-lived task per worker. Each
+task dynamically claims the next filtration level from an atomic counter,
+avoiding both thousands of tiny executor tasks and the former sorting and
+static simplex-count partition. It disables nested facet tasks while multiple
+levels are running concurrently. A single large plateau still uses the
 facet-parallel reduction-kernel path.
 
 ```sh
@@ -437,11 +441,14 @@ MPLCONFIGDIR=../work/matplotlib-cache \
   --table-output docs/reduction_kernel_scaling_table.tex
 ```
 
-Across the same nine terrains, median construction speedup relative to one
-worker is 1.64x, 2.35x, and 2.96x at two, four, and eight workers. Median
-end-to-end speedup reaches 2.00x at eight workers. Every worker count is checked
-for the exact sequential reduction-kernel sequence and the standard barcode.
-The multilevel rows now use one coarse level batch and no nested facet batches.
+This older Python-level pipeline benchmark includes sequence-object
+materialization, reference maps, and persistence, so it is retained only as an
+overhead diagnostic rather than evidence for gradient speed. Across the nine
+terrains, median native-sequence speedups are 1.08x, 1.11x, and 1.10x at two,
+four, and eight workers; median end-to-end speedup is 1.02x at eight workers.
+Every worker count is checked for the exact sequential reduction-kernel
+sequence and the standard barcode. The gradient-only results above are the
+relevant measurements for the present study.
 
 ![Reduction-kernel scaling](reduction_kernel_scaling.svg)
 

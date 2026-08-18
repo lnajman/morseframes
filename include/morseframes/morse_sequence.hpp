@@ -1616,7 +1616,8 @@ class FSequenceBuilder {
     const auto level_start = profile_start();
     if (level_workers == 1 || num_levels <= 1) {
       for (LevelId level = 0; level < num_levels; ++level) {
-        level_results[level] = workspace.compute_level_isolated(level);
+        level_results[level] =
+            workspace.compute_level_isolated_reusing_scratch(level, 0);
       }
     } else {
       // Levels own disjoint workspace entries. Long-lived tasks dynamically
@@ -1632,7 +1633,7 @@ class FSequenceBuilder {
       futures.reserve(task_count);
       for (std::size_t task = 0; task < task_count; ++task) {
         futures.push_back(executor->submit(
-            [&next_level, num_levels, &workspace, &level_results]() {
+            [task, &next_level, num_levels, &workspace, &level_results]() {
               while (true) {
                 const LevelId level = next_level.fetch_add(
                     1, std::memory_order_relaxed);
@@ -1640,7 +1641,8 @@ class FSequenceBuilder {
                   return;
                 }
                 level_results[level] =
-                    workspace.compute_level_isolated(level, false);
+                    workspace.compute_level_isolated_reusing_scratch(
+                        level, task, false);
               }
             }));
       }

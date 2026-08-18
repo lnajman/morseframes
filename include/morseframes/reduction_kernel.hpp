@@ -153,23 +153,42 @@ class ReductionKernelWorkspace {
     std::size_t inline_event_overflows = 0;
   };
 
+  struct LevelCells {
+    bool enabled = false;
+    std::vector<SimplexId> entries;
+    std::vector<std::pair<std::size_t, std::size_t>> ranges;
+  };
+
   struct LevelScratch {
-    explicit LevelScratch(std::size_t bucket_size, bool collect_metrics)
-        : facet_flags(bucket_size, 0),
-          coboundary_visits(collect_metrics ? bucket_size : 0, 0) {
-      facets.reserve(bucket_size);
+    void prepare(std::size_t bucket_size, bool collect_metrics) {
+      facet_flags.resize(bucket_size);
+      if (collect_metrics) {
+        coboundary_visits.resize(bucket_size);
+      } else {
+        coboundary_visits.clear();
+      }
+      facets.clear();
+      if (facets.capacity() < bucket_size) {
+        facets.reserve(bucket_size);
+      }
+      facet_results.clear();
+      included.resize(bucket_size);
+      cell_indices.clear();
+      if (cell_indices.capacity() < kInlineCellCapacity) {
+        cell_indices.reserve(kInlineCellCapacity);
+      }
+      level_cells.enabled = false;
+      level_cells.entries.clear();
+      level_cells.ranges.clear();
     }
 
     std::vector<std::uint8_t> facet_flags;
     std::vector<std::size_t> coboundary_visits;
     std::vector<SimplexId> facets;
     std::vector<FacetKernelResult> facet_results;
-  };
-
-  struct LevelCells {
-    bool enabled = false;
-    std::vector<SimplexId> entries;
-    std::vector<std::pair<std::size_t, std::size_t>> ranges;
+    LevelCells level_cells;
+    std::vector<std::uint8_t> included;
+    std::vector<std::size_t> cell_indices;
   };
 
   static std::uint64_t elapsed_nanoseconds(Clock::time_point start,
@@ -207,6 +226,9 @@ class ReductionKernelWorkspace {
       executor_ =
           std::make_shared<BoundedTaskExecutor>(options_.max_workers);
     }
+    const std::size_t scratch_count =
+        executor_ == nullptr ? 1 : executor_->worker_count();
+    level_scratch_.resize(scratch_count);
   }
 
   const ReductionKernelMetrics& metrics() const { return metrics_; }
@@ -222,6 +244,28 @@ class ReductionKernelWorkspace {
   // event buffers or counters between workers.
   ReductionKernelLevelResult compute_level_isolated(
       LevelId level, bool allow_intra_level_parallelism = true) {
+    LevelScratch scratch;
+    return compute_level_isolated_with_scratch(
+        level, allow_intra_level_parallelism, scratch);
+  }
+
+  ReductionKernelLevelResult compute_level_isolated_reusing_scratch(
+      LevelId level, std::size_t scratch_index,
+      bool allow_intra_level_parallelism = true) {
+    // A caller may process levels concurrently only when each long-lived task
+    // owns a distinct scratch index.
+    if (scratch_index >= level_scratch_.size()) {
+      throw std::out_of_range(
+          "Reduction-kernel scratch index exceeds executor workers.");
+    }
+    return compute_level_isolated_with_scratch(
+        level, allow_intra_level_parallelism, level_scratch_[scratch_index]);
+  }
+
+ private:
+  ReductionKernelLevelResult compute_level_isolated_with_scratch(
+      LevelId level, bool allow_intra_level_parallelism,
+      LevelScratch& scratch) {
     const auto& bucket = complex_.simplices_of_level(level);
     ReductionKernelLevelResult result;
     auto& events = result.events;
@@ -242,9 +286,10 @@ class ReductionKernelWorkspace {
         std::any_of(bucket.begin(), bucket.end(), [&](SimplexId simplex) {
           return complex_.dimension(simplex) >= 2;
         });
-    const auto level_cells = build_level_cells(bucket, cache_level_cells);
+    scratch.prepare(bucket.size(), options_.collect_metrics);
+    auto& level_cells = scratch.level_cells;
+    build_level_cells(bucket, cache_level_cells, scratch, level_cells);
     profile_add(metrics.closure_nanoseconds, closure_start);
-    LevelScratch scratch(bucket.size(), options_.collect_metrics);
 
     while (remaining > 0) {
       bool kernel_round_changed = false;
@@ -349,6 +394,7 @@ class ReductionKernelWorkspace {
     return result;
   }
 
+ public:
   static void accumulate_metrics(ReductionKernelMetrics& destination,
                                  const ReductionKernelMetrics& source) {
     destination.facet_nanoseconds += source.facet_nanoseconds;
@@ -399,18 +445,22 @@ class ReductionKernelWorkspace {
                          face_vertices.begin(), face_vertices.end());
   }
 
-  LevelCells build_level_cells(
-      const std::vector<SimplexId>& bucket, bool enabled) const {
-    LevelCells cells;
+  void build_level_cells(
+      const std::vector<SimplexId>& bucket, bool enabled,
+      LevelScratch& scratch, LevelCells& cells) const {
     cells.enabled = enabled;
     if (!enabled) {
-      return cells;
+      return;
     }
-    cells.entries.reserve(4 * bucket.size());
-    cells.ranges.reserve(bucket.size());
-    std::vector<std::uint8_t> included(bucket.size(), 0);
-    std::vector<std::size_t> cell_indices;
-    cell_indices.reserve(16);
+    if (cells.entries.capacity() < 4 * bucket.size()) {
+      cells.entries.reserve(4 * bucket.size());
+    }
+    if (cells.ranges.capacity() < bucket.size()) {
+      cells.ranges.reserve(bucket.size());
+    }
+    auto& included = scratch.included;
+    std::fill(included.begin(), included.end(), 0);
+    auto& cell_indices = scratch.cell_indices;
     for (std::size_t facet_index = 0; facet_index < bucket.size();
          ++facet_index) {
       const SimplexId facet = bucket[facet_index];
@@ -445,7 +495,6 @@ class ReductionKernelWorkspace {
       }
       cells.ranges.emplace_back(first, cells.entries.size());
     }
-    return cells;
   }
 
   template <typename Function>
@@ -752,6 +801,7 @@ class ReductionKernelWorkspace {
   std::vector<std::uint8_t> facet_incidence_;
   std::vector<std::uint8_t> round_removed_;
   std::vector<std::size_t> bucket_index_;
+  std::vector<LevelScratch> level_scratch_;
   ReductionKernelMetrics metrics_;
 };
 

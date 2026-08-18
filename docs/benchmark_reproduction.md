@@ -164,6 +164,52 @@ The exact paper-ready values are generated in
 scheduler study, not yet the comparison with Robins' implementation; that
 external benchmark remains a separate stage.
 
+## Unified Gradient-Only Strategy Comparison
+
+This is the central internal benchmark for discrete-gradient construction. It
+compares F-Max, sequential and parallel ProcessLowerStars, and sequential and
+parallel ReductionKernel on both triangulated 2D terrains and tetrahedral 3D
+volumes. The timed path calls only `profile_morse_sequence`: it does not build a
+reference map, a reduction plan, or a persistence diagram. Parallel sequences
+are constructed once outside the timing loop and must agree exactly with their
+sequential counterpart. Critical simplices are recorded by dimension and
+compared with F-Max.
+
+```sh
+PYTHONPATH=python python3 tools/benchmark_gradient_strategies.py \
+  --terrain-sizes 16 32 64 \
+  --volume-sizes 4 8 12 \
+  --seeds 0 1 2 \
+  --workers 1 2 4 8 \
+  --repeats 5 \
+  --warmups 1 \
+  --format csv \
+  --output ../work/gradient_strategy_benchmark.csv
+
+MPLCONFIGDIR=../work/matplotlib-cache \
+  python3 tools/render_gradient_strategy_benchmark.py \
+  --input ../work/gradient_strategy_benchmark.csv \
+  --figure-output docs/gradient_strategy_comparison.svg \
+  --table-output docs/gradient_strategy_comparison_table.tex
+```
+
+The run contains 18 complexes and 198 measured rows. All parallel gradients
+match their sequential counterpart exactly, and all five approaches have zero
+critical-count difference from F-Max in every case. In 2D, sequential
+ProcessLowerStars and ReductionKernel take median times of 5.54 and 5.82 times
+the F-Max time. At eight workers these ratios fall to 1.73 and 1.23, so the
+parallel ReductionKernel is the faster of the two. In 3D, the corresponding
+sequential ratios are 4.92 and 8.46; at eight workers they fall to 1.17 and
+1.39, so ProcessLowerStars is faster in absolute time. ReductionKernel scales
+more strongly from one to eight workers in both dimensions: 4.96-fold in 2D
+and 6.07-fold in 3D, versus 3.18-fold and 3.85-fold for ProcessLowerStars.
+
+![Gradient-only strategy comparison](gradient_strategy_comparison.svg)
+
+The aggregate values are generated in
+`docs/gradient_strategy_comparison_table.tex`; the raw CSV retains the exact
+critical counts by dimension for every complex and worker count.
+
 ## Simplicial Strategy Comparison
 
 The first internal comparison uses connected triangulated terrains rather than

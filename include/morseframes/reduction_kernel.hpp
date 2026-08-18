@@ -8,7 +8,9 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <new>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -17,16 +19,15 @@
 
 namespace morseframes {
 
-enum class ReductionKernelEventType {
-  Reduction,
-  Perforation,
-};
-
 struct ReductionKernelEvent {
-  ReductionKernelEventType type = ReductionKernelEventType::Perforation;
   SimplexId sigma = kInvalidSimplex;
   SimplexId tau = kInvalidSimplex;
+
+  bool is_perforation() const { return tau == kInvalidSimplex; }
 };
+
+static_assert(sizeof(ReductionKernelEvent) == 2 * sizeof(SimplexId));
+static_assert(std::is_trivially_destructible_v<ReductionKernelEvent>);
 
 enum class ReductionKernelExecutionPolicy {
   Sequential,
@@ -206,7 +207,8 @@ class ReductionKernelWorkspace {
 
     void push_back(const ReductionKernelEvent& event) {
       reserve(size_ + 1);
-      entries_[size_++] = event;
+      ::new (static_cast<void*>(entries_ + size_)) ReductionKernelEvent(event);
+      ++size_;
     }
 
     std::size_t size() const { return size_; }
@@ -385,7 +387,7 @@ class ReductionKernelWorkspace {
           for (std::size_t index = 0; index < facet_result.events.size();
                ++index) {
             const auto& event = facet_result.events[index];
-            if (event.type != ReductionKernelEventType::Reduction) {
+            if (event.is_perforation()) {
               throw std::logic_error(
                   "A facet kernel returned a non-reduction event.");
             }
@@ -433,8 +435,7 @@ class ReductionKernelWorkspace {
             "A nonempty reduction-kernel section has no facet.");
       }
       const SimplexId critical = facets.front();
-      events.push_back(ReductionKernelEvent{
-          ReductionKernelEventType::Perforation, critical, kInvalidSimplex});
+      events.push_back(ReductionKernelEvent{critical, kInvalidSimplex});
       active_[critical] = 0;
       --remaining;
       ++metrics.perforations;
@@ -786,8 +787,7 @@ class ReductionKernelWorkspace {
       mark_locally_removed(reduction_sigma_index);
       mark_locally_removed(reduction_tau_index);
       result.events.push_back(ReductionKernelEvent{
-          ReductionKernelEventType::Reduction, reduction_sigma,
-          reduction_tau});
+          reduction_sigma, reduction_tau});
     }
     if (options_.collect_metrics) {
       result.local_reduction_nanoseconds =

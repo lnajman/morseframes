@@ -1612,7 +1612,19 @@ class FSequenceBuilder {
       event_offsets[level + 1] =
           event_offsets[level] + complex_.simplices_of_level(level).size();
     }
-    std::vector<ReductionKernelEvent> level_events(event_offsets.back());
+    const std::size_t event_capacity = event_offsets.back();
+    if (event_capacity >
+        std::numeric_limits<std::size_t>::max() /
+            sizeof(ReductionKernelEvent)) {
+      throw std::length_error("Reduction-kernel event arena is too large.");
+    }
+    std::unique_ptr<unsigned char[]> event_arena;
+    if (event_capacity > 0) {
+      event_arena.reset(
+          new unsigned char[event_capacity * sizeof(ReductionKernelEvent)]);
+    }
+    auto* level_events =
+        reinterpret_cast<ReductionKernelEvent*>(event_arena.get());
     std::vector<std::size_t> level_event_counts(num_levels, 0);
     std::vector<ReductionKernelMetrics> level_metrics(num_levels);
     ReductionKernelMetrics kernel_metrics;
@@ -1624,7 +1636,7 @@ class FSequenceBuilder {
     if (level_workers == 1 || num_levels <= 1) {
       for (LevelId level = 0; level < num_levels; ++level) {
         level_metrics[level] = workspace.compute_level_isolated_into(
-            level, 0, level_events.data() + event_offsets[level],
+            level, 0, level_events + event_offsets[level],
             event_offsets[level + 1] - event_offsets[level],
             level_event_counts[level]);
       }
@@ -1643,7 +1655,7 @@ class FSequenceBuilder {
       for (std::size_t task = 0; task < task_count; ++task) {
         futures.push_back(executor->submit(
             [task, &next_level, num_levels, &workspace, &event_offsets,
-             &level_events, &level_event_counts, &level_metrics]() {
+             level_events, &level_event_counts, &level_metrics]() {
               while (true) {
                 const LevelId level = next_level.fetch_add(
                     1, std::memory_order_relaxed);
@@ -1651,7 +1663,7 @@ class FSequenceBuilder {
                   return;
                 }
                 level_metrics[level] = workspace.compute_level_isolated_into(
-                    level, task, level_events.data() + event_offsets[level],
+                    level, task, level_events + event_offsets[level],
                     event_offsets[level + 1] - event_offsets[level],
                     level_event_counts[level], false);
               }
@@ -1672,7 +1684,7 @@ class FSequenceBuilder {
       const std::size_t first = event_offsets[level];
       for (std::size_t index = level_event_counts[level]; index > 0; --index) {
         const auto& event = level_events[first + index - 1];
-        if (event.type == ReductionKernelEventType::Perforation) {
+        if (event.is_perforation()) {
           sequence.add_critical(event.sigma, level);
           if (sequence_metrics_ != nullptr) {
             ++sequence_metrics_->criticals;

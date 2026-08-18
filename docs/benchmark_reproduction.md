@@ -270,11 +270,12 @@ in `docs/tetrahedral_reduction_kernel_metrics_table.tex`.
 
 ## Tetrahedral Worker Scaling
 
-The focused 3D scaling study compares the parallel ProcessLowerStars and
-reduction-kernel implementations at one, two, four, and eight workers. Each
-algorithm uses its own one-worker parallel execution as the speedup baseline;
-every measured sequence is checked for exact agreement with the corresponding
-sequential implementation.
+The focused 3D scaling study times only discrete-gradient construction for the
+parallel ProcessLowerStars and reduction-kernel implementations at one, two,
+four, and eight workers. Each algorithm uses its own one-worker parallel
+execution as the speedup baseline; every measured sequence is checked for exact
+agreement with the corresponding sequential implementation. No reference map
+or persistence computation is performed.
 
 ```sh
 PYTHONPATH=python python3 tools/benchmark_tetrahedral_worker_scaling.py \
@@ -293,28 +294,27 @@ MPLCONFIGDIR=../work/matplotlib-cache \
   --table-output docs/tetrahedral_worker_scaling_table.tex
 ```
 
-Across the nine cases, eight-worker ProcessLowerStars reaches median
-construction and end-to-end speedups of 2.69 and 1.81, respectively. The
-reduction kernel reaches 3.80 and 2.41. Median end-to-end time is 1.12 times
-F-Max for ProcessLowerStars and 1.20 times F-Max for the reduction kernel; on
-the largest volumes those ratios fall to 1.07 and 1.09. The reduction kernel
-still scales more strongly from its slower one-worker baseline, while parallel
-owner/key setup lets ProcessLowerStars attain the lower absolute runtime.
-Persistence and other serial work limit end-to-end scaling for both algorithms.
+Across the nine cases, eight-worker ProcessLowerStars reaches a median
+gradient-construction speedup of 3.76, versus 5.85 for the reduction kernel.
+The corresponding median construction times are 9.25 ms and 10.50 ms, so
+ProcessLowerStars remains faster in absolute time despite the reduction
+kernel's stronger scaling from its slower one-worker baseline. Median
+eight-worker efficiencies are 0.47 and 0.73, respectively.
 
 ![Tetrahedral worker scaling](tetrahedral_worker_scaling.svg)
 
 The grid-size aggregates are generated in
 `docs/tetrahedral_worker_scaling_table.tex`.
 
-## Tetrahedral Phase Profile
+## Gradient-only Tetrahedral Phase Profile
 
-The native profiler separates ProcessLowerStars into builder initialization,
-global lower-star setup, local-star processing, and ordered event replay. For
-parallel runs it also records cumulative, minimum, and maximum task times in
-addition to the existing simplex-load counters. The comparison uses the same
-one- and eight-worker configurations for ProcessLowerStars and reduction
-kernels.
+This benchmark times only construction of the discrete gradient. It invokes
+`FSequenceBuilder` with a no-op callback: no reference map, reduction plan, or
+persistence computation occurs in the measured path. The native profiler
+separates ProcessLowerStars into builder initialization, global lower-star
+setup, local-star processing, and ordered event replay. It also records
+critical-simplex counts by dimension and checks every parallel gradient against
+the corresponding sequential result.
 
 ```sh
 PYTHONPATH=python python3 tools/benchmark_tetrahedral_phase_profile.py \
@@ -330,19 +330,17 @@ python3 tools/render_tetrahedral_phase_profile.py \
   --table-output docs/tetrahedral_phase_profile_table.tex
 ```
 
-At eight workers, median ProcessLowerStars time is 27.2 percent global setup,
-29.6 percent parallel local-star processing, 28.0 percent ordered replay, and
-2.8 percent builder initialization. The local tasks achieve 6.59-fold effective
-overlap. Their median simplex-load imbalance is only 1.0008 and measured
-task-time imbalance is 1.15, so load partitioning is not the principal scaling
-limit. On the largest volumes, setup is 26.4 percent, local work is 30.0 percent,
-and replay is 29.9 percent.
-
-For the reduction kernel, the callback share grows from about 4 percent at one
-worker to 19.0 percent at eight workers, and to 21.3 percent on the largest
-volumes. The ProcessLowerStars setup optimization has shifted its next target
-to ordered replay/reference updates, while future reduction-kernel work should
-focus on the same serial callbacks and the downstream persistence stage.
+Across the nine cases, eight-worker ProcessLowerStars reaches a 3.87-fold
+gradient-construction speedup; the reduction kernel reaches 6.04-fold from its
+slower one-worker baseline. ProcessLowerStars remains faster in absolute time:
+the median eight-worker construction times are 9.03 ms and 10.02 ms,
+respectively. At eight workers, ProcessLowerStars spends 36.8 percent in global
+setup, 42.0 percent in parallel local-star processing, 2.7 percent in ordered
+replay, and 3.6 percent in builder initialization. Its local tasks achieve
+6.46-fold effective overlap. Median simplex-load imbalance is 1.0008 and
+measured task-time imbalance is 1.21, so task balance is not the principal
+remaining limit. These figures deliberately make no claim about persistence
+performance.
 
 The phase and concurrency aggregates are generated in
 `docs/tetrahedral_phase_profile_table.tex`.

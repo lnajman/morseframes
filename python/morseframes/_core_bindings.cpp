@@ -398,6 +398,85 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
   return result;
 }
 
+nb::dict sequence_metrics_to_python(const morseframes::MorseSequenceBuildMetrics& metrics) {
+  nb::dict result;
+  result["init_nanoseconds"] = metrics.init_nanoseconds;
+  result["candidate_seed_nanoseconds"] = metrics.candidate_seed_nanoseconds;
+  result["candidate_loop_nanoseconds"] = metrics.candidate_loop_nanoseconds;
+  result["emit_nanoseconds"] = metrics.emit_nanoseconds;
+  result["callback_nanoseconds"] = metrics.callback_nanoseconds;
+  result["replay_nanoseconds"] = metrics.replay_nanoseconds;
+  result["reduction_kernel_facet_nanoseconds"] =
+      metrics.reduction_kernel_facet_nanoseconds;
+  result["reduction_kernel_essential_nanoseconds"] =
+      metrics.reduction_kernel_essential_nanoseconds;
+  result["reduction_kernel_core_nanoseconds"] =
+      metrics.reduction_kernel_core_nanoseconds;
+  result["reduction_kernel_local_reduction_nanoseconds"] =
+      metrics.reduction_kernel_local_reduction_nanoseconds;
+  result["reduction_kernel_aggregation_nanoseconds"] =
+      metrics.reduction_kernel_aggregation_nanoseconds;
+  result["reduction_kernel_merge_nanoseconds"] =
+      metrics.reduction_kernel_merge_nanoseconds;
+  result["process_lower_stars_builder_init_nanoseconds"] =
+      metrics.process_lower_stars_builder_init_nanoseconds;
+  result["process_lower_stars_setup_nanoseconds"] =
+      metrics.process_lower_stars_setup_nanoseconds;
+  result["process_lower_stars_local_wall_nanoseconds"] =
+      metrics.process_lower_stars_local_wall_nanoseconds;
+  result["process_lower_stars_replay_nanoseconds"] =
+      metrics.process_lower_stars_replay_nanoseconds;
+  result["process_lower_stars_cumulative_task_nanoseconds"] =
+      metrics.process_lower_stars_cumulative_task_nanoseconds;
+  result["process_lower_stars_min_task_nanoseconds"] =
+      metrics.process_lower_stars_min_task_nanoseconds;
+  result["process_lower_stars_max_task_nanoseconds"] =
+      metrics.process_lower_stars_max_task_nanoseconds;
+  result["candidate_pushes"] = metrics.candidate_pushes;
+  result["candidate_pops"] = metrics.candidate_pops;
+  result["stale_candidate_skips"] = metrics.stale_candidate_skips;
+  result["level_mismatch_skips"] = metrics.level_mismatch_skips;
+  result["regular_pairs"] = metrics.regular_pairs;
+  result["criticals"] = metrics.criticals;
+  result["reduction_kernel_levels"] = metrics.reduction_kernel_levels;
+  result["reduction_kernel_rounds"] = metrics.reduction_kernel_rounds;
+  result["reduction_kernel_facet_kernels"] = metrics.reduction_kernel_facet_kernels;
+  result["reduction_kernel_reductions"] = metrics.reduction_kernel_reductions;
+  result["reduction_kernel_perforations"] = metrics.reduction_kernel_perforations;
+  result["reduction_kernel_parallel_batches"] =
+      metrics.reduction_kernel_parallel_batches;
+  result["reduction_kernel_max_parallel_facets"] =
+      metrics.reduction_kernel_max_parallel_facets;
+  result["reduction_kernel_parallel_level_batches"] =
+      metrics.reduction_kernel_parallel_level_batches;
+  result["reduction_kernel_max_parallel_levels"] =
+      metrics.reduction_kernel_max_parallel_levels;
+  result["reduction_kernel_executor_workers"] =
+      metrics.reduction_kernel_executor_workers;
+  result["reduction_kernel_facet_discovery_parallel_tasks"] =
+      metrics.reduction_kernel_facet_discovery_parallel_tasks;
+  result["reduction_kernel_essential_parallel_tasks"] =
+      metrics.reduction_kernel_essential_parallel_tasks;
+  result["reduction_kernel_aggregation_rounds"] =
+      metrics.reduction_kernel_aggregation_rounds;
+  result["reduction_kernel_aggregation_parallel_tasks"] =
+      metrics.reduction_kernel_aggregation_parallel_tasks;
+  result["process_lower_stars_count"] = metrics.process_lower_stars_count;
+  result["process_lower_stars_max_star_size"] =
+      metrics.process_lower_stars_max_star_size;
+  result["process_lower_stars_executor_workers"] =
+      metrics.process_lower_stars_executor_workers;
+  result["process_lower_stars_setup_parallel_tasks"] =
+      metrics.process_lower_stars_setup_parallel_tasks;
+  result["process_lower_stars_parallel_tasks"] =
+      metrics.process_lower_stars_parallel_tasks;
+  result["process_lower_stars_min_task_load"] =
+      metrics.process_lower_stars_min_task_load;
+  result["process_lower_stars_max_task_load"] =
+      metrics.process_lower_stars_max_task_load;
+  return result;
+}
+
 nb::dict reduction_result_to_python(const morseframes::MorseReferenceReductionResult& result) {
   nb::dict py_result;
   py_result["diagram"] = diagram_to_python(result.diagram);
@@ -670,6 +749,69 @@ PyMorseSequence build_sequence(const PyFilteredComplex& complex,
     throw std::invalid_argument("Unknown Morse sequence algorithm: " + algorithm);
   }
   return PyMorseSequence{morseframes::FSequenceBuilder(complex.complex).build_saturated()};
+}
+
+nb::dict profile_morse_sequence_core(const PyFilteredComplex& complex,
+                                     const std::string& algorithm,
+                                     std::size_t max_workers) {
+  require_finalized(complex);
+  const std::string normalized = normalize_sequence_algorithm(algorithm);
+  if (normalized == "flooding" || normalized == "stack-flooding") {
+    throw std::logic_error(
+        "This Morse sequence algorithm is reserved for a future implementation.");
+  }
+  if (!is_implemented_sequence_algorithm(normalized)) {
+    throw std::invalid_argument("Unknown Morse sequence algorithm: " + algorithm);
+  }
+
+  morseframes::MorseSequenceBuildMetrics metrics;
+  const auto total_started = Clock::now();
+  const auto builder_started = Clock::now();
+  morseframes::FSequenceBuilder builder(complex.complex, &metrics);
+  const auto builder_finished = Clock::now();
+  const auto builder_nanoseconds =
+      elapsed_nanoseconds(builder_started, builder_finished);
+  if (normalized == "process-lower-stars" ||
+      normalized == "process-lower-stars-parallel") {
+    metrics.process_lower_stars_builder_init_nanoseconds = builder_nanoseconds;
+  }
+
+  const auto build_started = Clock::now();
+  morseframes::MorseSequence sequence =
+      normalized == "plateau-greedy" ? builder.build_plateau_greedy()
+      : normalized == "same-level-reduction" ? builder.build_same_level_reduction()
+      : normalized == "f-max" ? builder.build_f_max()
+      : normalized == "process-lower-stars" ? builder.build_process_lower_stars()
+      : normalized == "process-lower-stars-parallel"
+          ? builder.build_process_lower_stars_parallel(max_workers)
+      : normalized == "f-min" ? builder.build_f_min()
+      : normalized == "flooding-max" ? builder.build_flooding_max()
+      : normalized == "flooding-min" ? builder.build_flooding_min()
+      : normalized == "flooding-reduction-kernel"
+          ? builder.build_flooding_reduction_kernel()
+      : normalized == "flooding-reduction-kernel-parallel"
+          ? builder.build_flooding_reduction_kernel_parallel(max_workers)
+      : normalized == "flooding-minmax" ? builder.build_flooding_minmax()
+      : normalized == "flooding-maxmin" ? builder.build_flooding_maxmin()
+          : builder.build_saturated();
+  const auto build_finished = Clock::now();
+
+  nb::dict result;
+  result["num_simplices"] = complex.complex.size();
+  result["num_levels"] = complex.complex.num_levels();
+  result["num_critical_simplices"] = sequence.critical_simplices().size();
+  result["num_regular_pairs"] = sequence.steps().size() -
+                                sequence.critical_simplices().size();
+  result["critical_simplices_by_dimension"] =
+      critical_simplices_by_dimension(complex.complex, sequence);
+  result["sequence_algorithm"] = normalized;
+  result["builder_init_nanoseconds"] = builder_nanoseconds;
+  result["sequence_build_nanoseconds"] =
+      elapsed_nanoseconds(build_started, build_finished);
+  result["construction_nanoseconds"] =
+      elapsed_nanoseconds(total_started, build_finished);
+  result["metrics"] = sequence_metrics_to_python(metrics);
+  return result;
 }
 
 PyMorseReferenceFrame build_sequence_and_reference_map(const PyFilteredComplex& complex,
@@ -1623,6 +1765,11 @@ NB_MODULE(_morse_core, m) {
         nb::arg("frame_mode") = "fused");
   m.def("profile_morse_reference_frame_core",
         &profile_morse_reference_frame_core,
+        nb::arg("complex"),
+        nb::arg("algorithm") = "saturated",
+        nb::arg("max_workers") = 0);
+  m.def("profile_morse_sequence_core",
+        &profile_morse_sequence_core,
         nb::arg("complex"),
         nb::arg("algorithm") = "saturated",
         nb::arg("max_workers") = 0);

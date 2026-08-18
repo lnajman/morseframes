@@ -53,7 +53,7 @@ def render_table(rows: list[dict[str, str]], output: Path) -> None:
         r"\begin{tabular}{rlrrrrrrrrr}",
         r"\toprule",
         (
-            r"Grid & Strategy & Workers & Sequence (ms) & Core (\%) & Callback (\%) & "
+            r"Grid & Strategy & Workers & Gradient (ms) & Build (\%) & M simplex/s & "
             r"Builder (\%) & Setup (\%) & Local (\%) & Replay (\%) & Task parallelism \\"
         ),
         r"\midrule",
@@ -70,12 +70,12 @@ def render_table(rows: list[dict[str, str]], output: Path) -> None:
                             str(grid_size),
                             STRATEGY_LABELS[strategy],
                             str(workers),
-                            f'{1000.0 * _median(group, "sequence_total_seconds"):.2f}',
+                            f'{1000.0 * _median(group, "construction_seconds"):.2f}',
                             _percent(
-                                _median(group, "sequence_core_seconds")
-                                / _median(group, "sequence_total_seconds")
+                                _median(group, "sequence_build_seconds")
+                                / _median(group, "construction_seconds")
                             ),
-                            _percent(_median(group, "callback_share")),
+                            f'{1.0e-6 * _median(group, "simplices_per_second"):.2f}',
                             _percent(
                                 _median(
                                     group,

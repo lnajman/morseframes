@@ -57,8 +57,8 @@ def render_figure(rows: list[dict[str, str]], output: Path) -> None:
 
     figure, axes = plt.subplots(1, 2, figsize=(10.8, 4.8), sharex=True)
     for axis, column, title in (
-        (axes[0], "sequence_speedup_vs_one_worker", "Construction speedup"),
-        (axes[1], "total_speedup_vs_one_worker", "End-to-end speedup"),
+        (axes[0], "gradient_speedup_vs_one_worker", "Gradient speedup"),
+        (axes[1], "simplices_per_second", "Gradient throughput"),
     ):
         for strategy in strategies:
             summaries = {
@@ -82,19 +82,25 @@ def render_figure(rows: list[dict[str, str]], output: Path) -> None:
                 capsize=3,
                 label=STRATEGY_LABELS[strategy],
             )
-        axis.plot(
-            workers,
-            workers,
-            color="#60656F",
-            linestyle=(0, (3, 3)),
-            linewidth=1.0,
-            label="Ideal scaling",
-        )
+        if column == "gradient_speedup_vs_one_worker":
+            axis.plot(
+                workers,
+                workers,
+                color="#60656F",
+                linestyle=(0, (3, 3)),
+                linewidth=1.0,
+                label="Ideal scaling",
+            )
         axis.set_title(title, loc="left")
         axis.set_xlabel("Workers")
-        axis.set_ylabel("Speedup relative to one worker")
+        axis.set_ylabel(
+            "Speedup relative to one worker"
+            if column == "gradient_speedup_vs_one_worker"
+            else "Simplices per second"
+        )
         axis.set_xticks(workers)
-        axis.set_ylim(0, max(workers) * 1.08)
+        if column == "gradient_speedup_vs_one_worker":
+            axis.set_ylim(0, max(workers) * 1.08)
         axis.grid(color="#D9DDE3", linewidth=0.8)
         axis.spines["top"].set_visible(False)
         axis.spines["right"].set_visible(False)
@@ -142,8 +148,8 @@ def render_table(rows: list[dict[str, str]], output: Path) -> None:
         r"\begin{tabular}{rlrrrrrr}",
         r"\toprule",
         (
-            r"Grid & Strategy & Workers & Simplices & Sequence (ms) & "
-            r"Sequence speedup & Total (ms) & Total speedup \\"
+            r"Grid & Strategy & Workers & Simplices & Gradient (ms) & "
+            r"Speedup & Efficiency & M simplex/s \\"
         ),
         r"\midrule",
     ]
@@ -161,10 +167,10 @@ def render_table(rows: list[dict[str, str]], output: Path) -> None:
                             STRATEGY_LABELS[strategy],
                             str(workers),
                             f'{int(group[0]["num_simplices"]):,}',
-                            f'{1000.0 * median(float(row["sequence_seconds"]) for row in group):.2f}',
-                            f'{median(float(row["sequence_speedup_vs_one_worker"]) for row in group):.2f}',
-                            f'{1000.0 * median(float(row["total_seconds"]) for row in group):.2f}',
-                            f'{median(float(row["total_speedup_vs_one_worker"]) for row in group):.2f}',
+                            f'{1000.0 * median(float(row["gradient_seconds"]) for row in group):.2f}',
+                            f'{median(float(row["gradient_speedup_vs_one_worker"]) for row in group):.2f}',
+                            f'{median(float(row["parallel_efficiency"]) for row in group):.2f}',
+                            f'{1.0e-6 * median(float(row["simplices_per_second"]) for row in group):.2f}',
                         )
                     )
                     + r" \\"

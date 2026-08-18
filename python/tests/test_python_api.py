@@ -1,6 +1,7 @@
 import random
 import unittest
 from itertools import combinations
+from unittest.mock import patch
 
 import morseframes as mp
 
@@ -149,6 +150,18 @@ def _gudhi_available():
 
 
 class PythonApiTest(unittest.TestCase):
+    def test_gradient_profile_python_fallback(self):
+        complex_ = injective_triangle_boundary_complex()
+        with patch.object(mp, "_morse_core", None):
+            profile = mp.profile_morse_sequence(
+                complex_, algorithm=mp.PROCESS_LOWER_STARS_SEQUENCE
+            )
+        self.assertEqual(profile.num_critical_simplices, 2)
+        self.assertEqual(profile.num_regular_pairs, 2)
+        self.assertEqual(profile.critical_simplices_by_dimension, (1, 1))
+        self.assertGreater(profile.construction_seconds, 0.0)
+        self.assertEqual(profile.metrics, {})
+
     def test_process_lower_stars_exact_order_and_contract(self):
         complex_ = injective_triangle_boundary_complex()
         sequence = mp.compute_morse_sequence(
@@ -195,6 +208,20 @@ class PythonApiTest(unittest.TestCase):
             complex_,
             algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
             max_workers=2,
+        )
+        gradient_profile = mp.profile_morse_sequence(
+            complex_,
+            algorithm=mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
+            max_workers=2,
+        )
+        self.assertEqual(gradient_profile.num_critical_simplices, 2)
+        self.assertEqual(gradient_profile.num_regular_pairs, 2)
+        self.assertEqual(gradient_profile.critical_simplices_by_dimension, (1, 1))
+        self.assertGreater(gradient_profile.construction_seconds, 0.0)
+        self.assertGreater(gradient_profile.builder_init_seconds, 0.0)
+        self.assertNotIn("reference_update_nanoseconds", gradient_profile.metrics)
+        self.assertEqual(
+            gradient_profile.metrics["process_lower_stars_count"], 3
         )
         for metric in (
             "sequence_process_lower_stars_count",

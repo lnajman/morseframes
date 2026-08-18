@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Profile parallel phase costs on injective tetrahedral volumes."""
+"""Profile gradient-construction phase costs on injective tetrahedral volumes."""
 
 from __future__ import annotations
 
@@ -25,6 +25,10 @@ STRATEGIES = {
     "process-lower-stars": mp.PROCESS_LOWER_STARS_PARALLEL_SEQUENCE,
     "reduction-kernel": mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
 }
+SEQUENTIAL_STRATEGIES = {
+    "process-lower-stars": mp.PROCESS_LOWER_STARS_SEQUENCE,
+    "reduction-kernel": mp.FLOODING_REDUCTION_KERNEL_SEQUENCE,
+}
 
 
 @dataclass(frozen=True)
@@ -40,11 +44,12 @@ class TetrahedralPhaseProfileRow:
     num_simplices: int
     num_levels: int
     num_critical_simplices: int
-    profile_seconds: float
-    sequence_total_seconds: float
-    sequence_core_seconds: float
-    callback_seconds: float
-    callback_share: float
+    critical_simplices_by_dimension: str
+    matches_sequential: bool
+    construction_seconds: float
+    builder_init_seconds: float
+    sequence_build_seconds: float
+    simplices_per_second: float
     process_lower_stars_builder_init_seconds: float
     process_lower_stars_builder_init_share: float
     process_lower_stars_setup_seconds: float
@@ -89,51 +94,53 @@ def benchmark_profile(
         raise ValueError(f"Unknown strategies: {', '.join(sorted(unknown))}")
 
     complex_ = strategy_benchmark.make_injective_volume(seed, grid_size)
+    sequential_steps = {
+        strategy: mp.compute_morse_sequence(
+            complex_, algorithm=SEQUENTIAL_STRATEGIES[strategy]
+        ).steps
+        for strategy in selected_strategies
+    }
     rows: list[TetrahedralPhaseProfileRow] = []
     for strategy in selected_strategies:
         algorithm = STRATEGIES[strategy]
         for worker_count in selected_workers:
             profiles = [
-                mp.profile_morse_reference_frame(
+                mp.profile_morse_sequence(
                     complex_, algorithm=algorithm, max_workers=worker_count
                 )
                 for _ in range(repeats)
             ]
-            profile = min(profiles, key=lambda candidate: candidate.profile_seconds)
-            metrics = profile.frame_metrics
-            sequence_total = _seconds(metrics, "sequence_total_nanoseconds")
-            sequence_core = _seconds(metrics, "sequence_core_nanoseconds")
-            callback = sum(
-                _seconds(metrics, name)
-                for name in (
-                    "reference_update_nanoseconds",
-                    "reduction_plan_nanoseconds",
-                    "release_cleanup_nanoseconds",
-                )
+            profile = min(
+                profiles, key=lambda candidate: candidate.construction_seconds
             )
+            metrics = profile.metrics
+            construction = profile.construction_seconds
             builder_init = _seconds(
-                metrics, "sequence_process_lower_stars_builder_init_nanoseconds"
+                metrics, "process_lower_stars_builder_init_nanoseconds"
             )
-            setup = _seconds(metrics, "sequence_process_lower_stars_setup_nanoseconds")
+            setup = _seconds(metrics, "process_lower_stars_setup_nanoseconds")
             local_wall = _seconds(
-                metrics, "sequence_process_lower_stars_local_wall_nanoseconds"
+                metrics, "process_lower_stars_local_wall_nanoseconds"
             )
             replay = _seconds(
-                metrics, "sequence_process_lower_stars_replay_nanoseconds"
+                metrics, "process_lower_stars_replay_nanoseconds"
             )
             cumulative_task = _seconds(
                 metrics,
-                "sequence_process_lower_stars_cumulative_task_nanoseconds",
+                "process_lower_stars_cumulative_task_nanoseconds",
             )
             min_task = _seconds(
-                metrics, "sequence_process_lower_stars_min_task_nanoseconds"
+                metrics, "process_lower_stars_min_task_nanoseconds"
             )
             max_task = _seconds(
-                metrics, "sequence_process_lower_stars_max_task_nanoseconds"
+                metrics, "process_lower_stars_max_task_nanoseconds"
             )
-            min_load = int(metrics.get("sequence_process_lower_stars_min_task_load", 0))
-            max_load = int(metrics.get("sequence_process_lower_stars_max_task_load", 0))
+            min_load = int(metrics.get("process_lower_stars_min_task_load", 0))
+            max_load = int(metrics.get("process_lower_stars_max_task_load", 0))
             is_process_lower_stars = strategy == "process-lower-stars"
+            parallel_steps = mp.compute_morse_sequence(
+                complex_, algorithm=algorithm, max_workers=worker_count
+            ).steps
             rows.append(
                 TetrahedralPhaseProfileRow(
                     family="injective-volume",
@@ -147,32 +154,38 @@ def benchmark_profile(
                     num_simplices=profile.num_simplices,
                     num_levels=profile.num_levels,
                     num_critical_simplices=profile.num_critical_simplices,
-                    profile_seconds=profile.profile_seconds,
-                    sequence_total_seconds=sequence_total,
-                    sequence_core_seconds=sequence_core,
-                    callback_seconds=callback,
-                    callback_share=_ratio(callback, sequence_total),
+                    critical_simplices_by_dimension=";".join(
+                        str(count)
+                        for count in profile.critical_simplices_by_dimension
+                    ),
+                    matches_sequential=(
+                        parallel_steps == sequential_steps[strategy]
+                    ),
+                    construction_seconds=construction,
+                    builder_init_seconds=profile.builder_init_seconds,
+                    sequence_build_seconds=profile.sequence_build_seconds,
+                    simplices_per_second=profile.simplices_per_second,
                     process_lower_stars_builder_init_seconds=builder_init,
                     process_lower_stars_builder_init_share=(
-                        _ratio(builder_init, sequence_total)
+                        _ratio(builder_init, construction)
                         if is_process_lower_stars
                         else math.nan
                     ),
                     process_lower_stars_setup_seconds=setup,
                     process_lower_stars_setup_share=(
-                        _ratio(setup, sequence_total)
+                        _ratio(setup, construction)
                         if is_process_lower_stars
                         else math.nan
                     ),
                     process_lower_stars_local_wall_seconds=local_wall,
                     process_lower_stars_local_wall_share=(
-                        _ratio(local_wall, sequence_total)
+                        _ratio(local_wall, construction)
                         if is_process_lower_stars
                         else math.nan
                     ),
                     process_lower_stars_replay_seconds=replay,
                     process_lower_stars_replay_share=(
-                        _ratio(replay, sequence_total)
+                        _ratio(replay, construction)
                         if is_process_lower_stars
                         else math.nan
                     ),
@@ -194,15 +207,15 @@ def benchmark_profile(
                     ),
                     process_lower_stars_setup_parallel_tasks=int(
                         metrics.get(
-                            "sequence_process_lower_stars_setup_parallel_tasks",
+                            "process_lower_stars_setup_parallel_tasks",
                             0,
                         )
                     ),
                     process_lower_stars_parallel_tasks=int(
-                        metrics.get("sequence_process_lower_stars_parallel_tasks", 0)
+                        metrics.get("process_lower_stars_parallel_tasks", 0)
                     ),
                     reduction_kernel_max_parallel_levels=int(
-                        metrics.get("sequence_reduction_kernel_max_parallel_levels", 0)
+                        metrics.get("reduction_kernel_max_parallel_levels", 0)
                     ),
                 )
             )

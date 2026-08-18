@@ -25,7 +25,10 @@ class TetrahedralPhaseProfileBenchmarkTest(unittest.TestCase):
         )
 
         self.assertEqual(len(rows), 4)
-        self.assertTrue(all(row.sequence_total_seconds > 0.0 for row in rows))
+        self.assertTrue(all(row.construction_seconds > 0.0 for row in rows))
+        self.assertTrue(all(row.simplices_per_second > 0.0 for row in rows))
+        self.assertTrue(all(row.matches_sequential for row in rows))
+        self.assertTrue(all(row.critical_simplices_by_dimension for row in rows))
         process_rows = [row for row in rows if row.strategy == "process-lower-stars"]
         self.assertTrue(
             all(row.process_lower_stars_setup_seconds > 0.0 for row in process_rows)

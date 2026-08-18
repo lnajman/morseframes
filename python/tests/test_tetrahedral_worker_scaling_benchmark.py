@@ -26,12 +26,11 @@ class TetrahedralWorkerScalingBenchmarkTest(unittest.TestCase):
         self.assertEqual(len(rows), 4)
         self.assertTrue(all(row.family == "injective-volume" for row in rows))
         self.assertTrue(all(row.sequence_matches_sequential for row in rows))
-        self.assertTrue(all(row.barcode_matches_standard for row in rows))
+        self.assertTrue(all(row.gradient_seconds > 0.0 for row in rows))
         for strategy in bench.STRATEGIES:
             strategy_rows = [row for row in rows if row.strategy == strategy]
             self.assertEqual([row.max_workers for row in strategy_rows], [1, 2])
-            self.assertEqual(strategy_rows[0].sequence_speedup_vs_one_worker, 1.0)
-            self.assertEqual(strategy_rows[0].total_speedup_vs_one_worker, 1.0)
+            self.assertEqual(strategy_rows[0].gradient_speedup_vs_one_worker, 1.0)
             self.assertEqual(
                 strategy_rows[0].critical_simplices_by_dimension,
                 strategy_rows[1].critical_simplices_by_dimension,
@@ -46,7 +45,7 @@ class TetrahedralWorkerScalingBenchmarkTest(unittest.TestCase):
             table = table_path.read_text()
         self.assertIn("ProcessLowerStars", table)
         self.assertIn("Reduction kernel", table)
-        self.assertIn("Sequence speedup", table)
+        self.assertIn("Gradient (ms)", table)
 
 
 if __name__ == "__main__":

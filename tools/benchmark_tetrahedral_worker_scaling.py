@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark worker scaling on injective tetrahedral volumes."""
+"""Benchmark gradient-construction worker scaling on tetrahedral volumes."""
 
 from __future__ import annotations
 
@@ -49,14 +49,10 @@ class TetrahedralWorkerScalingRow:
     num_critical_simplices: int
     critical_simplices_by_dimension: tuple[int, ...]
     sequence_matches_sequential: bool
-    barcode_matches_standard: bool
-    sequence_seconds: float
-    total_seconds: float
-    sequence_speedup_vs_one_worker: float
-    total_speedup_vs_one_worker: float
-    sequence_parallel_efficiency: float
-    total_parallel_efficiency: float
-    total_time_ratio_vs_f_max: float
+    gradient_seconds: float
+    gradient_speedup_vs_one_worker: float
+    parallel_efficiency: float
+    simplices_per_second: float
 
 
 def benchmark_scaling(
@@ -74,6 +70,10 @@ def benchmark_scaling(
         raise ValueError("workers must contain positive integers")
     if 1 not in selected_workers:
         raise ValueError("workers must include the one-worker baseline")
+    if repeats < 1:
+        raise ValueError("repeats must be positive")
+    if warmups < 0:
+        raise ValueError("warmups must be non-negative")
     unknown = set(selected_strategies) - STRATEGIES.keys()
     if unknown:
         raise ValueError(f"Unknown strategies: {', '.join(sorted(unknown))}")
@@ -83,9 +83,9 @@ def benchmark_scaling(
         strategy: mp.compute_morse_sequence(complex_, algorithm=STRATEGIES[strategy][0])
         for strategy in selected_strategies
     }
-    measured: dict[
-        str, list[tuple[int, strategy_benchmark.SimplicialStrategyBenchmarkRow]]
-    ] = {strategy: [] for strategy in selected_strategies}
+    measured: dict[str, list[tuple[int, mp.MorseSequenceProfile]]] = {
+        strategy: [] for strategy in selected_strategies
+    }
 
     for strategy in selected_strategies:
         _, parallel_algorithm = STRATEGIES[strategy]
@@ -97,15 +97,26 @@ def benchmark_scaling(
                 raise AssertionError(
                     f"{worker_count}-worker {strategy} differs from sequential"
                 )
-            rows = strategy_benchmark.benchmark_volume(
-                seed,
-                grid_size,
-                algorithms=(parallel_algorithm, mp.F_MAX_SEQUENCE),
-                parallel_workers=worker_count,
-                repeats=repeats,
-                warmups=warmups,
+            for _ in range(warmups):
+                mp.profile_morse_sequence(
+                    complex_,
+                    algorithm=parallel_algorithm,
+                    max_workers=worker_count,
+                )
+            profiles = [
+                mp.profile_morse_sequence(
+                    complex_,
+                    algorithm=parallel_algorithm,
+                    max_workers=worker_count,
+                )
+                for _ in range(repeats)
+            ]
+            measured[strategy].append(
+                (
+                    worker_count,
+                    min(profiles, key=lambda profile: profile.construction_seconds),
+                )
             )
-            measured[strategy].append((worker_count, rows[0]))
 
     output: list[TetrahedralWorkerScalingRow] = []
     for strategy in selected_strategies:
@@ -113,35 +124,30 @@ def benchmark_scaling(
             row for worker_count, row in measured[strategy] if worker_count == 1
         )
         for worker_count, row in measured[strategy]:
-            sequence_speedup = baseline.sequence_seconds / row.sequence_seconds
-            total_speedup = baseline.total_seconds / row.total_seconds
+            gradient_speedup = (
+                baseline.construction_seconds / row.construction_seconds
+            )
             output.append(
                 TetrahedralWorkerScalingRow(
                     family="injective-volume",
-                    name=row.name,
+                    name=f"injective-volume-n{grid_size}-seed{seed}",
                     seed=seed,
                     grid_size=grid_size,
                     strategy=strategy,
-                    algorithm=row.algorithm,
+                    algorithm=row.sequence_algorithm,
                     max_workers=worker_count,
                     repeats=repeats,
                     warmups=warmups,
-                    cpp_backend=row.cpp_backend,
+                    cpp_backend=mp.cpp_backend_active(complex_),
                     num_simplices=row.num_simplices,
                     num_levels=row.num_levels,
                     num_critical_simplices=row.num_critical_simplices,
-                    critical_simplices_by_dimension=(
-                        row.critical_simplices_by_dimension
-                    ),
+                    critical_simplices_by_dimension=row.critical_simplices_by_dimension,
                     sequence_matches_sequential=True,
-                    barcode_matches_standard=row.barcode_matches_standard,
-                    sequence_seconds=row.sequence_seconds,
-                    total_seconds=row.total_seconds,
-                    sequence_speedup_vs_one_worker=sequence_speedup,
-                    total_speedup_vs_one_worker=total_speedup,
-                    sequence_parallel_efficiency=sequence_speedup / worker_count,
-                    total_parallel_efficiency=total_speedup / worker_count,
-                    total_time_ratio_vs_f_max=1.0 / row.total_speedup_vs_f_max,
+                    gradient_seconds=row.construction_seconds,
+                    gradient_speedup_vs_one_worker=gradient_speedup,
+                    parallel_efficiency=gradient_speedup / worker_count,
+                    simplices_per_second=row.simplices_per_second,
                 )
             )
     return output

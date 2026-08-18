@@ -312,6 +312,34 @@ class PersistenceBenchmark:
 
 
 @dataclass(frozen=True)
+class MorseSequenceProfile:
+    """Gradient-construction timings and counters, excluding persistence."""
+
+    num_simplices: int
+    num_levels: int
+    num_critical_simplices: int
+    num_regular_pairs: int
+    critical_simplices_by_dimension: tuple[int, ...]
+    sequence_algorithm: str
+    builder_init_seconds: float
+    sequence_build_seconds: float
+    construction_seconds: float
+    metrics: dict[str, object] = field(default_factory=dict, repr=False, compare=False)
+
+    @property
+    def critical_ratio(self) -> float:
+        if self.num_simplices == 0:
+            return 0.0
+        return float(self.num_critical_simplices) / float(self.num_simplices)
+
+    @property
+    def simplices_per_second(self) -> float:
+        if self.construction_seconds == 0.0:
+            return inf
+        return float(self.num_simplices) / self.construction_seconds
+
+
+@dataclass(frozen=True)
 class MorseReferenceProfile:
     num_simplices: int
     num_levels: int
@@ -3307,6 +3335,63 @@ def profile_morse_reference_frame(
     return _make_morse_reference_profile(payload)
 
 
+def profile_morse_sequence(
+    complex_: FilteredComplex,
+    *,
+    algorithm: str = DEFAULT_MORSE_SEQUENCE_ALGORITHM,
+    max_workers: int | None = None,
+) -> MorseSequenceProfile:
+    """Profile gradient construction without references or persistence."""
+
+    algorithm = _normalize_morse_sequence_algorithm(algorithm)
+    native_max_workers = _normalize_parallel_max_workers(algorithm, max_workers)
+    core_profiler = (
+        getattr(_morse_core, "profile_morse_sequence_core", None)
+        if _morse_core is not None and complex_._cpp is not None
+        else None
+    )
+    if core_profiler is not None:
+        payload = dict(core_profiler(complex_._cpp, algorithm, native_max_workers))
+        return MorseSequenceProfile(
+            num_simplices=int(payload["num_simplices"]),
+            num_levels=int(payload["num_levels"]),
+            num_critical_simplices=int(payload["num_critical_simplices"]),
+            num_regular_pairs=int(payload["num_regular_pairs"]),
+            critical_simplices_by_dimension=tuple(
+                int(count) for count in payload["critical_simplices_by_dimension"]
+            ),
+            sequence_algorithm=str(payload["sequence_algorithm"]),
+            builder_init_seconds=1.0e-9 * int(payload["builder_init_nanoseconds"]),
+            sequence_build_seconds=1.0e-9 * int(payload["sequence_build_nanoseconds"]),
+            construction_seconds=1.0e-9 * int(payload["construction_nanoseconds"]),
+            metrics=dict(payload["metrics"]),
+        )
+
+    started = perf_counter()
+    sequence = compute_morse_sequence(
+        complex_, algorithm=algorithm, max_workers=max_workers
+    )
+    construction_seconds = perf_counter() - started
+    max_dimension = max(
+        (complex_.dimension(simplex) for simplex in range(complex_.size)), default=-1
+    )
+    critical_counts = [0] * (max_dimension + 1)
+    for simplex in sequence.critical_simplices:
+        critical_counts[complex_.dimension(simplex)] += 1
+    return MorseSequenceProfile(
+        num_simplices=complex_.size,
+        num_levels=complex_.num_levels,
+        num_critical_simplices=len(sequence.critical_simplices),
+        num_regular_pairs=sum(step.type == REGULAR_PAIR for step in sequence.steps),
+        critical_simplices_by_dimension=tuple(critical_counts),
+        sequence_algorithm=algorithm,
+        builder_init_seconds=0.0,
+        sequence_build_seconds=construction_seconds,
+        construction_seconds=construction_seconds,
+        metrics={},
+    )
+
+
 def profile_morse_sequence_algorithms(
     complex_: FilteredComplex,
     *,
@@ -5699,6 +5784,7 @@ __all__ = [
     "MorseCoreferenceFrame",
     "MorseReferenceFrame",
     "MorseReferenceProfile",
+    "MorseSequenceProfile",
     "MorseSequence",
     "MorseStep",
     "MorseStepSimplices",
@@ -5763,6 +5849,7 @@ __all__ = [
     "gudhi_barcode",
     "morse_sequence_as_simplices",
     "profile_morse_reference_frame",
+    "profile_morse_sequence",
     "profile_morse_sequence_algorithms",
     "reference_map_as_simplices",
     "select_morse_sequence_algorithm",

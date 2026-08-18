@@ -164,6 +164,53 @@ The exact paper-ready values are generated in
 scheduler study, not yet the comparison with Robins' implementation; that
 external benchmark remains a separate stage.
 
+## Simplicial Strategy Comparison
+
+The first internal comparison uses connected triangulated terrains rather than
+independent synthetic lower stars. A smooth random field is sampled on each
+grid, the vertices are strictly ranked, and every higher-dimensional simplex
+receives the value of its maximum vertex. This gives an injective lower-star
+filtration while retaining nontrivial terrain topology.
+
+```sh
+PYTHONPATH=python python3 tools/benchmark_simplicial_strategies.py \
+  --sizes 16 32 64 \
+  --seeds 0 1 2 \
+  --parallel-workers 8 \
+  --repeats 5 \
+  --warmups 1 \
+  --format csv \
+  --output ../work/simplicial_strategy_benchmark.csv
+
+MPLCONFIGDIR=../work/matplotlib-cache \
+  python3 tools/render_simplicial_strategy_benchmark.py \
+  --input ../work/simplicial_strategy_benchmark.csv \
+  --figure-output docs/simplicial_strategy_comparison.svg \
+  --table-output docs/simplicial_strategy_comparison_table.tex
+```
+
+Every measured Morse pipeline is checked against ordinary persistence for the
+same barcode. The output records critical counts by dimension, regular-pair
+counts, exact sequence agreement with ProcessLowerStars, and both construction
+and end-to-end timings. Each reported case uses the fastest of five measured
+runs after one warm-up.
+
+The initial Apple M1 Max run covers nine cases (three sizes by three seeds).
+ProcessLowerStars, its eight-worker version, F-Max, F-Min, and Saturated produce
+the same critical count in every case. Same-level reduction produces a median
+of 3.95 times as many critical simplices. Relative to F-Max, median end-to-end
+time is 2.32 times as large for sequential ProcessLowerStars and 1.56 times as
+large with eight workers. Thus the present implementation preserves F-Max's
+compression quality on this corpus, while parallel lower-star processing
+narrows but does not yet close the runtime gap.
+
+![Simplicial strategy comparison](simplicial_strategy_comparison.svg)
+
+The grid-size aggregates are generated in
+`docs/simplicial_strategy_comparison_table.tex`. This is a MorseFrames-internal
+comparison; it does not replace the planned external benchmark against Robins'
+ProcessLowerStars implementation.
+
 ## Roadmap and External Data
 
 The benchmark runner also has Roadmap and CAM-style families:

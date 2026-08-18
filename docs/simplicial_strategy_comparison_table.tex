@@ -1,0 +1,27 @@
+\begin{tabular}{rlrrrrrr}
+\toprule
+Grid & Strategy & Simplices & Critical & Critical/F-Max & Sequence (ms) & Total (ms) & Total speedup \\
+\midrule
+16 & ProcessLowerStars & 1,411 & 15 & 1.00 & 5.74 & 7.13 & 0.42 \\
+16 & ProcessLowerStars (8 workers) & 1,411 & 15 & 1.00 & 3.47 & 4.89 & 0.60 \\
+16 & F-Max & 1,411 & 15 & 1.00 & 1.58 & 3.01 & 1.00 \\
+16 & F-Min & 1,411 & 15 & 1.00 & 1.51 & 2.97 & 1.01 \\
+16 & Same-level reduction & 1,411 & 61 & 3.21 & 1.57 & 3.01 & 0.94 \\
+16 & Saturated & 1,411 & 15 & 1.00 & 2.12 & 3.59 & 0.84 \\
+\addlinespace
+32 & ProcessLowerStars & 5,891 & 41 & 1.00 & 23.84 & 30.51 & 0.42 \\
+32 & ProcessLowerStars (8 workers) & 5,891 & 41 & 1.00 & 14.11 & 20.22 & 0.64 \\
+32 & F-Max & 5,891 & 41 & 1.00 & 6.88 & 12.99 & 1.00 \\
+32 & F-Min & 5,891 & 41 & 1.00 & 6.52 & 12.86 & 1.01 \\
+32 & Same-level reduction & 5,891 & 165 & 3.58 & 6.74 & 13.29 & 0.99 \\
+32 & Saturated & 5,891 & 41 & 1.00 & 9.05 & 15.46 & 0.84 \\
+\addlinespace
+64 & ProcessLowerStars & 24,067 & 559 & 1.00 & 104.83 & 142.11 & 0.48 \\
+64 & ProcessLowerStars (8 workers) & 24,067 & 559 & 1.00 & 59.79 & 99.97 & 0.68 \\
+64 & F-Max & 24,067 & 559 & 1.00 & 28.87 & 67.28 & 1.00 \\
+64 & F-Min & 24,067 & 559 & 1.00 & 27.06 & 66.79 & 1.00 \\
+64 & Same-level reduction & 24,067 & 2321 & 4.06 & 30.34 & 79.13 & 0.87 \\
+64 & Saturated & 24,067 & 559 & 1.00 & 37.73 & 79.18 & 0.85 \\
+\addlinespace
+\bottomrule
+\end{tabular}

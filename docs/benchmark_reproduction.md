@@ -149,10 +149,10 @@ construction and downstream persistence times, speedup, and parallel
 efficiency. A `cpp_backend=False` row is a correctness run of the sequential
 fallback, not a parallel-performance measurement.
 
-The first controlled run on an Apple M1 Max (10 CPU cores), using seven
+The current controlled run on an Apple M1 Max (10 CPU cores), using five
 measured repetitions after one warm-up, is shown below. At 12,304 simplices the
-balanced case reaches 1.81x sequence speedup and 1.60x end-to-end speedup. The
-matched skewed case reaches only 1.19x and 1.13x, respectively, while its
+balanced case reaches 2.26x sequence speedup and 1.68x end-to-end speedup. The
+matched skewed case reaches only 1.43x and 1.29x, respectively, while its
 estimated eight-worker load ratio rises to 6.79. The two cases have identical
 critical counts `(2048, 2032, 0)`, so this gap is attributable to scheduling
 imbalance rather than a different Morse complex.
@@ -205,8 +205,8 @@ and Saturated produce the same critical count in every case. Same-level
 reduction produces a median of 3.95 times as many critical simplices. Relative
 to F-Max, median end-to-end time is 2.35 times as large for sequential
 ProcessLowerStars and 2.39 times as large for sequential reduction kernels.
-Eight-worker ProcessLowerStars improves to 1.58 times the F-Max time, while
-the optimized eight-worker reduction kernel reaches 1.12 times the F-Max time.
+Eight-worker ProcessLowerStars improves to 1.29 times the F-Max time, while
+the optimized eight-worker reduction kernel reaches 1.09 times the F-Max time.
 The structural counters are unchanged: the runtime improvement comes from
 coarse scheduling rather than a different Morse complex.
 
@@ -255,12 +255,12 @@ produce the same dimension-wise critical counts.
 On the Apple M1 Max, the nine-case run finds identical critical counts for
 ProcessLowerStars, reduction kernels, both eight-worker versions, F-Max, F-Min,
 and Saturated. Same-level reduction creates a median of 7.57 times as many
-critical simplices. Relative to F-Max, median end-to-end time is 2.32 times as
-large for sequential ProcessLowerStars and 3.25 times as large for sequential
-reduction kernels. The eight-worker versions reduce those ratios to 1.53 and
-1.30, respectively. Thus the current reduction-kernel parallelization recovers
-most, but not all, of the gap to the highly optimized sequential F-Max path in
-three dimensions.
+critical simplices. Relative to F-Max, median end-to-end time is 2.27 times as
+large for sequential ProcessLowerStars and 3.31 times as large for sequential
+reduction kernels. The eight-worker versions reduce those ratios to 1.16 and
+1.19, respectively. Parallel ProcessLowerStars is therefore slightly faster on
+this rerun, although both remain close to the highly optimized sequential F-Max
+path in three dimensions.
 
 ![Tetrahedral strategy comparison](tetrahedral_strategy_comparison.svg)
 
@@ -294,14 +294,13 @@ MPLCONFIGDIR=../work/matplotlib-cache \
 ```
 
 Across the nine cases, eight-worker ProcessLowerStars reaches median
-construction and end-to-end speedups of 1.85 and 1.51, respectively. The
-reduction kernel reaches 3.95 and 2.40. Its median end-to-end time at eight
-workers is 1.19 times the F-Max time across the complete corpus, falling to
-1.09 on the largest volumes. ProcessLowerStars reaches 1.43 times F-Max across
-the corpus and 1.32 on the largest volumes. This supports the interpretation
-that coarse independent-level scheduling is better matched to this machine
-than the finer ProcessLowerStars workload, while persistence and other serial
-work limit end-to-end scaling for both algorithms.
+construction and end-to-end speedups of 2.69 and 1.81, respectively. The
+reduction kernel reaches 3.80 and 2.41. Median end-to-end time is 1.12 times
+F-Max for ProcessLowerStars and 1.20 times F-Max for the reduction kernel; on
+the largest volumes those ratios fall to 1.07 and 1.09. The reduction kernel
+still scales more strongly from its slower one-worker baseline, while parallel
+owner/key setup lets ProcessLowerStars attain the lower absolute runtime.
+Persistence and other serial work limit end-to-end scaling for both algorithms.
 
 ![Tetrahedral worker scaling](tetrahedral_worker_scaling.svg)
 
@@ -331,20 +330,19 @@ python3 tools/render_tetrahedral_phase_profile.py \
   --table-output docs/tetrahedral_phase_profile_table.tex
 ```
 
-At eight workers, median ProcessLowerStars time is 51.1 percent global setup,
-22.3 percent parallel local-star processing, 17.4 percent ordered replay, and
-1.5 percent builder initialization. The local tasks achieve 5.70-fold effective
-overlap. Their median simplex-load imbalance is only 1.0008, although measured
-task-time imbalance is 1.54, so load partitioning is not the principal scaling
-limit. On the largest volumes, setup alone rises to 53.0 percent while local
-work falls to 20.7 percent.
+At eight workers, median ProcessLowerStars time is 27.2 percent global setup,
+29.6 percent parallel local-star processing, 28.0 percent ordered replay, and
+2.8 percent builder initialization. The local tasks achieve 6.59-fold effective
+overlap. Their median simplex-load imbalance is only 1.0008 and measured
+task-time imbalance is 1.15, so load partitioning is not the principal scaling
+limit. On the largest volumes, setup is 26.4 percent, local work is 30.0 percent,
+and replay is 29.9 percent.
 
-For the reduction kernel, the callback share grows from 4.3 percent at one
-worker to 17.3 percent at eight workers, and to 19.6 percent on the largest
-volumes. These measurements identify different next optimization targets:
-parallelize or reduce ProcessLowerStars ownership/key setup first, while future
-reduction-kernel work should focus on serial replay/reference updates and the
-downstream persistence stage.
+For the reduction kernel, the callback share grows from about 4 percent at one
+worker to 19.0 percent at eight workers, and to 21.3 percent on the largest
+volumes. The ProcessLowerStars setup optimization has shifted its next target
+to ordered replay/reference updates, while future reduction-kernel work should
+focus on the same serial callbacks and the downstream persistence stage.
 
 The phase and concurrency aggregates are generated in
 `docs/tetrahedral_phase_profile_table.tex`.

@@ -57,6 +57,7 @@ class TetrahedralPhaseProfileRow:
     process_lower_stars_task_parallelism: float
     process_lower_stars_task_time_imbalance: float
     process_lower_stars_task_load_imbalance: float
+    process_lower_stars_setup_parallel_tasks: int
     process_lower_stars_parallel_tasks: int
     reduction_kernel_max_parallel_levels: int
 
@@ -190,6 +191,12 @@ def benchmark_profile(
                         _ratio(float(max_load), float(min_load))
                         if is_process_lower_stars
                         else math.nan
+                    ),
+                    process_lower_stars_setup_parallel_tasks=int(
+                        metrics.get(
+                            "sequence_process_lower_stars_setup_parallel_tasks",
+                            0,
+                        )
                     ),
                     process_lower_stars_parallel_tasks=int(
                         metrics.get("sequence_process_lower_stars_parallel_tasks", 0)

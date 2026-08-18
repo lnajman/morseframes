@@ -128,6 +128,11 @@ def render_figure(rows: list[dict[str, str]], output: Path) -> None:
         metadata={"Title": "ProcessLowerStars scaling", "Date": None},
     )
     plt.close(figure)
+    if output.suffix.lower() == ".svg":
+        normalized = "\n".join(
+            line.rstrip() for line in output.read_text().splitlines()
+        )
+        output.write_text(normalized + "\n")
 
 
 def _latex_escape(value: str) -> str:

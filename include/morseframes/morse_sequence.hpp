@@ -89,6 +89,7 @@ struct MorseSequenceBuildMetrics {
   std::size_t process_lower_stars_count = 0;
   std::size_t process_lower_stars_max_star_size = 0;
   std::size_t process_lower_stars_executor_workers = 1;
+  std::size_t process_lower_stars_setup_parallel_tasks = 0;
   std::size_t process_lower_stars_parallel_tasks = 0;
   std::size_t process_lower_stars_min_task_load = 0;
   std::size_t process_lower_stars_max_task_load = 0;
@@ -1053,10 +1054,12 @@ class FSequenceBuilder {
       vertex_rank.emplace(complex_.vertices(vertex_order[rank])[0], rank);
     }
 
+    BoundedTaskExecutor executor(max_workers);
+    const std::size_t worker_count = executor.worker_count();
     std::vector<SimplexId> owner(n, kInvalidSimplex);
     std::vector<std::vector<SimplexId>> owned(n);
     std::vector<std::vector<std::size_t>> robins_key(n);
-    for (SimplexId simplex = 0; simplex < n; ++simplex) {
+    auto build_owner_and_key = [&](SimplexId simplex) {
       const auto& vertices = complex_.vertices(simplex);
       if (vertices.empty()) {
         throw std::invalid_argument(
@@ -1085,7 +1088,36 @@ class FSequenceBuilder {
             "ProcessLowerStars requires the max-vertex lower-star extension.");
       }
       owner[simplex] = simplex_owner;
-      owned[simplex_owner].push_back(simplex);
+    };
+
+    constexpr std::size_t kParallelSetupThreshold = 512;
+    if (worker_count > 1 && n >= kParallelSetupThreshold) {
+      const std::size_t task_count = std::min(worker_count, n);
+      const std::size_t chunk_size = (n + task_count - 1) / task_count;
+      std::vector<std::future<void>> futures;
+      futures.reserve(task_count);
+      for (std::size_t first = 0; first < n; first += chunk_size) {
+        const std::size_t last = std::min(n, first + chunk_size);
+        futures.push_back(executor.submit([first, last, &build_owner_and_key]() {
+          for (SimplexId simplex = first; simplex < last; ++simplex) {
+            build_owner_and_key(simplex);
+          }
+        }));
+      }
+      if (sequence_metrics_ != nullptr) {
+        sequence_metrics_->process_lower_stars_setup_parallel_tasks =
+            futures.size();
+      }
+      for (auto& future : futures) {
+        executor.get(future);
+      }
+    } else {
+      for (SimplexId simplex = 0; simplex < n; ++simplex) {
+        build_owner_and_key(simplex);
+      }
+    }
+    for (SimplexId simplex = 0; simplex < n; ++simplex) {
+      owned[owner[simplex]].push_back(simplex);
     }
 
     struct RobinsMinPriority {
@@ -1227,8 +1259,6 @@ class FSequenceBuilder {
       }
     };
 
-    BoundedTaskExecutor executor(max_workers);
-    const std::size_t worker_count = executor.worker_count();
     if (sequence_metrics_ != nullptr) {
       sequence_metrics_->process_lower_stars_count = vertex_order.size();
       for (SimplexId star_vertex : vertex_order) {

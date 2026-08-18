@@ -130,6 +130,7 @@ struct MorseReferenceFrameMetrics {
   std::size_t sequence_process_lower_stars_count = 0;
   std::size_t sequence_process_lower_stars_max_star_size = 0;
   std::size_t sequence_process_lower_stars_executor_workers = 1;
+  std::size_t sequence_process_lower_stars_setup_parallel_tasks = 0;
   std::size_t sequence_process_lower_stars_parallel_tasks = 0;
   std::size_t sequence_process_lower_stars_min_task_load = 0;
   std::size_t sequence_process_lower_stars_max_task_load = 0;
@@ -1187,6 +1188,8 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.process_lower_stars_max_star_size;
       frame_metrics.sequence_process_lower_stars_executor_workers =
           sequence_build_metrics.process_lower_stars_executor_workers;
+      frame_metrics.sequence_process_lower_stars_setup_parallel_tasks =
+          sequence_build_metrics.process_lower_stars_setup_parallel_tasks;
       frame_metrics.sequence_process_lower_stars_parallel_tasks =
           sequence_build_metrics.process_lower_stars_parallel_tasks;
       frame_metrics.sequence_process_lower_stars_min_task_load =

@@ -381,6 +381,8 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
       metrics.sequence_process_lower_stars_max_star_size;
   result["sequence_process_lower_stars_executor_workers"] =
       metrics.sequence_process_lower_stars_executor_workers;
+  result["sequence_process_lower_stars_setup_parallel_tasks"] =
+      metrics.sequence_process_lower_stars_setup_parallel_tasks;
   result["sequence_process_lower_stars_parallel_tasks"] =
       metrics.sequence_process_lower_stars_parallel_tasks;
   result["sequence_process_lower_stars_min_task_load"] =

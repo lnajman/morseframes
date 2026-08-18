@@ -200,6 +200,7 @@ class PythonApiTest(unittest.TestCase):
             "sequence_process_lower_stars_count",
             "sequence_process_lower_stars_max_star_size",
             "sequence_process_lower_stars_executor_workers",
+            "sequence_process_lower_stars_setup_parallel_tasks",
             "sequence_process_lower_stars_parallel_tasks",
             "sequence_process_lower_stars_min_task_load",
             "sequence_process_lower_stars_max_task_load",

@@ -19,7 +19,7 @@ class TetrahedralPhaseProfileBenchmarkTest(unittest.TestCase):
     def test_phase_profile_contract(self):
         rows = bench.benchmark_profile(
             seed=0,
-            grid_size=3,
+            grid_size=4,
             workers=(1, 2),
             repeats=1,
         )
@@ -44,6 +44,8 @@ class TetrahedralPhaseProfileBenchmarkTest(unittest.TestCase):
                 for row in process_rows
             )
         )
+        self.assertEqual(process_rows[0].process_lower_stars_setup_parallel_tasks, 0)
+        self.assertGreater(process_rows[1].process_lower_stars_setup_parallel_tasks, 0)
         kernel_rows = [row for row in rows if row.strategy == "reduction-kernel"]
         self.assertTrue(
             all(math.isnan(row.process_lower_stars_setup_share) for row in kernel_rows)

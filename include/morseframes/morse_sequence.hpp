@@ -96,6 +96,8 @@ struct MorseSequenceBuildMetrics {
   std::size_t reduction_kernel_local_candidate_visits = 0;
   std::size_t reduction_kernel_local_coboundary_visits = 0;
   std::size_t reduction_kernel_local_membership_tests = 0;
+  std::size_t reduction_kernel_inline_cell_overflows = 0;
+  std::size_t reduction_kernel_inline_event_overflows = 0;
   std::size_t process_lower_stars_count = 0;
   std::size_t process_lower_stars_max_star_size = 0;
   std::size_t process_lower_stars_executor_workers = 1;
@@ -1738,6 +1740,10 @@ class FSequenceBuilder {
           kernel_metrics.local_coboundary_visits;
       sequence_metrics_->reduction_kernel_local_membership_tests =
           kernel_metrics.local_membership_tests;
+      sequence_metrics_->reduction_kernel_inline_cell_overflows =
+          kernel_metrics.inline_cell_overflows;
+      sequence_metrics_->reduction_kernel_inline_event_overflows =
+          kernel_metrics.inline_event_overflows;
     }
 
     return sequence;

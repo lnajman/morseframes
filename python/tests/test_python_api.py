@@ -1521,6 +1521,37 @@ class PythonApiTest(unittest.TestCase):
                 if _gudhi_available():
                     mp.assert_matches_gudhi(complex_)
 
+    def test_reduction_kernel_high_dimensional_inline_overflow(self):
+        vertices = tuple(range(5))
+        simplices = [
+            (simplex, 0.0)
+            for size in range(1, len(vertices) + 1)
+            for simplex in combinations(vertices, size)
+        ]
+        complex_ = mp.FilteredComplex.from_simplices(simplices)
+
+        sequential = mp.compute_morse_sequence(
+            complex_, algorithm="flooding-reduction-kernel"
+        )
+        parallel = mp.compute_morse_sequence(
+            complex_,
+            algorithm="flooding-reduction-kernel-parallel",
+            max_workers=4,
+        )
+
+        self.assertEqual(len(sequential.steps), 16)
+        self.assertEqual(sequential.steps, parallel.steps)
+        if mp.cpp_backend_available() and complex_.cpp_backend_active():
+            profile = mp.profile_morse_sequence(
+                complex_, algorithm="flooding-reduction-kernel"
+            )
+            self.assertGreater(
+                profile.metrics["reduction_kernel_inline_cell_overflows"], 0
+            )
+            self.assertGreater(
+                profile.metrics["reduction_kernel_inline_event_overflows"], 0
+            )
+
     def test_benchmark_persistence_lower_star(self):
         complex_ = mp.FilteredComplex.from_lower_star(
             [[0, 1, 2, 3], [1, 3, 4]],

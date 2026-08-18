@@ -395,6 +395,10 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
       metrics.sequence_reduction_kernel_local_coboundary_visits;
   result["sequence_reduction_kernel_local_membership_tests"] =
       metrics.sequence_reduction_kernel_local_membership_tests;
+  result["sequence_reduction_kernel_inline_cell_overflows"] =
+      metrics.sequence_reduction_kernel_inline_cell_overflows;
+  result["sequence_reduction_kernel_inline_event_overflows"] =
+      metrics.sequence_reduction_kernel_inline_event_overflows;
   result["sequence_process_lower_stars_count"] =
       metrics.sequence_process_lower_stars_count;
   result["sequence_process_lower_stars_max_star_size"] =
@@ -501,6 +505,10 @@ nb::dict sequence_metrics_to_python(const morseframes::MorseSequenceBuildMetrics
       metrics.reduction_kernel_local_coboundary_visits;
   result["reduction_kernel_local_membership_tests"] =
       metrics.reduction_kernel_local_membership_tests;
+  result["reduction_kernel_inline_cell_overflows"] =
+      metrics.reduction_kernel_inline_cell_overflows;
+  result["reduction_kernel_inline_event_overflows"] =
+      metrics.reduction_kernel_inline_event_overflows;
   result["process_lower_stars_count"] = metrics.process_lower_stars_count;
   result["process_lower_stars_max_star_size"] =
       metrics.process_lower_stars_max_star_size;

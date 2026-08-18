@@ -137,6 +137,8 @@ struct MorseReferenceFrameMetrics {
   std::size_t sequence_reduction_kernel_local_candidate_visits = 0;
   std::size_t sequence_reduction_kernel_local_coboundary_visits = 0;
   std::size_t sequence_reduction_kernel_local_membership_tests = 0;
+  std::size_t sequence_reduction_kernel_inline_cell_overflows = 0;
+  std::size_t sequence_reduction_kernel_inline_event_overflows = 0;
   std::size_t sequence_process_lower_stars_count = 0;
   std::size_t sequence_process_lower_stars_max_star_size = 0;
   std::size_t sequence_process_lower_stars_executor_workers = 1;
@@ -1214,6 +1216,10 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.reduction_kernel_local_coboundary_visits;
       frame_metrics.sequence_reduction_kernel_local_membership_tests =
           sequence_build_metrics.reduction_kernel_local_membership_tests;
+      frame_metrics.sequence_reduction_kernel_inline_cell_overflows =
+          sequence_build_metrics.reduction_kernel_inline_cell_overflows;
+      frame_metrics.sequence_reduction_kernel_inline_event_overflows =
+          sequence_build_metrics.reduction_kernel_inline_event_overflows;
       frame_metrics.sequence_process_lower_stars_count =
           sequence_build_metrics.process_lower_stars_count;
       frame_metrics.sequence_process_lower_stars_max_star_size =

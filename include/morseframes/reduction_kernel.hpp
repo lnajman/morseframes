@@ -1,11 +1,11 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <future>
-#include <iterator>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -68,6 +68,8 @@ struct ReductionKernelMetrics {
   std::size_t local_candidate_visits = 0;
   std::size_t local_coboundary_visits = 0;
   std::size_t local_membership_tests = 0;
+  std::size_t inline_cell_overflows = 0;
+  std::size_t inline_event_overflows = 0;
 };
 
 struct ReductionKernelLevelResult {
@@ -85,15 +87,83 @@ class ReductionKernelWorkspace {
 
  private:
   using Clock = std::chrono::steady_clock;
+  // A tetrahedron has 15 nonempty faces and admits at most seven local pairs.
+  static constexpr std::size_t kInlineCellCapacity = 16;
+  static constexpr std::size_t kInlineEventCapacity = 8;
+
+  template <typename T, std::size_t InlineCapacity>
+  class InlineVector {
+   public:
+    void push_back(T value) {
+      if (!using_overflow_ && size_ < InlineCapacity) {
+        inline_entries_[size_++] = std::move(value);
+        return;
+      }
+      if (!using_overflow_) {
+        overflow_entries_.reserve(2 * InlineCapacity);
+        for (std::size_t index = 0; index < size_; ++index) {
+          overflow_entries_.push_back(std::move(inline_entries_[index]));
+        }
+        using_overflow_ = true;
+      }
+      overflow_entries_.push_back(std::move(value));
+      size_ = overflow_entries_.size();
+    }
+
+    std::size_t size() const { return size_; }
+    bool uses_overflow() const { return using_overflow_; }
+
+    const T& operator[](std::size_t index) const {
+      return using_overflow_ ? overflow_entries_[index]
+                             : inline_entries_[index];
+    }
+
+    std::size_t index_of(const T& value) const {
+      for (std::size_t index = 0; index < size_; ++index) {
+        if ((*this)[index] == value) {
+          return index;
+        }
+      }
+      return size_;
+    }
+
+    void append_to(std::vector<T>& destination) const {
+      destination.reserve(destination.size() + size_);
+      for (std::size_t index = 0; index < size_; ++index) {
+        destination.push_back((*this)[index]);
+      }
+    }
+
+   private:
+    std::array<T, InlineCapacity> inline_entries_{};
+    std::vector<T> overflow_entries_;
+    std::size_t size_ = 0;
+    bool using_overflow_ = false;
+  };
 
   struct FacetKernelResult {
-    std::vector<ReductionKernelEvent> events;
+    InlineVector<ReductionKernelEvent, kInlineEventCapacity> events;
     std::uint64_t core_nanoseconds = 0;
     std::uint64_t local_reduction_nanoseconds = 0;
     std::size_t facet_cell_visits = 0;
     std::size_t local_candidate_visits = 0;
     std::size_t local_coboundary_visits = 0;
     std::size_t local_membership_tests = 0;
+    std::size_t inline_cell_overflows = 0;
+    std::size_t inline_event_overflows = 0;
+  };
+
+  struct LevelScratch {
+    explicit LevelScratch(std::size_t bucket_size, bool collect_metrics)
+        : facet_flags(bucket_size, 0),
+          coboundary_visits(collect_metrics ? bucket_size : 0, 0) {
+      facets.reserve(bucket_size);
+    }
+
+    std::vector<std::uint8_t> facet_flags;
+    std::vector<std::size_t> coboundary_visits;
+    std::vector<SimplexId> facets;
+    std::vector<FacetKernelResult> facet_results;
   };
 
   struct LevelCells {
@@ -174,6 +244,7 @@ class ReductionKernelWorkspace {
         });
     const auto level_cells = build_level_cells(bucket, cache_level_cells);
     profile_add(metrics.closure_nanoseconds, closure_start);
+    LevelScratch scratch(bucket.size(), options_.collect_metrics);
 
     while (remaining > 0) {
       bool kernel_round_changed = false;
@@ -182,8 +253,9 @@ class ReductionKernelWorkspace {
         ++metrics.kernel_rounds;
         kernel_round_changed = false;
         const auto facet_start = profile_start();
-        const auto facets = active_facets(
-            level, bucket, metrics, allow_intra_level_parallelism);
+        const auto& facets = active_facets(
+            level, bucket, scratch, metrics,
+            allow_intra_level_parallelism);
         profile_add(metrics.facet_nanoseconds, facet_start);
         metrics.facet_kernels += facets.size();
         const auto essential_start = profile_start();
@@ -194,38 +266,44 @@ class ReductionKernelWorkspace {
           round_removed_[simplex] = 0;
         }
 
-        auto facet_results =
-            execute_facets(level, facets, bucket, level_cells, metrics,
+        const auto& facet_results =
+            execute_facets(level, facets, bucket, level_cells,
+                           scratch.facet_results, metrics,
                            allow_intra_level_parallelism);
         const auto aggregation_start = profile_start();
-        auto round_result =
-            aggregate_facet_results(
-                std::move(facet_results), metrics,
-                allow_intra_level_parallelism);
-        profile_add(metrics.aggregation_nanoseconds, aggregation_start);
-        metrics.core_nanoseconds += round_result.core_nanoseconds;
-        metrics.local_reduction_nanoseconds +=
-            round_result.local_reduction_nanoseconds;
-        metrics.facet_cell_visits += round_result.facet_cell_visits;
-        metrics.local_candidate_visits += round_result.local_candidate_visits;
-        metrics.local_coboundary_visits +=
-            round_result.local_coboundary_visits;
-        metrics.local_membership_tests +=
-            round_result.local_membership_tests;
-        auto& round_events = round_result.events;
-
-        for (const auto& event : round_events) {
-          if (event.type != ReductionKernelEventType::Reduction) {
-            throw std::logic_error(
-                "A facet kernel returned a non-reduction event.");
-          }
-          if (round_removed_[event.sigma] || round_removed_[event.tau]) {
-            throw std::logic_error(
-                "Facet reduction kernels removed the same simplex twice.");
-          }
-          round_removed_[event.sigma] = 1;
-          round_removed_[event.tau] = 1;
+        if (facet_results.size() > 1) {
+          ++metrics.aggregation_rounds;
         }
+        for (const auto& facet_result : facet_results) {
+          metrics.core_nanoseconds += facet_result.core_nanoseconds;
+          metrics.local_reduction_nanoseconds +=
+              facet_result.local_reduction_nanoseconds;
+          metrics.facet_cell_visits += facet_result.facet_cell_visits;
+          metrics.local_candidate_visits +=
+              facet_result.local_candidate_visits;
+          metrics.local_coboundary_visits +=
+              facet_result.local_coboundary_visits;
+          metrics.local_membership_tests +=
+              facet_result.local_membership_tests;
+          metrics.inline_cell_overflows += facet_result.inline_cell_overflows;
+          metrics.inline_event_overflows +=
+              facet_result.inline_event_overflows;
+          for (std::size_t index = 0; index < facet_result.events.size();
+               ++index) {
+            const auto& event = facet_result.events[index];
+            if (event.type != ReductionKernelEventType::Reduction) {
+              throw std::logic_error(
+                  "A facet kernel returned a non-reduction event.");
+            }
+            if (round_removed_[event.sigma] || round_removed_[event.tau]) {
+              throw std::logic_error(
+                  "Facet reduction kernels removed the same simplex twice.");
+            }
+            round_removed_[event.sigma] = 1;
+            round_removed_[event.tau] = 1;
+          }
+        }
+        profile_add(metrics.aggregation_nanoseconds, aggregation_start);
 
         const auto merge_start = profile_start();
         for (SimplexId simplex : bucket) {
@@ -240,8 +318,10 @@ class ReductionKernelWorkspace {
           --remaining;
           kernel_round_changed = true;
         }
-        events.insert(events.end(), round_events.begin(), round_events.end());
-        metrics.reductions += round_events.size();
+        for (const auto& facet_result : facet_results) {
+          facet_result.events.append_to(events);
+          metrics.reductions += facet_result.events.size();
+        }
         profile_add(metrics.merge_nanoseconds, merge_start);
       } while (kernel_round_changed);
 
@@ -250,8 +330,9 @@ class ReductionKernelWorkspace {
       }
 
       const auto facet_start = profile_start();
-      const auto facets = active_facets(
-          level, bucket, metrics, allow_intra_level_parallelism);
+      const auto& facets = active_facets(
+          level, bucket, scratch, metrics,
+          allow_intra_level_parallelism);
       profile_add(metrics.facet_nanoseconds, facet_start);
       if (facets.empty()) {
         throw std::logic_error(
@@ -306,6 +387,8 @@ class ReductionKernelWorkspace {
     destination.local_candidate_visits += source.local_candidate_visits;
     destination.local_coboundary_visits += source.local_coboundary_visits;
     destination.local_membership_tests += source.local_membership_tests;
+    destination.inline_cell_overflows += source.inline_cell_overflows;
+    destination.inline_event_overflows += source.inline_event_overflows;
   }
 
  private:
@@ -398,13 +481,15 @@ class ReductionKernelWorkspace {
     return futures.size();
   }
 
-  std::vector<SimplexId> active_facets(
+  const std::vector<SimplexId>& active_facets(
       LevelId level, const std::vector<SimplexId>& bucket,
+      LevelScratch& scratch,
       ReductionKernelMetrics& metrics,
       bool allow_parallelism) const {
-    std::vector<std::uint8_t> facet_flags(bucket.size(), 0);
-    std::vector<std::size_t> coboundary_visits(
-        options_.collect_metrics ? bucket.size() : 0, 0);
+    auto& facet_flags = scratch.facet_flags;
+    auto& coboundary_visits = scratch.coboundary_visits;
+    std::fill(facet_flags.begin(), facet_flags.end(), 0);
+    std::fill(coboundary_visits.begin(), coboundary_visits.end(), 0);
     metrics.facet_discovery_parallel_tasks += parallel_for_indices(
         bucket.size(), [this, level, &bucket, &facet_flags,
                         &coboundary_visits](std::size_t index) {
@@ -426,7 +511,8 @@ class ReductionKernelWorkspace {
       metrics.facet_discovery_coboundary_visits += visits;
     }
 
-    std::vector<SimplexId> facets;
+    auto& facets = scratch.facets;
+    facets.clear();
     for (std::size_t index = 0; index < bucket.size(); ++index) {
       if (facet_flags[index]) {
         facets.push_back(bucket[index]);
@@ -498,7 +584,7 @@ class ReductionKernelWorkspace {
       const LevelCells& level_cells) const {
     FacetKernelResult result;
     const auto core_start = profile_start();
-    std::vector<SimplexId> cell;
+    InlineVector<SimplexId, kInlineCellCapacity> cell;
     if (level_cells.enabled) {
       const auto [first, last] = level_cells.ranges[bucket_index_[facet]];
       for (std::size_t index = first; index < last; ++index) {
@@ -524,10 +610,24 @@ class ReductionKernelWorkspace {
     if (options_.collect_metrics) {
       result.core_nanoseconds =
           elapsed_nanoseconds(core_start, Clock::now());
+      result.inline_cell_overflows = cell.uses_overflow() ? 1 : 0;
     }
 
     const auto reduction_start = profile_start();
-    std::vector<std::uint8_t> locally_removed(cell.size(), 0);
+    std::array<std::uint8_t, kInlineCellCapacity> inline_removed{};
+    std::vector<std::uint8_t> overflow_removed(
+        cell.size() > inline_removed.size() ? cell.size() : 0, 0);
+    auto is_locally_removed = [&](std::size_t index) {
+      return overflow_removed.empty() ? inline_removed[index]
+                                      : overflow_removed[index];
+    };
+    auto mark_locally_removed = [&](std::size_t index) {
+      if (overflow_removed.empty()) {
+        inline_removed[index] = 1;
+      } else {
+        overflow_removed[index] = 1;
+      }
+    };
     while (true) {
       SimplexId reduction_sigma = kInvalidSimplex;
       SimplexId reduction_tau = kInvalidSimplex;
@@ -542,7 +642,8 @@ class ReductionKernelWorkspace {
           ++result.local_candidate_visits;
         }
         const SimplexId sigma = cell[sigma_index];
-        if (locally_removed[sigma_index] || facet_incidence_[sigma] > 1) {
+        if (is_locally_removed(sigma_index) ||
+            facet_incidence_[sigma] > 1) {
           continue;
         }
         SimplexId unique_coface = kInvalidSimplex;
@@ -558,13 +659,11 @@ class ReductionKernelWorkspace {
           if (options_.collect_metrics) {
             ++result.local_membership_tests;
           }
-          const auto found = std::find(cell.begin(), cell.end(), coface);
-          if (found == cell.end()) {
+          const std::size_t coface_index = cell.index_of(coface);
+          if (coface_index == cell.size()) {
             continue;
           }
-          const std::size_t coface_index =
-              static_cast<std::size_t>(found - cell.begin());
-          if (locally_removed[coface_index]) {
+          if (is_locally_removed(coface_index)) {
             continue;
           }
           unique_coface = coface;
@@ -586,8 +685,8 @@ class ReductionKernelWorkspace {
       if (reduction_sigma == kInvalidSimplex) {
         break;
       }
-      locally_removed[reduction_sigma_index] = 1;
-      locally_removed[reduction_tau_index] = 1;
+      mark_locally_removed(reduction_sigma_index);
+      mark_locally_removed(reduction_tau_index);
       result.events.push_back(ReductionKernelEvent{
           ReductionKernelEventType::Reduction, reduction_sigma,
           reduction_tau});
@@ -595,18 +694,22 @@ class ReductionKernelWorkspace {
     if (options_.collect_metrics) {
       result.local_reduction_nanoseconds =
           elapsed_nanoseconds(reduction_start, Clock::now());
+      result.inline_event_overflows = result.events.uses_overflow() ? 1 : 0;
     }
     return result;
   }
 
-  std::vector<FacetKernelResult> execute_facets(
+  const std::vector<FacetKernelResult>& execute_facets(
       LevelId level, const std::vector<SimplexId>& facets,
       const std::vector<SimplexId>& bucket,
       const LevelCells& level_cells,
+      std::vector<FacetKernelResult>& results,
       ReductionKernelMetrics& metrics,
       bool allow_parallelism) const {
-    std::vector<FacetKernelResult> results;
-    results.reserve(facets.size());
+    results.clear();
+    if (results.capacity() < facets.size()) {
+      results.reserve(facets.size());
+    }
 
     const std::size_t workers =
         executor_ == nullptr ? 1 : executor_->worker_count();
@@ -639,34 +742,6 @@ class ReductionKernelWorkspace {
       }
     }
     return results;
-  }
-
-  FacetKernelResult aggregate_facet_results(
-      std::vector<FacetKernelResult> results,
-      ReductionKernelMetrics& metrics,
-      bool /*allow_parallelism*/) const {
-    FacetKernelResult combined;
-    std::size_t event_count = 0;
-    for (const auto& result : results) {
-      event_count += result.events.size();
-      combined.core_nanoseconds += result.core_nanoseconds;
-      combined.local_reduction_nanoseconds +=
-          result.local_reduction_nanoseconds;
-      combined.facet_cell_visits += result.facet_cell_visits;
-      combined.local_candidate_visits += result.local_candidate_visits;
-      combined.local_coboundary_visits += result.local_coboundary_visits;
-      combined.local_membership_tests += result.local_membership_tests;
-    }
-    combined.events.reserve(event_count);
-    for (auto& result : results) {
-      combined.events.insert(combined.events.end(),
-                             std::make_move_iterator(result.events.begin()),
-                             std::make_move_iterator(result.events.end()));
-    }
-    if (results.size() > 1) {
-      ++metrics.aggregation_rounds;
-    }
-    return combined;
   }
 
   const ComplexView& complex_;

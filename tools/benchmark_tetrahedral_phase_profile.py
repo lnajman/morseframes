@@ -80,6 +80,8 @@ class TetrahedralPhaseProfileRow:
     reduction_kernel_local_candidate_visits: int
     reduction_kernel_local_coboundary_visits: int
     reduction_kernel_local_membership_tests: int
+    reduction_kernel_inline_cell_overflows: int
+    reduction_kernel_inline_event_overflows: int
 
 
 def _seconds(metrics: dict[str, object], name: str) -> float:
@@ -291,6 +293,12 @@ def benchmark_profile(
                     ),
                     reduction_kernel_local_membership_tests=int(
                         metrics.get("reduction_kernel_local_membership_tests", 0)
+                    ),
+                    reduction_kernel_inline_cell_overflows=int(
+                        metrics.get("reduction_kernel_inline_cell_overflows", 0)
+                    ),
+                    reduction_kernel_inline_event_overflows=int(
+                        metrics.get("reduction_kernel_inline_event_overflows", 0)
                     ),
                 )
             )

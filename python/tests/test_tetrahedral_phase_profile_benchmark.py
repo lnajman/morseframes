@@ -66,6 +66,12 @@ class TetrahedralPhaseProfileBenchmarkTest(unittest.TestCase):
         self.assertTrue(
             all(row.reduction_kernel_local_coboundary_visits > 0 for row in kernel_rows)
         )
+        self.assertTrue(
+            all(row.reduction_kernel_inline_cell_overflows == 0 for row in kernel_rows)
+        )
+        self.assertTrue(
+            all(row.reduction_kernel_inline_event_overflows == 0 for row in kernel_rows)
+        )
 
         output = StringIO()
         bench.write_rows(rows, output, "csv")

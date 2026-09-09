@@ -244,19 +244,20 @@ python3 tools/render_ttk_reduction_kernel_table.py \
 
 All 84 configurations have identical critical-simplex counts by dimension.
 On 2D terrains, TTK is faster in every case: the median ReductionKernel/TTK
-ratios are 2.18, 2.41, 2.77, and 2.48 at one, two, four, and eight workers. The
-four-worker ReductionKernel remains faster than F-Max at 0.89 times its time,
-but TTK reaches 0.27.
+ratios are 2.18, 2.46, 2.60, and 2.35 at one, two, four, and eight workers. The
+four-worker ReductionKernel remains faster than F-Max at 0.80 times its time,
+but TTK reaches 0.31.
 
 The 3D result is substantially closer. The median ReductionKernel/TTK ratios
-are 0.92, 0.99, 1.11, and 1.20 at one, two, four, and eight workers,
-respectively. Thus ReductionKernel has a small sequential advantage, the two
-are effectively tied at two workers, and TTK has a modest advantage at four and
-eight workers. At eight workers both have nearly identical aggregate ratios to
-F-Max, 0.48 for ReductionKernel and 0.49 for TTK; the median of the paired
-ReductionKernel/TTK ratios is 1.20 because a ratio of medians is not generally
-the median of per-case ratios. The paired ratios are the appropriate direct
-comparison.
+are 0.93, 1.05, 1.13, and 1.32 at one, two, four, and eight workers,
+respectively. Thus ReductionKernel retains a small sequential advantage, while
+TTK is 5--32 percent faster on the parallel configurations. At eight workers,
+the median ratios to F-Max are 0.49 for ReductionKernel and 0.38 for TTK. The
+chunked ReductionKernel scheduler reaches a median 3.09-fold eight-worker
+speedup, compared with 2.91-fold in the preceding run, but TTK reaches
+4.34-fold in the refreshed run. Direct paired ratios remain the appropriate
+comparison because ratios of independently aggregated timings can be
+misleading.
 
 This establishes the intended result without optimizing MorseFrames
 ProcessLowerStars: the arbitrary-dimensional ReductionKernel is competitive

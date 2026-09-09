@@ -4,11 +4,12 @@ set -euo pipefail
 
 readonly TTK_REVISION="f4ffd1a1049d0ccf6e8f3eb4f7c096a6cc251ba0"
 readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly WORK_ROOT="${1:-${REPOSITORY_ROOT}/../work/ttk-benchmark}"
+work_root_input="${1:-${REPOSITORY_ROOT}/../work/ttk-benchmark}"
+mkdir -p "${work_root_input}"
+readonly WORK_ROOT="$(cd "${work_root_input}" && pwd)"
 readonly TTK_SOURCE="${WORK_ROOT}/ttk-${TTK_REVISION}"
 readonly BUILD_DIR="${WORK_ROOT}/build-${TTK_REVISION}"
 
-mkdir -p "${WORK_ROOT}"
 if [[ ! -d "${TTK_SOURCE}/.git" ]]; then
   git init "${TTK_SOURCE}" >&2
   git -C "${TTK_SOURCE}" remote add origin \

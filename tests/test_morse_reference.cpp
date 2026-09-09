@@ -5,6 +5,7 @@
 #include <cmath>
 #include <initializer_list>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 #include <thread>
 #include <tuple>
@@ -1189,7 +1190,8 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   assert(parallel_metrics.reduction_kernel_max_parallel_facets == 2);
   assert(parallel_metrics.reduction_kernel_executor_workers == 2);
   assert(parallel_metrics.reduction_kernel_facet_discovery_parallel_tasks > 0);
-  assert(parallel_metrics.reduction_kernel_essential_parallel_tasks > 0);
+  // Small packed levels compute protected cores with word operations.
+  assert(parallel_metrics.reduction_kernel_essential_parallel_tasks == 0);
   assert(parallel_metrics.reduction_kernel_aggregation_rounds > 0);
   const auto single_worker_sequence =
       FSequenceBuilder(complex).build_flooding_reduction_kernel_parallel(1);
@@ -1284,6 +1286,82 @@ void test_flooding_reduction_kernel_on_shared_facets() {
          metrics.sequence_criticals);
 }
 
+void test_reduction_kernel_packed_core_matches_sparse_cache() {
+  const auto check = [](FilteredSimplicialComplex complex) {
+    complex.finalize();
+    auto cached = complex;
+    cached.prepare_same_level_closure_cache();
+    // The cache retains the independent sparse incidence/cell implementation.
+    const auto expected =
+        FSequenceBuilder(cached).build_flooding_reduction_kernel();
+    const auto compare = [&](const auto& actual) {
+      morseframes::validate_morse_sequence(complex, actual);
+      assert(expected.steps().size() == actual.steps().size());
+      for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+        const auto& a = expected.steps()[i];
+        const auto& b = actual.steps()[i];
+        assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+               a.level == b.level);
+      }
+    };
+    compare(FSequenceBuilder(complex).build_flooding_reduction_kernel());
+    compare(FSequenceBuilder(complex).build_flooding_reduction_kernel_parallel(4));
+    morseframes::MorseSequenceBuildMetrics metrics;
+    compare(FSequenceBuilder(complex, &metrics)
+                .build_flooding_reduction_kernel_parallel(4));
+  };
+
+  // Exercise both word boundaries and the packed/sparse cutoff. Combining
+  // these components also reuses worker scratch across different bucket sizes.
+  FilteredSimplicialComplex multilevel;
+  std::uint32_t offset = 0;
+  std::size_t level = 0;
+  for (std::size_t count : {63, 64, 65, 127, 128, 129, 255}) {
+    const std::size_t vertices = count < 127 ? 6 : (count < 255 ? 7 : 8);
+    FilteredSimplicialComplex single_level;
+    for (std::size_t mask = 1; mask < (std::size_t{1} << vertices); ++mask) {
+      std::vector<morseframes::VertexId> simplex;
+      for (std::size_t v = 0; v < vertices; ++v) {
+        if ((mask & (std::size_t{1} << v)) != 0) {
+          simplex.push_back(offset + static_cast<std::uint32_t>(v));
+        }
+      }
+      single_level.add_simplex(simplex, 0.0);
+      multilevel.add_simplex(simplex, static_cast<double>(level));
+    }
+    const auto extras = count - ((std::size_t{1} << vertices) - 1);
+    for (std::size_t i = 0; i < extras; ++i) {
+      const auto v = offset + static_cast<std::uint32_t>(vertices + i);
+      single_level.add_simplex({v}, 0.0);
+      multilevel.add_simplex({v}, static_cast<double>(level));
+    }
+    check(single_level);
+    offset += static_cast<std::uint32_t>(vertices + extras);
+    ++level;
+  }
+  check(multilevel);
+
+  // Shared high-dimensional facets exercise protected faces, tied weights,
+  // perforations and repeated kernel rounds against the sparse oracle.
+  for (unsigned seed = 0; seed < 12; ++seed) {
+    std::mt19937 rng(seed);
+    FilteredSimplicialComplex complex;
+    std::vector<double> weights(9, 0.0);
+    if (seed % 2 != 0) {
+      for (std::size_t v = 0; v < weights.size(); ++v) {
+        weights[v] = static_cast<double>((v * 13 + seed) % 4);
+      }
+    }
+    for (std::size_t facet = 0; facet < 5; ++facet) {
+      std::vector<morseframes::VertexId> vertices{0, 1, 2, 3, 4, 5, 6, 7, 8};
+      std::shuffle(vertices.begin(), vertices.end(), rng);
+      vertices.resize(4 + seed % 2);
+      add_weighted_closure(complex, vertices, weights, 0.0);
+    }
+    check(complex);
+  }
+}
+
 void test_instrumentation_metrics() {
   FilteredSimplicialComplex complex;
   add_simplex(complex, {0}, 0.0);
@@ -1348,6 +1426,7 @@ int main() {
   test_lower_star_two_triangle_strip();
   test_lower_star_three_dimensional_pair();
   test_flooding_reduction_kernel_on_shared_facets();
+  test_reduction_kernel_packed_core_matches_sparse_cache();
   test_instrumentation_metrics();
 
   std::cout << "All Morse persistence prototype tests passed.\n";

@@ -287,13 +287,20 @@ parallel metrics-free collection therefore also moves smaller result objects.
 
 For level buckets containing at most 128 simplices, ReductionKernel constructs
 same-level closures as packed bit masks. The local facet kernel retains that
-representation: it visits set bits in canonical bucket order, tracks local
-removals in a second mask, and tests coface membership with one bit lookup.
-This avoids repeated sparse-set insertion and sorting, copying each closure
-into an inline vector, and linear membership searches on the small lower stars
-typical of triangulated 2D and 3D grids. Larger buckets and precomputed caches
-keep the general sparse closure path, so the strategy remains dimension
-agnostic.
+representation throughout a round. Accumulating `shared |= seen & closure`
+before `seen |= closure` over current facets identifies faces contained in at
+least two facets, hence the protected core. Intersecting `seen & ~shared` with
+the active mask identifies eligible simplices. Each facet keeps a local live
+mask, scans eligible set bits in canonical bucket order, and clears each pair
+as it is reduced. Coface membership is a single bit lookup; protected cofaces
+still participate in the unique-coface test.
+
+The packed path no longer materializes closure entry lists or counts incidence
+simplex by simplex. Larger buckets and precomputed caches keep the independent
+sparse implementation, so the strategy remains dimension agnostic. The
+`incidence_cell_visits` diagnostic counts sparse entry visits only (zero for
+packed levels); `local_candidate_visits` counts candidates actually scanned,
+after the packed filter has excluded protected and removed simplices.
 
 For repeated sequential gradients on an owning `FilteredComplex`, callers may
 invoke `complex_.prepare_reduction_kernel_cache()` once. ReductionKernel then
@@ -308,11 +315,12 @@ workspace and local-kernel routine. Facet cells in a round are evaluated in
 bounded batches against one immutable active-set snapshot. A reusable task pool
 is shared by level and facet work; waiting tasks cooperatively execute queued
 work, allowing nested parallelism without deadlock or repeated thread creation.
-The current facets are discovered in parallel in level-bucket chunks. Facet
-incidence for each active face is then computed in parallel once per round and
-saturated at two; incidence greater than one identifies the protected core
-directly, without rescanning every other facet inside every local kernel. Facet
-results are combined by an order-preserving binary tree.
+The current facets are discovered in parallel in level-bucket chunks. Small
+levels compute their core using the packed word operations above before
+launching facet tasks. The sparse path can compute facet incidence for each
+active face in parallel once per round, saturating the count at two. Both paths
+identify the core without rescanning every other facet inside each local
+kernel, and preserve deterministic facet-result order.
 
 The configured worker count is a strict global budget. Independent level
 streams are assembled in increasing level order, and every tree node appends

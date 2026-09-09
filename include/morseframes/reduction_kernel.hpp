@@ -110,6 +110,8 @@ class ReductionKernelWorkspace {
   static constexpr std::size_t kInlineCellCapacity = 16;
   static constexpr std::size_t kInlineEventCapacity = 8;
   static constexpr std::size_t kPackedClosureBucketCapacity = 128;
+  using PackedMask =
+      std::array<std::uint64_t, (kPackedClosureBucketCapacity + 63) / 64>;
 
   template <typename T, std::size_t InlineCapacity>
   class InlineVector {
@@ -192,6 +194,8 @@ class ReductionKernelWorkspace {
     const std::vector<std::uint64_t>* packed_masks = nullptr;
     const std::vector<SimplexId>* packed_bucket = nullptr;
     std::size_t packed_block_count = 0;
+    PackedMask packed_active{};
+    PackedMask packed_unique{};
     const std::vector<SimplexId>* cached_entries = nullptr;
     const std::vector<std::pair<std::size_t, std::size_t>>* cached_ranges =
         nullptr;
@@ -231,6 +235,8 @@ class ReductionKernelWorkspace {
       level_cells.packed_masks = nullptr;
       level_cells.packed_bucket = nullptr;
       level_cells.packed_block_count = 0;
+      level_cells.packed_active.fill(0);
+      level_cells.packed_unique.fill(0);
       level_cells.cached_entries = nullptr;
       level_cells.cached_ranges = nullptr;
     }
@@ -704,12 +710,6 @@ class ReductionKernelWorkspace {
         return;
       }
     }
-    if (cells.entries.capacity() < 4 * bucket.size()) {
-      cells.entries.reserve(4 * bucket.size());
-    }
-    if (cells.ranges.capacity() < bucket.size()) {
-      cells.ranges.reserve(bucket.size());
-    }
     if (bucket.size() <= kPackedClosureBucketCapacity) {
       const std::size_t block_count = (bucket.size() + 63) / 64;
       auto& masks = scratch.closure_masks;
@@ -717,7 +717,6 @@ class ReductionKernelWorkspace {
       cells.packed_masks = &masks;
       cells.packed_bucket = &bucket;
       cells.packed_block_count = block_count;
-      cells.ranges.resize(bucket.size());
       for (std::size_t simplex_index = 0; simplex_index < bucket.size();
            ++simplex_index) {
         const SimplexId simplex = bucket[simplex_index];
@@ -738,19 +737,14 @@ class ReductionKernelWorkspace {
             simplex_mask[block] |= face_mask[block];
           }
         }
-        const std::size_t first = cells.entries.size();
-        for (std::size_t block = 0; block < block_count; ++block) {
-          std::uint64_t entries = simplex_mask[block];
-          while (entries != 0) {
-            const std::size_t offset = trailing_zero_count(entries);
-            const std::size_t local_index = 64 * block + offset;
-            cells.entries.push_back(bucket[local_index]);
-            entries &= entries - 1;
-          }
-        }
-        cells.ranges[simplex_index] = {first, cells.entries.size()};
       }
       return;
+    }
+    if (cells.entries.capacity() < 4 * bucket.size()) {
+      cells.entries.reserve(4 * bucket.size());
+    }
+    if (cells.ranges.capacity() < bucket.size()) {
+      cells.ranges.reserve(bucket.size());
     }
     auto& included = scratch.included;
     std::fill(included.begin(), included.end(), 0);
@@ -913,9 +907,39 @@ class ReductionKernelWorkspace {
   void compute_facet_incidence(
       const std::vector<SimplexId>& facets,
       const std::vector<SimplexId>& bucket,
-      const LevelCells& level_cells,
+      LevelCells& level_cells,
       ReductionKernelMetrics& metrics,
       bool allow_parallelism) {
+    if (level_cells.packed_masks != nullptr) {
+      PackedMask seen{};
+      PackedMask shared{};
+      const std::size_t block_count = level_cells.packed_block_count;
+      // A face is protected exactly when at least two current facets contain
+      // it. Accumulate that predicate one word at a time instead of counting
+      // incidence simplex by simplex. These masks are immutable during the
+      // subsequent facet tasks, including intra-level parallel execution.
+      for (SimplexId facet : facets) {
+        const auto* cell_mask = level_cells.packed_masks->data() +
+                                bucket_index_[facet] * block_count;
+        for (std::size_t block = 0; block < block_count; ++block) {
+          shared[block] |= seen[block] & cell_mask[block];
+          seen[block] |= cell_mask[block];
+        }
+      }
+      level_cells.packed_active.fill(0);
+      for (SimplexId simplex : bucket) {
+        if (active_[simplex]) {
+          const std::size_t index = bucket_index_[simplex];
+          level_cells.packed_active[index / 64] |=
+              std::uint64_t{1} << (index % 64);
+        }
+      }
+      for (std::size_t block = 0; block < block_count; ++block) {
+        level_cells.packed_unique[block] =
+            seen[block] & ~shared[block] & level_cells.packed_active[block];
+      }
+      return;
+    }
     const bool use_cached_cells =
         level_cells.enabled &&
         (options_.policy == ReductionKernelExecutionPolicy::Sequential ||
@@ -995,9 +1019,10 @@ class ReductionKernelWorkspace {
     }
 
     const auto reduction_start = profile_start<CollectMetrics>();
-    constexpr std::size_t kPackedBlockCapacity =
-        (kPackedClosureBucketCapacity + 63) / 64;
-    std::array<std::uint64_t, kPackedBlockCapacity> removed{};
+    PackedMask live_cell{};
+    for (std::size_t block = 0; block < block_count; ++block) {
+      live_cell[block] = cell_mask[block] & level_cells.packed_active[block];
+    }
     while (true) {
       SimplexId reduction_sigma = kInvalidSimplex;
       SimplexId reduction_tau = kInvalidSimplex;
@@ -1009,7 +1034,8 @@ class ReductionKernelWorkspace {
       bool found_reduction = false;
       for (std::size_t block = 0;
            block < block_count && !found_reduction; ++block) {
-        std::uint64_t candidates = cell_mask[block];
+        std::uint64_t candidates =
+            live_cell[block] & level_cells.packed_unique[block];
         while (candidates != 0) {
           const std::size_t offset = trailing_zero_count(candidates);
           const std::size_t sigma_index = 64 * block + offset;
@@ -1018,11 +1044,6 @@ class ReductionKernelWorkspace {
             ++result.local_candidate_visits;
           }
           const SimplexId sigma = bucket[sigma_index];
-          const std::uint64_t sigma_bit = std::uint64_t{1} << offset;
-          if ((removed[block] & sigma_bit) != 0 || !active_[sigma] ||
-              facet_incidence_[sigma] > 1) {
-            continue;
-          }
 
           SimplexId unique_coface = kInvalidSimplex;
           std::size_t unique_coface_index = bucket.size();
@@ -1042,8 +1063,7 @@ class ReductionKernelWorkspace {
                 const std::size_t coface_block = coface_index / 64;
                 const std::uint64_t coface_bit =
                     std::uint64_t{1} << (coface_index % 64);
-                if ((cell_mask[coface_block] & coface_bit) == 0 ||
-                    (removed[coface_block] & coface_bit) != 0) {
+                if ((live_cell[coface_block] & coface_bit) == 0) {
                   return true;
                 }
                 unique_coface = coface;
@@ -1051,7 +1071,9 @@ class ReductionKernelWorkspace {
                 ++coface_count;
                 return coface_count <= 1;
               });
-          if (coface_count == 1 && facet_incidence_[unique_coface] == 1) {
+          if (coface_count == 1 &&
+              (level_cells.packed_unique[unique_coface_index / 64] &
+               (std::uint64_t{1} << (unique_coface_index % 64))) != 0) {
             reduction_sigma = sigma;
             reduction_tau = unique_coface;
             reduction_sigma_index = sigma_index;
@@ -1065,10 +1087,10 @@ class ReductionKernelWorkspace {
       if (reduction_sigma == kInvalidSimplex) {
         break;
       }
-      removed[reduction_sigma_index / 64] |=
-          std::uint64_t{1} << (reduction_sigma_index % 64);
-      removed[reduction_tau_index / 64] |=
-          std::uint64_t{1} << (reduction_tau_index % 64);
+      live_cell[reduction_sigma_index / 64] &=
+          ~(std::uint64_t{1} << (reduction_sigma_index % 64));
+      live_cell[reduction_tau_index / 64] &=
+          ~(std::uint64_t{1} << (reduction_tau_index % 64));
       result.events.push_back(ReductionKernelEvent{
           reduction_sigma, reduction_tau});
     }

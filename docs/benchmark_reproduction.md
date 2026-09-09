@@ -27,6 +27,8 @@ Tracked public artifacts:
 - `docs/*_table.tex`: LaTeX table fragments used to report benchmark results.
 - `tools/*.py`: benchmark, validation, and table-rendering scripts.
 - `benchmarks/benchmark_gudhi_view.cpp`: native GUDHI-view benchmark.
+- `benchmarks/benchmark_reduction_kernel_ab.cpp`: native worker for controlled
+  comparisons between ReductionKernel revisions.
 
 Local or private artifacts:
 
@@ -218,7 +220,69 @@ adding one measured explicit-triangulation setup and preconditioning pass to
 the prepared gradient-kernel time. The other columns compare prepared gradient
 kernels only.
 
+### Controlled ReductionKernel A/B comparison
+
+Use this workflow to evaluate an implementation change. It compiles the same
+native driver against two snapshots of the headers using identical compiler
+flags. Each process keeps the same topology resident; only one process runs a
+gradient at a time while the other waits for a command. It alternates baseline
+and candidate order in balanced blocks and saves every timing sample, paired
+block ratios, interquartile ranges and a descriptive bootstrap interval.
+Run it without other tests, builds or benchmarks in progress.
+
+```sh
+python3 tools/benchmark_reduction_kernel_ab.py \
+  --baseline ebddcc4 --candidate WORKTREE \
+  --sizes 16 24 32 --seeds 0 1 2 --workers 1 2 4 8 \
+  --blocks 12 --repeats 3 --warmups 2 \
+  --input-dir ../rk-ab-inputs --output ../rk-packed-core-ab.json
+```
+
+The inputs use the existing injective tetrahedral-volume generator. The timed
+scope includes a fresh builder, workspace, task-pool setup/teardown and event
+replay, with no diagnostic instrumentation or persistence computation.
+Topology construction, sequence validation, protocol I/O and destruction of
+the returned sequence are outside the timer. The two native sequential
+sequences are compared exactly through exported step records, and every timed
+sequence is checked field by field against its build's sequential reference.
+All checks must pass before a case is recorded. Header, input, driver and
+binary hashes, compiler target and flags are retained in the JSON. Choose a
+new output path for each run; existing evidence is never overwritten.
+
+The controlled native ARM run on this MacBook Pro (Apple clang 15, C++17,
+`-O3 -DNDEBUG -pthread`) covered 36 configurations, including 32-cubed volumes
+with 792,051 simplices. The table gives median reductions in total gradient
+time across nine size/seed cases per worker count. Positive values mean faster.
+
+| Workers | Packed facets: `b01eaa0` to `ebddcc4` | Packed core: relative to `ebddcc4` |
+| ---: | ---: | ---: |
+| 1 | 8.2% | 10.4% |
+| 2 | 5.8% | 10.1% |
+| 4 | 7.7% | 10.7% |
+| 8 | 6.1% | 9.0% |
+
+Packed facets were faster in 34/36 configurations; packed cores were faster in
+36/36. All exact sequence comparisons passed. These paired results replace the
+earlier small, separate-run estimates of 1.3% and 5.6% for packed facets. Raw
+evidence is saved locally as `../rk-packed-facets-ab-1.json` and
+`../rk-packed-core-ab-1.json`. To reproduce the first comparison, use
+`--baseline b01eaa0 --candidate ebddcc4`. Bootstrap intervals describe the
+observed session and do not establish uncertainty across machines or sessions.
+These measurements do not update the separate TTK comparison below.
+
+A fresh confirmation session used sizes 16 and 32, seeds 0 and 2, workers 1
+and 8, and 16 balanced blocks of three repetitions. All eight configurations
+again favored the packed core; median reductions were 10.2% sequentially and
+8.0% with eight workers. The 32-cubed, seed-zero sequential case was nearly
+tied (1.1% reduction with an interval spanning parity), so the benefit is not
+uniform. The raw confirmation is `../rk-packed-core-ab-confirmation.json`.
+Use the corresponding `--sizes`, `--seeds`, `--workers` and `--blocks` options
+with a new output filename to repeat it.
+
 ### Direct TTK versus parallel ReductionKernel
+
+The figures in this subsection were measured at `ebddcc4`, before the packed
+protected-core optimization. They remain a historical TTK comparison.
 
 The publication-facing comparison runs F-Max, TTK ProcessLowerStars, and the
 parallel ReductionKernel in the same native process. The execution order is

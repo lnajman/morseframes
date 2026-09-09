@@ -285,6 +285,12 @@ accounting and concurrent result collection.
 The metrics-free result type omits all diagnostic fields at compile time;
 parallel metrics-free collection therefore also moves smaller result objects.
 
+For level buckets containing at most 128 simplices, ReductionKernel constructs
+same-level closures as packed bit masks and emits their set bits in canonical
+bucket order. This avoids repeated sparse-set insertion and sorting on the
+small lower stars typical of triangulated 2D and 3D grids. Larger buckets keep
+the general sparse closure path, so the strategy remains dimension agnostic.
+
 For repeated sequential gradients on an owning `FilteredComplex`, callers may
 invoke `complex_.prepare_reduction_kernel_cache()` once. ReductionKernel then
 reads immutable, precomputed same-level closure ranges and coboundary adjacency

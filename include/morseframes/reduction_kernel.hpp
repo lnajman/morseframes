@@ -109,6 +109,7 @@ class ReductionKernelWorkspace {
   // A tetrahedron has 15 nonempty faces and admits at most seven local pairs.
   static constexpr std::size_t kInlineCellCapacity = 16;
   static constexpr std::size_t kInlineEventCapacity = 8;
+  static constexpr std::size_t kPackedClosureBucketCapacity = 128;
 
   template <typename T, std::size_t InlineCapacity>
   class InlineVector {
@@ -216,6 +217,7 @@ class ReductionKernelWorkspace {
         round_events.reserve(bucket_size);
       }
       included.resize(bucket_size);
+      closure_masks.clear();
       cell_indices.clear();
       if (cell_indices.capacity() < kInlineCellCapacity) {
         cell_indices.reserve(kInlineCellCapacity);
@@ -237,6 +239,7 @@ class ReductionKernelWorkspace {
     LevelCells level_cells;
     std::vector<std::uint8_t> included;
     std::vector<std::size_t> cell_indices;
+    std::vector<std::uint64_t> closure_masks;
   };
 
   class FixedEventBuffer {
@@ -270,6 +273,20 @@ class ReductionKernelWorkspace {
     return static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start)
             .count());
+  }
+
+  static std::size_t trailing_zero_count(std::uint64_t bits) {
+#if defined(__clang__) || defined(__GNUC__)
+    return static_cast<std::size_t>(
+        __builtin_ctzll(static_cast<unsigned long long>(bits)));
+#else
+    std::size_t count = 0;
+    while ((bits & std::uint64_t{1}) == 0) {
+      bits >>= 1;
+      ++count;
+    }
+    return count;
+#endif
   }
 
   template <bool CollectMetrics>
@@ -686,6 +703,45 @@ class ReductionKernelWorkspace {
     }
     if (cells.ranges.capacity() < bucket.size()) {
       cells.ranges.reserve(bucket.size());
+    }
+    if (bucket.size() <= kPackedClosureBucketCapacity) {
+      const std::size_t block_count = (bucket.size() + 63) / 64;
+      auto& masks = scratch.closure_masks;
+      masks.assign(bucket.size() * block_count, 0);
+      cells.ranges.resize(bucket.size());
+      for (std::size_t simplex_index = 0; simplex_index < bucket.size();
+           ++simplex_index) {
+        const SimplexId simplex = bucket[simplex_index];
+        auto* simplex_mask = masks.data() + simplex_index * block_count;
+        simplex_mask[simplex_index / 64] |=
+            std::uint64_t{1} << (simplex_index % 64);
+        for (SimplexId face : complex_.boundary(simplex)) {
+          if (complex_.level(face) != complex_.level(simplex)) {
+            continue;
+          }
+          const std::size_t face_index = bucket_index_[face];
+          if (face_index >= simplex_index) {
+            throw std::logic_error(
+                "Reduction-kernel level bucket is not face-first.");
+          }
+          const auto* face_mask = masks.data() + face_index * block_count;
+          for (std::size_t block = 0; block < block_count; ++block) {
+            simplex_mask[block] |= face_mask[block];
+          }
+        }
+        const std::size_t first = cells.entries.size();
+        for (std::size_t block = 0; block < block_count; ++block) {
+          std::uint64_t entries = simplex_mask[block];
+          while (entries != 0) {
+            const std::size_t offset = trailing_zero_count(entries);
+            const std::size_t local_index = 64 * block + offset;
+            cells.entries.push_back(bucket[local_index]);
+            entries &= entries - 1;
+          }
+        }
+        cells.ranges[simplex_index] = {first, cells.entries.size()};
+      }
+      return;
     }
     auto& included = scratch.included;
     std::fill(included.begin(), included.end(), 0);

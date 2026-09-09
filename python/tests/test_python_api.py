@@ -1600,6 +1600,25 @@ class PythonApiTest(unittest.TestCase):
                 profile.metrics["reduction_kernel_inline_event_overflows"], 0
             )
 
+    def test_reduction_kernel_large_bucket_sparse_closure_fallback(self):
+        vertices = tuple(range(8))
+        complex_ = mp.FilteredComplex.from_simplices(
+            (simplex, 0.0)
+            for size in range(1, len(vertices) + 1)
+            for simplex in combinations(vertices, size)
+        )
+
+        sequential = mp.compute_morse_sequence(
+            complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_SEQUENCE
+        )
+        parallel = mp.compute_morse_sequence(
+            complex_,
+            algorithm=mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+            max_workers=4,
+        )
+        self.assertEqual(len(sequential.steps), 128)
+        self.assertEqual(sequential.steps, parallel.steps)
+
     def test_benchmark_persistence_lower_star(self):
         complex_ = mp.FilteredComplex.from_lower_star(
             [[0, 1, 2, 3], [1, 3, 4]],

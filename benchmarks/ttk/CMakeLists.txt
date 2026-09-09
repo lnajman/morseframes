@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.21)
 
 project(morseframes_ttk_gradient_benchmark LANGUAGES C CXX)
 
+find_package(Threads REQUIRED)
+
 if(NOT DEFINED TTK_SOURCE_DIR)
   message(FATAL_ERROR "Set TTK_SOURCE_DIR to the pinned TTK source checkout")
 endif()
@@ -29,4 +31,10 @@ add_executable(morseframes_ttk_gradient_benchmark
   benchmark_ttk_process_lower_stars.cpp
 )
 target_compile_features(morseframes_ttk_gradient_benchmark PRIVATE cxx_std_17)
-target_link_libraries(morseframes_ttk_gradient_benchmark PRIVATE discreteGradient)
+target_include_directories(morseframes_ttk_gradient_benchmark PRIVATE
+  "${CMAKE_CURRENT_LIST_DIR}/../../include"
+)
+target_link_libraries(morseframes_ttk_gradient_benchmark PRIVATE
+  discreteGradient
+  Threads::Threads
+)

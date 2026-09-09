@@ -218,6 +218,52 @@ adding one measured explicit-triangulation setup and preconditioning pass to
 the prepared gradient-kernel time. The other columns compare prepared gradient
 kernels only.
 
+### Direct TTK versus parallel ReductionKernel
+
+The publication-facing comparison runs F-Max, TTK ProcessLowerStars, and the
+parallel ReductionKernel in the same native process. The execution order is
+rotated on every repetition to reduce systematic thermal and ordering bias.
+Both TTK and MorseFrames topology construction are outside the gradient timing,
+and TTK's gradient cache is bypassed on every call.
+
+```sh
+PYTHONPATH=python python3 tools/benchmark_ttk_reduction_kernel.py \
+  --ttk-benchmark "$TTK_BENCHMARK" \
+  --terrain-sizes 16 32 64 \
+  --volume-sizes 4 8 12 16 \
+  --seeds 0 1 2 \
+  --workers 1 2 4 8 \
+  --repeats 7 \
+  --warmups 2 \
+  --output ../work/ttk_reduction_kernel.csv
+
+python3 tools/render_ttk_reduction_kernel_table.py \
+  --input ../work/ttk_reduction_kernel.csv \
+  --output docs/ttk_reduction_kernel_table.tex
+```
+
+All 84 configurations have identical critical-simplex counts by dimension.
+On 2D terrains, TTK is faster in every case: the median ReductionKernel/TTK
+ratios are 2.18, 2.41, 2.77, and 2.48 at one, two, four, and eight workers. The
+four-worker ReductionKernel remains faster than F-Max at 0.89 times its time,
+but TTK reaches 0.27.
+
+The 3D result is substantially closer. The median ReductionKernel/TTK ratios
+are 0.92, 0.99, 1.11, and 1.20 at one, two, four, and eight workers,
+respectively. Thus ReductionKernel has a small sequential advantage, the two
+are effectively tied at two workers, and TTK has a modest advantage at four and
+eight workers. At eight workers both have nearly identical aggregate ratios to
+F-Max, 0.48 for ReductionKernel and 0.49 for TTK; the median of the paired
+ReductionKernel/TTK ratios is 1.20 because a ratio of medians is not generally
+the median of per-case ratios. The paired ratios are the appropriate direct
+comparison.
+
+This establishes the intended result without optimizing MorseFrames
+ProcessLowerStars: the arbitrary-dimensional ReductionKernel is competitive
+with TTK's dimension-specialized Robins implementation in 3D, while TTK remains
+clearly superior for these 2D triangulations. The aggregate table is stored in
+`docs/ttk_reduction_kernel_table.tex`.
+
 ## Unified Gradient-Only Strategy Comparison
 
 This is the central internal benchmark for discrete-gradient construction. It

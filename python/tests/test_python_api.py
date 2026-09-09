@@ -1593,7 +1593,7 @@ class PythonApiTest(unittest.TestCase):
             profile = mp.profile_morse_sequence(
                 complex_, algorithm="flooding-reduction-kernel"
             )
-            self.assertGreater(
+            self.assertEqual(
                 profile.metrics["reduction_kernel_inline_cell_overflows"], 0
             )
             self.assertGreater(
@@ -1618,6 +1618,13 @@ class PythonApiTest(unittest.TestCase):
         )
         self.assertEqual(len(sequential.steps), 128)
         self.assertEqual(sequential.steps, parallel.steps)
+        if mp.cpp_backend_available() and complex_.cpp_backend_active():
+            profile = mp.profile_morse_sequence(
+                complex_, algorithm="flooding-reduction-kernel"
+            )
+            self.assertGreater(
+                profile.metrics["reduction_kernel_inline_cell_overflows"], 0
+            )
 
     def test_benchmark_persistence_lower_star(self):
         complex_ = mp.FilteredComplex.from_lower_star(

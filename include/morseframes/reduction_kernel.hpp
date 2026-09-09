@@ -189,6 +189,9 @@ class ReductionKernelWorkspace {
     bool enabled = false;
     std::vector<SimplexId> entries;
     std::vector<std::pair<std::size_t, std::size_t>> ranges;
+    const std::vector<std::uint64_t>* packed_masks = nullptr;
+    const std::vector<SimplexId>* packed_bucket = nullptr;
+    std::size_t packed_block_count = 0;
     const std::vector<SimplexId>* cached_entries = nullptr;
     const std::vector<std::pair<std::size_t, std::size_t>>* cached_ranges =
         nullptr;
@@ -225,6 +228,9 @@ class ReductionKernelWorkspace {
       level_cells.enabled = false;
       level_cells.entries.clear();
       level_cells.ranges.clear();
+      level_cells.packed_masks = nullptr;
+      level_cells.packed_bucket = nullptr;
+      level_cells.packed_block_count = 0;
       level_cells.cached_entries = nullptr;
       level_cells.cached_ranges = nullptr;
     }
@@ -708,6 +714,9 @@ class ReductionKernelWorkspace {
       const std::size_t block_count = (bucket.size() + 63) / 64;
       auto& masks = scratch.closure_masks;
       masks.assign(bucket.size() * block_count, 0);
+      cells.packed_masks = &masks;
+      cells.packed_bucket = &bucket;
+      cells.packed_block_count = block_count;
       cells.ranges.resize(bucket.size());
       for (std::size_t simplex_index = 0; simplex_index < bucket.size();
            ++simplex_index) {
@@ -962,10 +971,124 @@ class ReductionKernelWorkspace {
   }
 
   template <bool CollectMetrics>
+  FacetKernelResult<CollectMetrics> compute_packed_facet_kernel(
+      LevelId level, SimplexId facet,
+      const LevelCells& level_cells) const {
+    FacetKernelResult<CollectMetrics> result;
+    const auto& bucket = *level_cells.packed_bucket;
+    const std::size_t block_count = level_cells.packed_block_count;
+    const std::size_t facet_index = bucket_index_[facet];
+    const auto* cell_mask =
+        level_cells.packed_masks->data() + facet_index * block_count;
+
+    if constexpr (CollectMetrics) {
+      const auto core_start = profile_start<CollectMetrics>();
+      for (std::size_t block = 0; block < block_count; ++block) {
+        std::uint64_t entries = cell_mask[block];
+        while (entries != 0) {
+          ++result.facet_cell_visits;
+          entries &= entries - 1;
+        }
+      }
+      result.core_nanoseconds =
+          elapsed_nanoseconds(core_start, Clock::now());
+    }
+
+    const auto reduction_start = profile_start<CollectMetrics>();
+    constexpr std::size_t kPackedBlockCapacity =
+        (kPackedClosureBucketCapacity + 63) / 64;
+    std::array<std::uint64_t, kPackedBlockCapacity> removed{};
+    while (true) {
+      SimplexId reduction_sigma = kInvalidSimplex;
+      SimplexId reduction_tau = kInvalidSimplex;
+      std::size_t reduction_sigma_index = bucket.size();
+      std::size_t reduction_tau_index = bucket.size();
+
+      // Iterating set bits from low to high preserves the canonical bucket
+      // order used by the sparse kernel without materializing a local cell.
+      bool found_reduction = false;
+      for (std::size_t block = 0;
+           block < block_count && !found_reduction; ++block) {
+        std::uint64_t candidates = cell_mask[block];
+        while (candidates != 0) {
+          const std::size_t offset = trailing_zero_count(candidates);
+          const std::size_t sigma_index = 64 * block + offset;
+          candidates &= candidates - 1;
+          if constexpr (CollectMetrics) {
+            ++result.local_candidate_visits;
+          }
+          const SimplexId sigma = bucket[sigma_index];
+          const std::uint64_t sigma_bit = std::uint64_t{1} << offset;
+          if ((removed[block] & sigma_bit) != 0 || !active_[sigma] ||
+              facet_incidence_[sigma] > 1) {
+            continue;
+          }
+
+          SimplexId unique_coface = kInvalidSimplex;
+          std::size_t unique_coface_index = bucket.size();
+          std::size_t coface_count = 0;
+          visit_same_level_coboundary(
+              sigma, level, false, [&](SimplexId coface) {
+                if constexpr (CollectMetrics) {
+                  ++result.local_coboundary_visits;
+                }
+                if (!active_[coface]) {
+                  return true;
+                }
+                if constexpr (CollectMetrics) {
+                  ++result.local_membership_tests;
+                }
+                const std::size_t coface_index = bucket_index_[coface];
+                const std::size_t coface_block = coface_index / 64;
+                const std::uint64_t coface_bit =
+                    std::uint64_t{1} << (coface_index % 64);
+                if ((cell_mask[coface_block] & coface_bit) == 0 ||
+                    (removed[coface_block] & coface_bit) != 0) {
+                  return true;
+                }
+                unique_coface = coface;
+                unique_coface_index = coface_index;
+                ++coface_count;
+                return coface_count <= 1;
+              });
+          if (coface_count == 1 && facet_incidence_[unique_coface] == 1) {
+            reduction_sigma = sigma;
+            reduction_tau = unique_coface;
+            reduction_sigma_index = sigma_index;
+            reduction_tau_index = unique_coface_index;
+            found_reduction = true;
+            break;
+          }
+        }
+      }
+
+      if (reduction_sigma == kInvalidSimplex) {
+        break;
+      }
+      removed[reduction_sigma_index / 64] |=
+          std::uint64_t{1} << (reduction_sigma_index % 64);
+      removed[reduction_tau_index / 64] |=
+          std::uint64_t{1} << (reduction_tau_index % 64);
+      result.events.push_back(ReductionKernelEvent{
+          reduction_sigma, reduction_tau});
+    }
+    if constexpr (CollectMetrics) {
+      result.local_reduction_nanoseconds =
+          elapsed_nanoseconds(reduction_start, Clock::now());
+      result.inline_event_overflows = result.events.uses_overflow() ? 1 : 0;
+    }
+    return result;
+  }
+
+  template <bool CollectMetrics>
   FacetKernelResult<CollectMetrics> compute_facet_kernel(
       LevelId level, SimplexId facet,
       const std::vector<SimplexId>& bucket,
       const LevelCells& level_cells) const {
+    if (level_cells.packed_masks != nullptr) {
+      return compute_packed_facet_kernel<CollectMetrics>(
+          level, facet, level_cells);
+    }
     FacetKernelResult<CollectMetrics> result;
     const auto core_start = profile_start<CollectMetrics>();
     InlineVector<SimplexId, kInlineCellCapacity> cell;

@@ -243,18 +243,19 @@ python3 tools/render_ttk_reduction_kernel_table.py \
 ```
 
 All 84 configurations have identical critical-simplex counts by dimension.
-On 2D terrains, TTK is faster in every case: the median ReductionKernel/TTK
-ratios are 1.94, 2.32, 2.63, and 1.81 at one, two, four, and eight workers. The
-four-worker ReductionKernel remains faster than F-Max at 0.85 times its time,
-but TTK reaches 0.36.
+On 2D terrains, TTK is faster in 34 of 36 configurations: the median
+ReductionKernel/TTK ratios are 1.73, 2.26, 2.73, and 1.91 at one, two, four,
+and eight workers. The four-worker ReductionKernel remains faster than F-Max
+at 0.82 times its time,
+but TTK reaches 0.33.
 
 The 3D result is substantially closer. The median ReductionKernel/TTK ratios
-are 0.80, 0.85, 0.98, and 1.06 at one, two, four, and eight workers,
-respectively. Thus ReductionKernel is 20 percent faster sequentially, 15
-percent faster at two workers, effectively tied at four workers, and only 6
-percent slower at eight workers. At eight workers, the median ratios to F-Max
-are 0.46 for ReductionKernel and 0.44 for TTK. ReductionKernel reaches a median
-2.46-fold eight-worker speedup, while TTK reaches 3.64-fold. Direct paired
+are 0.78, 0.90, 1.10, and 0.94 at one, two, four, and eight workers,
+respectively. Thus ReductionKernel is 22 percent faster sequentially, 10
+percent faster at two workers, 10 percent slower at four workers, and 6 percent
+faster at eight workers. At eight workers, the median ratios to F-Max are 0.54
+for ReductionKernel and 1.06 for TTK. ReductionKernel reaches a median
+2.20-fold eight-worker speedup, while TTK reaches 1.57-fold. Direct paired
 ratios remain the appropriate comparison because ratios of independently
 aggregated timings can be misleading.
 
@@ -283,7 +284,7 @@ PYTHONPATH=python python3 tools/benchmark_gradient_strategies.py \
   --volume-sizes 4 8 12 16 \
   --seeds 0 1 2 \
   --workers 1 2 4 8 \
-  --repeats 5 \
+  --repeats 11 \
   --warmups 1 \
   --format csv \
   --output ../work/gradient_strategy_benchmark.csv
@@ -570,14 +571,14 @@ python3 tools/render_tetrahedral_phase_profile.py \
   --table-output docs/tetrahedral_phase_profile_table.tex
 ```
 
-Across the twelve cases, eight-worker ProcessLowerStars reaches a 2.37-fold
-gradient-construction speedup; ReductionKernel reaches 2.35-fold. Their median
-eight-worker construction times are 3.97 ms and 0.90 ms, respectively. At
-eight workers, ProcessLowerStars spends 30.3 percent in global setup, 39.1
-percent in parallel local-star processing, 3.1 percent in ordered replay, and
-4.9 percent in builder initialization. ReductionKernel spends 79.5 percent of
-its diagnostic wall time processing levels; setup and replay account for 16.0
-and 4.3 percent. The CSV also records ReductionKernel chunk counts, per-worker
+Across the twelve cases, eight-worker ProcessLowerStars reaches a 2.23-fold
+gradient-construction speedup; ReductionKernel reaches 1.90-fold. Their median
+eight-worker construction times are 4.53 ms and 1.09 ms, respectively. At
+eight workers, ProcessLowerStars spends 28.9 percent in global setup, 42.9
+percent in parallel local-star processing, 3.4 percent in ordered replay, and
+4.5 percent in builder initialization. ReductionKernel spends 82.4 percent of
+its diagnostic wall time processing levels; setup and replay account for 13.2
+and 3.1 percent. The CSV also records ReductionKernel chunk counts, per-worker
 level and simplex loads, task time, and effective task parallelism, alongside
 kernel rounds, facet kernels, topology scans, membership tests, and inline
 buffer overflows. All measured triangular and

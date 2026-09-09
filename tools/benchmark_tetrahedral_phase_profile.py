@@ -82,10 +82,12 @@ class TetrahedralPhaseProfileRow:
     reduction_kernel_rounds: int
     reduction_kernel_facet_kernels: int
     reduction_kernel_facet_discovery_coboundary_visits: int
+    reduction_kernel_facet_discovery_mask_tests: int
     reduction_kernel_incidence_cell_visits: int
     reduction_kernel_facet_cell_visits: int
     reduction_kernel_local_candidate_visits: int
     reduction_kernel_local_coboundary_visits: int
+    reduction_kernel_local_coboundary_mask_tests: int
     reduction_kernel_local_membership_tests: int
     reduction_kernel_inline_cell_overflows: int
     reduction_kernel_inline_event_overflows: int
@@ -344,6 +346,12 @@ def benchmark_profile(
                     ),
                     reduction_kernel_local_membership_tests=int(
                         metrics.get("reduction_kernel_local_membership_tests", 0)
+                    ),
+                    reduction_kernel_facet_discovery_mask_tests=int(
+                        metrics.get("reduction_kernel_facet_discovery_mask_tests", 0)
+                    ),
+                    reduction_kernel_local_coboundary_mask_tests=int(
+                        metrics.get("reduction_kernel_local_coboundary_mask_tests", 0)
                     ),
                     reduction_kernel_inline_cell_overflows=int(
                         metrics.get("reduction_kernel_inline_cell_overflows", 0)

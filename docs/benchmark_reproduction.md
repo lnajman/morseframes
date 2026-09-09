@@ -5,6 +5,10 @@ repository. It is meant for software reproducibility: manuscript text and
 discussion notes live outside the public repository, in the private manuscript
 workspace until a public preprint or published version exists.
 
+The controlled ReductionKernel A/B and direct TTK comparison sections record
+the latest packed-coface results. Other stored tables on this page are earlier
+benchmark snapshots; their timings do not describe the latest implementation.
+
 Run commands from the repository root.
 
 ```sh
@@ -232,10 +236,10 @@ Run it without other tests, builds or benchmarks in progress.
 
 ```sh
 python3 tools/benchmark_reduction_kernel_ab.py \
-  --baseline ebddcc4 --candidate WORKTREE \
+  --baseline d32f71a --candidate WORKTREE \
   --sizes 16 24 32 --seeds 0 1 2 --workers 1 2 4 8 \
   --blocks 12 --repeats 3 --warmups 2 \
-  --input-dir ../rk-ab-inputs --output ../rk-packed-core-ab.json
+  --input-dir ../rk-ab-inputs --output ../rk-packed-cofaces-ab.json
 ```
 
 The inputs use the existing injective tetrahedral-volume generator. The timed
@@ -254,19 +258,20 @@ The controlled native ARM run on this MacBook Pro (Apple clang 15, C++17,
 with 792,051 simplices. The table gives median reductions in total gradient
 time across nine size/seed cases per worker count. Positive values mean faster.
 
-| Workers | Packed facets: `b01eaa0` to `ebddcc4` | Packed core: relative to `ebddcc4` |
-| ---: | ---: | ---: |
-| 1 | 8.2% | 10.4% |
-| 2 | 5.8% | 10.1% |
-| 4 | 7.7% | 10.7% |
-| 8 | 6.1% | 9.0% |
+| Workers | Packed facets: `b01eaa0` to `ebddcc4` | Packed core: `ebddcc4` to `d32f71a` | Packed cofaces: relative to `d32f71a` |
+| ---: | ---: | ---: | ---: |
+| 1 | 8.2% | 10.4% | 42.9% |
+| 2 | 5.8% | 10.1% | 35.7% |
+| 4 | 7.7% | 10.7% | 27.6% |
+| 8 | 6.1% | 9.0% | 23.2% |
 
 Packed facets were faster in 34/36 configurations; packed cores were faster in
 36/36. All exact sequence comparisons passed. These paired results replace the
 earlier small, separate-run estimates of 1.3% and 5.6% for packed facets. Raw
 evidence is saved locally as `../rk-packed-facets-ab-1.json` and
 `../rk-packed-core-ab-1.json`. To reproduce the first comparison, use
-`--baseline b01eaa0 --candidate ebddcc4`. Bootstrap intervals describe the
+`--baseline b01eaa0 --candidate ebddcc4`; for the second, use
+`--baseline ebddcc4 --candidate d32f71a`. Bootstrap intervals describe the
 observed session and do not establish uncertainty across machines or sessions.
 These measurements do not update the separate TTK comparison below.
 
@@ -279,55 +284,87 @@ uniform. The raw confirmation is `../rk-packed-core-ab-confirmation.json`.
 Use the corresponding `--sizes`, `--seeds`, `--workers` and `--blocks` options
 with a new output filename to repeat it.
 
-### Direct TTK versus parallel ReductionKernel
+Packed cofaces additionally remove adjacency-list traversal from packed facet
+discovery and the local unique-coface test. Their mask construction and active
+mask updates are included in the measured total. All 36 configurations favored
+this change, and each case's paired-block bootstrap interval was below parity.
+All exact sequence checks passed. Raw samples are saved as
+`../rk-packed-cofaces-ab-1.json`.
+A fresh run on sizes 16 and 32, seeds 0 and 2, workers 1 and 8, with 16 blocks
+of three repetitions again favored packed cofaces in all eight configurations.
+Median reductions were 42.7% sequentially and 25.6% with eight workers, and all
+paired-block intervals were below parity. Its exact sequence checks also
+passed; raw evidence is `../rk-packed-cofaces-ab-confirmation.json`.
 
-The figures in this subsection were measured at `ebddcc4`, before the packed
-protected-core optimization. They remain a historical TTK comparison.
+### Direct TTK versus parallel ReductionKernel
 
 The publication-facing comparison runs F-Max, TTK ProcessLowerStars, and the
 parallel ReductionKernel in the same native process. The execution order is
-rotated on every repetition to reduce systematic thermal and ordering bias.
+balanced over all six permutations of the algorithms. Each CSV row retains
+all timing samples and their interquartile ranges. Reported times are medians;
+ratios between algorithms are medians of their paired per-repetition ratios.
+This replaces the former independently selected best-time estimates.
 Both TTK and MorseFrames topology construction are outside the gradient timing,
-and TTK's gradient cache is bypassed on every call.
+and TTK's gradient cache is bypassed on every call. Unlike the total-construction
+A/B benchmark above, this comparison reuses the MorseFrames builder outside
+the timer. It measures the prepared gradient kernels, including RK's task pool
+and event replay. The returned sequence is assigned to a reusable output.
+
+The main run uses `OMP_WAIT_POLICY=PASSIVE` so idle OpenMP workers do not spin
+while another algorithm is being measured. The selected policy is recorded
+in every CSV row. Timing and especially small-input scaling depend on this
+runtime setting; comparisons must use the same policy and timing definition.
 
 ```sh
-PYTHONPATH=python python3 tools/benchmark_ttk_reduction_kernel.py \
+OMP_WAIT_POLICY=PASSIVE PYTHONPATH=python python3 tools/benchmark_ttk_reduction_kernel.py \
   --ttk-benchmark "$TTK_BENCHMARK" \
   --terrain-sizes 16 32 64 \
-  --volume-sizes 4 8 12 16 \
+  --volume-sizes 4 8 12 16 24 32 \
   --seeds 0 1 2 \
   --workers 1 2 4 8 \
-  --repeats 7 \
-  --warmups 2 \
-  --output ../work/ttk_reduction_kernel.csv
+  --repeats 18 \
+  --warmups 3 \
+  --output ../ttk_reduction_kernel_packed_cofaces.csv
 
 python3 tools/render_ttk_reduction_kernel_table.py \
-  --input ../work/ttk_reduction_kernel.csv \
+  --input ../ttk_reduction_kernel_packed_cofaces.csv \
   --output docs/ttk_reduction_kernel_table.tex
 ```
 
-All 84 configurations have identical critical-simplex counts by dimension.
-On 2D terrains, TTK is faster in 34 of 36 configurations: the median
-ReductionKernel/TTK ratios are 1.73, 2.26, 2.73, and 1.91 at one, two, four,
-and eight workers. The four-worker ReductionKernel remains faster than F-Max
-at 0.82 times its time,
-but TTK reaches 0.33.
+All 108 configurations have identical critical-simplex counts by dimension.
+On 2D terrains, TTK is faster in all 36 configurations: the median
+ReductionKernel/TTK ratios are 1.26, 1.61, 2.03, and 1.95 at one, two, four,
+and eight workers. RK's median ratios to sequential F-Max are 0.79, 0.78, 0.83
+and 1.07. Additional workers do not benefit these small RK terrain workloads.
 
-The 3D result is substantially closer. The median ReductionKernel/TTK ratios
-are 0.78, 0.90, 1.10, and 0.94 at one, two, four, and eight workers,
-respectively. Thus ReductionKernel is 22 percent faster sequentially, 10
-percent faster at two workers, 10 percent slower at four workers, and 6 percent
-faster at eight workers. At eight workers, the median ratios to F-Max are 0.54
-for ReductionKernel and 1.06 for TTK. ReductionKernel reaches a median
-2.20-fold eight-worker speedup, while TTK reaches 1.57-fold. Direct paired
-ratios remain the appropriate comparison because ratios of independently
-aggregated timings can be misleading.
+On 3D volumes, the median ReductionKernel/TTK ratios are 0.43, 0.53, 0.62,
+and 0.67 at one, two, four, and eight workers. RK wins in 65 of 72
+configurations, including all 18 sequential cases. The median eight-worker
+ratios to F-Max are 0.20 for RK and 0.36 for TTK. RK reaches a median 2.22-fold
+eight-worker speedup from its own one-worker time, while TTK reaches 3.45-fold.
+TTK scales more strongly but starts from a slower one-worker time on these
+volumes. Restricting to the 24-cubed and 32-cubed inputs, eight-worker RK has
+median ratios of 0.12 to F-Max and 0.67 to TTK.
 
-This establishes the intended result without optimizing MorseFrames
-ProcessLowerStars: the arbitrary-dimensional ReductionKernel is competitive
-with TTK's dimension-specialized Robins implementation in 3D, while TTK remains
-clearly superior for these 2D triangulations. The aggregate table is stored in
-`docs/ttk_reduction_kernel_table.tex`.
+These are workload- and runtime-specific prepared-kernel comparisons, not a
+claim that RK is uniformly fastest. The aggregate table is stored in
+`docs/ttk_reduction_kernel_table.tex`. This refresh changes the statistic,
+OpenMP policy and input-size range from the older `ebddcc4` table; the controlled
+A/B experiment above is the evidence for the isolated implementation gain.
+
+A runtime-policy check reran terrains of sizes 32/64 and volumes of sizes
+16/32, seeds 0/2, with 1/8 workers and `OMP_WAIT_POLICY` unset. All 16 critical
+count comparisons passed. On its four eight-worker volume cases, RK/TTK was
+0.52 (versus 0.65 on the matching passive-policy cases), and RK won every case
+under both policies. The eight-worker terrain ranking reversed: RK/TTK was
+0.34 with the default policy, versus 1.98 with passive waiting. Thus the 3D
+advantage survived this check, while the 2D parallel comparison is sensitive
+to runtime behavior and should not be presented as an unconditional algorithm
+ranking. These were separate sessions, not an interleaved policy experiment.
+The control samples are in `../ttk_reduction_kernel_cofaces_default_policy.csv`.
+To reproduce them, use `env -u OMP_WAIT_POLICY` with the same command and
+`--terrain-sizes 32 64 --volume-sizes 16 32 --seeds 0 2 --workers 1 8`, writing
+to a separate output file.
 
 ## Unified Gradient-Only Strategy Comparison
 

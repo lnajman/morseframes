@@ -103,10 +103,12 @@ struct MorseSequenceBuildMetrics {
   std::size_t reduction_kernel_aggregation_rounds = 0;
   std::size_t reduction_kernel_aggregation_parallel_tasks = 0;
   std::size_t reduction_kernel_facet_discovery_coboundary_visits = 0;
+  std::size_t reduction_kernel_facet_discovery_mask_tests = 0;
   std::size_t reduction_kernel_incidence_cell_visits = 0;
   std::size_t reduction_kernel_facet_cell_visits = 0;
   std::size_t reduction_kernel_local_candidate_visits = 0;
   std::size_t reduction_kernel_local_coboundary_visits = 0;
+  std::size_t reduction_kernel_local_coboundary_mask_tests = 0;
   std::size_t reduction_kernel_local_membership_tests = 0;
   std::size_t reduction_kernel_inline_cell_overflows = 0;
   std::size_t reduction_kernel_inline_event_overflows = 0;
@@ -1855,6 +1857,8 @@ class FSequenceBuilder {
           kernel_metrics.aggregation_parallel_tasks;
       sequence_metrics_->reduction_kernel_facet_discovery_coboundary_visits =
           kernel_metrics.facet_discovery_coboundary_visits;
+      sequence_metrics_->reduction_kernel_facet_discovery_mask_tests =
+          kernel_metrics.facet_discovery_mask_tests;
       sequence_metrics_->reduction_kernel_incidence_cell_visits =
           kernel_metrics.incidence_cell_visits;
       sequence_metrics_->reduction_kernel_facet_cell_visits =
@@ -1863,6 +1867,8 @@ class FSequenceBuilder {
           kernel_metrics.local_candidate_visits;
       sequence_metrics_->reduction_kernel_local_coboundary_visits =
           kernel_metrics.local_coboundary_visits;
+      sequence_metrics_->reduction_kernel_local_coboundary_mask_tests =
+          kernel_metrics.local_coboundary_mask_tests;
       sequence_metrics_->reduction_kernel_local_membership_tests =
           kernel_metrics.local_membership_tests;
       sequence_metrics_->reduction_kernel_inline_cell_overflows =

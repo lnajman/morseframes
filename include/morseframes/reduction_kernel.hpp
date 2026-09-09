@@ -64,10 +64,12 @@ struct ReductionKernelMetrics {
   std::size_t aggregation_rounds = 0;
   std::size_t aggregation_parallel_tasks = 0;
   std::size_t facet_discovery_coboundary_visits = 0;
+  std::size_t facet_discovery_mask_tests = 0;
   std::size_t incidence_cell_visits = 0;
   std::size_t facet_cell_visits = 0;
   std::size_t local_candidate_visits = 0;
   std::size_t local_coboundary_visits = 0;
+  std::size_t local_coboundary_mask_tests = 0;
   std::size_t local_membership_tests = 0;
   std::size_t inline_cell_overflows = 0;
   std::size_t inline_event_overflows = 0;
@@ -172,6 +174,7 @@ class ReductionKernelWorkspace {
     std::size_t facet_cell_visits = 0;
     std::size_t local_candidate_visits = 0;
     std::size_t local_coboundary_visits = 0;
+    std::size_t local_coboundary_mask_tests = 0;
     std::size_t local_membership_tests = 0;
     std::size_t inline_cell_overflows = 0;
     std::size_t inline_event_overflows = 0;
@@ -192,6 +195,7 @@ class ReductionKernelWorkspace {
     std::vector<SimplexId> entries;
     std::vector<std::pair<std::size_t, std::size_t>> ranges;
     const std::vector<std::uint64_t>* packed_masks = nullptr;
+    const std::vector<std::uint64_t>* packed_cofaces = nullptr;
     const std::vector<SimplexId>* packed_bucket = nullptr;
     std::size_t packed_block_count = 0;
     PackedMask packed_active{};
@@ -225,6 +229,7 @@ class ReductionKernelWorkspace {
       }
       included.resize(bucket_size);
       closure_masks.clear();
+      coface_masks.clear();
       cell_indices.clear();
       if (cell_indices.capacity() < kInlineCellCapacity) {
         cell_indices.reserve(kInlineCellCapacity);
@@ -233,6 +238,7 @@ class ReductionKernelWorkspace {
       level_cells.entries.clear();
       level_cells.ranges.clear();
       level_cells.packed_masks = nullptr;
+      level_cells.packed_cofaces = nullptr;
       level_cells.packed_bucket = nullptr;
       level_cells.packed_block_count = 0;
       level_cells.packed_active.fill(0);
@@ -252,6 +258,7 @@ class ReductionKernelWorkspace {
     std::vector<std::uint8_t> included;
     std::vector<std::size_t> cell_indices;
     std::vector<std::uint64_t> closure_masks;
+    std::vector<std::uint64_t> coface_masks;
   };
 
   class FixedEventBuffer {
@@ -541,6 +548,8 @@ class ReductionKernelWorkspace {
                 facet_result.local_candidate_visits;
             metrics.local_coboundary_visits +=
                 facet_result.local_coboundary_visits;
+            metrics.local_coboundary_mask_tests +=
+                facet_result.local_coboundary_mask_tests;
             metrics.local_membership_tests +=
                 facet_result.local_membership_tests;
             metrics.inline_cell_overflows +=
@@ -561,6 +570,13 @@ class ReductionKernelWorkspace {
           }
           active_[event.sigma] = 0;
           active_[event.tau] = 0;
+          if (level_cells.packed_masks != nullptr) {
+            for (SimplexId simplex : {event.sigma, event.tau}) {
+              const std::size_t index = bucket_index_[simplex];
+              level_cells.packed_active[index / 64] &=
+                  ~(std::uint64_t{1} << (index % 64));
+            }
+          }
           round_removed_[event.sigma] = 0;
           round_removed_[event.tau] = 0;
           remaining -= 2;
@@ -589,6 +605,11 @@ class ReductionKernelWorkspace {
       const SimplexId critical = facets.front();
       events.push_back(ReductionKernelEvent{critical, kInvalidSimplex});
       active_[critical] = 0;
+      if (level_cells.packed_masks != nullptr) {
+        const std::size_t index = bucket_index_[critical];
+        level_cells.packed_active[index / 64] &=
+            ~(std::uint64_t{1} << (index % 64));
+      }
       --remaining;
       if constexpr (CollectMetrics) {
         ++metrics.perforations;
@@ -631,10 +652,13 @@ class ReductionKernelWorkspace {
         source.aggregation_parallel_tasks;
     destination.facet_discovery_coboundary_visits +=
         source.facet_discovery_coboundary_visits;
+    destination.facet_discovery_mask_tests +=
+        source.facet_discovery_mask_tests;
     destination.incidence_cell_visits += source.incidence_cell_visits;
     destination.facet_cell_visits += source.facet_cell_visits;
     destination.local_candidate_visits += source.local_candidate_visits;
     destination.local_coboundary_visits += source.local_coboundary_visits;
+    destination.local_coboundary_mask_tests += source.local_coboundary_mask_tests;
     destination.local_membership_tests += source.local_membership_tests;
     destination.inline_cell_overflows += source.inline_cell_overflows;
     destination.inline_event_overflows += source.inline_event_overflows;
@@ -714,7 +738,10 @@ class ReductionKernelWorkspace {
       const std::size_t block_count = (bucket.size() + 63) / 64;
       auto& masks = scratch.closure_masks;
       masks.assign(bucket.size() * block_count, 0);
+      auto& cofaces = scratch.coface_masks;
+      cofaces.assign(bucket.size() * block_count, 0);
       cells.packed_masks = &masks;
+      cells.packed_cofaces = &cofaces;
       cells.packed_bucket = &bucket;
       cells.packed_block_count = block_count;
       for (std::size_t simplex_index = 0; simplex_index < bucket.size();
@@ -722,6 +749,8 @@ class ReductionKernelWorkspace {
         const SimplexId simplex = bucket[simplex_index];
         auto* simplex_mask = masks.data() + simplex_index * block_count;
         simplex_mask[simplex_index / 64] |=
+            std::uint64_t{1} << (simplex_index % 64);
+        cells.packed_active[simplex_index / 64] |=
             std::uint64_t{1} << (simplex_index % 64);
         for (SimplexId face : complex_.boundary(simplex)) {
           if (complex_.level(face) != complex_.level(simplex)) {
@@ -732,6 +761,10 @@ class ReductionKernelWorkspace {
             throw std::logic_error(
                 "Reduction-kernel level bucket is not face-first.");
           }
+          // Only immediate cofaces belong in this mask, not all containing
+          // simplices. The same boundary visit also builds transitive closure.
+          cofaces[face_index * block_count + simplex_index / 64] |=
+              std::uint64_t{1} << (simplex_index % 64);
           const auto* face_mask = masks.data() + face_index * block_count;
           for (std::size_t block = 0; block < block_count; ++block) {
             simplex_mask[block] |= face_mask[block];
@@ -826,6 +859,34 @@ class ReductionKernelWorkspace {
       bool allow_parallelism) const {
     auto& facets = scratch.facets;
     facets.clear();
+    const auto& cells = scratch.level_cells;
+    if (cells.packed_cofaces != nullptr) {
+      // The active mask is updated only after all facet tasks finish. Its
+      // set bits retain the original bucket order across every kernel round.
+      for (std::size_t block = 0; block < cells.packed_block_count; ++block) {
+        std::uint64_t candidates = cells.packed_active[block];
+        while (candidates != 0) {
+          const std::size_t index = 64 * block + trailing_zero_count(candidates);
+          candidates &= candidates - 1;
+          const auto* cofaces = cells.packed_cofaces->data() +
+                                index * cells.packed_block_count;
+          bool has_active_coface = false;
+          for (std::size_t b = 0; b < cells.packed_block_count; ++b) {
+            if constexpr (CollectMetrics) {
+              ++metrics.facet_discovery_mask_tests;
+            }
+            if ((cofaces[b] & cells.packed_active[b]) != 0) {
+              has_active_coface = true;
+              break;
+            }
+          }
+          if (!has_active_coface) {
+            facets.push_back(bucket[index]);
+          }
+        }
+      }
+      return facets;
+    }
     const std::size_t workers =
         executor_ == nullptr ? 1 : executor_->worker_count();
     const bool sequential_scan =
@@ -926,14 +987,6 @@ class ReductionKernelWorkspace {
           seen[block] |= cell_mask[block];
         }
       }
-      level_cells.packed_active.fill(0);
-      for (SimplexId simplex : bucket) {
-        if (active_[simplex]) {
-          const std::size_t index = bucket_index_[simplex];
-          level_cells.packed_active[index / 64] |=
-              std::uint64_t{1} << (index % 64);
-        }
-      }
       for (std::size_t block = 0; block < block_count; ++block) {
         level_cells.packed_unique[block] =
             seen[block] & ~shared[block] & level_cells.packed_active[block];
@@ -996,7 +1049,7 @@ class ReductionKernelWorkspace {
 
   template <bool CollectMetrics>
   FacetKernelResult<CollectMetrics> compute_packed_facet_kernel(
-      LevelId level, SimplexId facet,
+      SimplexId facet,
       const LevelCells& level_cells) const {
     FacetKernelResult<CollectMetrics> result;
     const auto& bucket = *level_cells.packed_bucket;
@@ -1045,37 +1098,31 @@ class ReductionKernelWorkspace {
           }
           const SimplexId sigma = bucket[sigma_index];
 
-          SimplexId unique_coface = kInvalidSimplex;
           std::size_t unique_coface_index = bucket.size();
-          std::size_t coface_count = 0;
-          visit_same_level_coboundary(
-              sigma, level, false, [&](SimplexId coface) {
-                if constexpr (CollectMetrics) {
-                  ++result.local_coboundary_visits;
-                }
-                if (!active_[coface]) {
-                  return true;
-                }
-                if constexpr (CollectMetrics) {
-                  ++result.local_membership_tests;
-                }
-                const std::size_t coface_index = bucket_index_[coface];
-                const std::size_t coface_block = coface_index / 64;
-                const std::uint64_t coface_bit =
-                    std::uint64_t{1} << (coface_index % 64);
-                if ((live_cell[coface_block] & coface_bit) == 0) {
-                  return true;
-                }
-                unique_coface = coface;
-                unique_coface_index = coface_index;
-                ++coface_count;
-                return coface_count <= 1;
-              });
-          if (coface_count == 1 &&
+          const auto* cofaces = level_cells.packed_cofaces->data() +
+                                sigma_index * block_count;
+          for (std::size_t b = 0; b < block_count; ++b) {
+            if constexpr (CollectMetrics) {
+              ++result.local_coboundary_mask_tests;
+            }
+            const std::uint64_t live_cofaces = cofaces[b] & live_cell[b];
+            if (live_cofaces == 0) {
+              continue;
+            }
+            // Reject two bits in one word, or a second nonempty word. The
+            // intersection includes protected cofaces in the uniqueness test.
+            if ((live_cofaces & (live_cofaces - 1)) != 0 ||
+                unique_coface_index != bucket.size()) {
+              unique_coface_index = bucket.size();
+              break;
+            }
+            unique_coface_index = 64 * b + trailing_zero_count(live_cofaces);
+          }
+          if (unique_coface_index != bucket.size() &&
               (level_cells.packed_unique[unique_coface_index / 64] &
                (std::uint64_t{1} << (unique_coface_index % 64))) != 0) {
             reduction_sigma = sigma;
-            reduction_tau = unique_coface;
+            reduction_tau = bucket[unique_coface_index];
             reduction_sigma_index = sigma_index;
             reduction_tau_index = unique_coface_index;
             found_reduction = true;
@@ -1109,7 +1156,7 @@ class ReductionKernelWorkspace {
       const LevelCells& level_cells) const {
     if (level_cells.packed_masks != nullptr) {
       return compute_packed_facet_kernel<CollectMetrics>(
-          level, facet, level_cells);
+          facet, level_cells);
     }
     FacetKernelResult<CollectMetrics> result;
     const auto core_start = profile_start<CollectMetrics>();

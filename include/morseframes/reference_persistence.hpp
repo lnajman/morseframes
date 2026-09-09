@@ -132,10 +132,12 @@ struct MorseReferenceFrameMetrics {
   std::size_t sequence_reduction_kernel_aggregation_rounds = 0;
   std::size_t sequence_reduction_kernel_aggregation_parallel_tasks = 0;
   std::size_t sequence_reduction_kernel_facet_discovery_coboundary_visits = 0;
+  std::size_t sequence_reduction_kernel_facet_discovery_mask_tests = 0;
   std::size_t sequence_reduction_kernel_incidence_cell_visits = 0;
   std::size_t sequence_reduction_kernel_facet_cell_visits = 0;
   std::size_t sequence_reduction_kernel_local_candidate_visits = 0;
   std::size_t sequence_reduction_kernel_local_coboundary_visits = 0;
+  std::size_t sequence_reduction_kernel_local_coboundary_mask_tests = 0;
   std::size_t sequence_reduction_kernel_local_membership_tests = 0;
   std::size_t sequence_reduction_kernel_inline_cell_overflows = 0;
   std::size_t sequence_reduction_kernel_inline_event_overflows = 0;
@@ -1214,6 +1216,10 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.reduction_kernel_local_candidate_visits;
       frame_metrics.sequence_reduction_kernel_local_coboundary_visits =
           sequence_build_metrics.reduction_kernel_local_coboundary_visits;
+      frame_metrics.sequence_reduction_kernel_facet_discovery_mask_tests =
+          sequence_build_metrics.reduction_kernel_facet_discovery_mask_tests;
+      frame_metrics.sequence_reduction_kernel_local_coboundary_mask_tests =
+          sequence_build_metrics.reduction_kernel_local_coboundary_mask_tests;
       frame_metrics.sequence_reduction_kernel_local_membership_tests =
           sequence_build_metrics.reduction_kernel_local_membership_tests;
       frame_metrics.sequence_reduction_kernel_inline_cell_overflows =

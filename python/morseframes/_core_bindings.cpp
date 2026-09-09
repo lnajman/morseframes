@@ -385,6 +385,10 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
       metrics.sequence_reduction_kernel_aggregation_parallel_tasks;
   result["sequence_reduction_kernel_facet_discovery_coboundary_visits"] =
       metrics.sequence_reduction_kernel_facet_discovery_coboundary_visits;
+  result["sequence_reduction_kernel_facet_discovery_mask_tests"] =
+      metrics.sequence_reduction_kernel_facet_discovery_mask_tests;
+  result["sequence_reduction_kernel_local_coboundary_mask_tests"] =
+      metrics.sequence_reduction_kernel_local_coboundary_mask_tests;
   result["sequence_reduction_kernel_incidence_cell_visits"] =
       metrics.sequence_reduction_kernel_incidence_cell_visits;
   result["sequence_reduction_kernel_facet_cell_visits"] =
@@ -517,6 +521,10 @@ nb::dict sequence_metrics_to_python(const morseframes::MorseSequenceBuildMetrics
       metrics.reduction_kernel_aggregation_parallel_tasks;
   result["reduction_kernel_facet_discovery_coboundary_visits"] =
       metrics.reduction_kernel_facet_discovery_coboundary_visits;
+  result["reduction_kernel_facet_discovery_mask_tests"] =
+      metrics.reduction_kernel_facet_discovery_mask_tests;
+  result["reduction_kernel_local_coboundary_mask_tests"] =
+      metrics.reduction_kernel_local_coboundary_mask_tests;
   result["reduction_kernel_incidence_cell_visits"] =
       metrics.reduction_kernel_incidence_cell_visits;
   result["reduction_kernel_facet_cell_visits"] =

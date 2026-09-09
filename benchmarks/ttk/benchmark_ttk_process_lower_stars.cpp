@@ -5,6 +5,7 @@
 #include "morseframes/morse_sequence.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <fstream>
@@ -235,24 +236,32 @@ int main(int argc, char** argv) {
     double best_ttk_seconds = std::numeric_limits<double>::infinity();
     double best_f_max_seconds = std::numeric_limits<double>::infinity();
     double best_reduction_kernel_seconds = std::numeric_limits<double>::infinity();
+    std::vector<double> ttk_samples, f_max_samples, reduction_kernel_samples;
+    ttk_samples.reserve(options.repeats);
+    f_max_samples.reserve(options.repeats);
+    reduction_kernel_samples.reserve(options.repeats);
     const auto measure = [](auto&& callback) {
       const auto start = Clock::now();
       callback();
       return seconds(start, Clock::now());
     };
+    // Balance positions and pairwise precedence across six repetitions.
+    constexpr std::array<std::array<int, 3>, 6> orders{{
+        {{0, 1, 2}}, {{2, 1, 0}}, {{1, 2, 0}},
+        {{0, 2, 1}}, {{2, 0, 1}}, {{1, 0, 2}}}};
     for (int repeat = 0; repeat < options.repeats; ++repeat) {
-      const int rotation = repeat % 3;
       for (int position = 0; position < 3; ++position) {
-        const int algorithm = (position + rotation) % 3;
+        const int algorithm = orders[repeat % orders.size()][position];
         if (algorithm == 0) {
-          best_f_max_seconds =
-              std::min(best_f_max_seconds, measure(build_f_max));
+          f_max_samples.push_back(measure(build_f_max));
+          best_f_max_seconds = std::min(best_f_max_seconds, f_max_samples.back());
         } else if (algorithm == 1) {
+          reduction_kernel_samples.push_back(measure(build_reduction_kernel));
           best_reduction_kernel_seconds = std::min(
-              best_reduction_kernel_seconds, measure(build_reduction_kernel));
+              best_reduction_kernel_seconds, reduction_kernel_samples.back());
         } else {
-          best_ttk_seconds =
-              std::min(best_ttk_seconds, measure(build_ttk_gradient));
+          ttk_samples.push_back(measure(build_ttk_gradient));
+          best_ttk_seconds = std::min(best_ttk_seconds, ttk_samples.back());
         }
       }
     }
@@ -303,7 +312,16 @@ int main(int argc, char** argv) {
               << ",\"gradient_seconds\":" << best_ttk_seconds
               << ",\"f_max_seconds\":" << best_f_max_seconds
               << ",\"reduction_kernel_seconds\":"
-              << best_reduction_kernel_seconds << "}\n";
+              << best_reduction_kernel_seconds;
+    // Keep legacy best-time fields for existing clients; direct comparisons
+    // consume the complete sample arrays and report paired median ratios.
+    std::cout << ",\"f_max_samples_seconds\":";
+    write_json_array(f_max_samples);
+    std::cout << ",\"reduction_kernel_samples_seconds\":";
+    write_json_array(reduction_kernel_samples);
+    std::cout << ",\"ttk_samples_seconds\":";
+    write_json_array(ttk_samples);
+    std::cout << "}\n";
     return 0;
   } catch (const std::exception& error) {
     std::cerr << "error: " << error.what() << '\n';

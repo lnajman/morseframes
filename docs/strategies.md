@@ -286,14 +286,19 @@ The metrics-free result type omits all diagnostic fields at compile time;
 parallel metrics-free collection therefore also moves smaller result objects.
 
 For level buckets containing at most 128 simplices, ReductionKernel constructs
-same-level closures as packed bit masks. The local facet kernel retains that
+same-level closures and immediate cofaces as packed bit masks during one
+boundary traversal. The local facet kernel retains that
 representation throughout a round. Accumulating `shared |= seen & closure`
 before `seen |= closure` over current facets identifies faces contained in at
 least two facets, hence the protected core. Intersecting `seen & ~shared` with
 the active mask identifies eligible simplices. Each facet keeps a local live
 mask, scans eligible set bits in canonical bucket order, and clears each pair
-as it is reduced. Coface membership is a single bit lookup; protected cofaces
-still participate in the unique-coface test.
+as it is reduced. Intersecting the immediate-coface mask with the local live
+mask tests whether exactly one coface remains, across either one or two words.
+Protected cofaces still participate in this uniqueness test. The level's
+active mask is updated after each round's facet tasks finish, and after each
+perforation. A simplex is a current facet exactly when its coface mask has
+empty intersection with that active mask.
 
 The packed path no longer materializes closure entry lists or counts incidence
 simplex by simplex. Larger buckets and precomputed caches keep the independent
@@ -301,6 +306,10 @@ sparse implementation, so the strategy remains dimension agnostic. The
 `incidence_cell_visits` diagnostic counts sparse entry visits only (zero for
 packed levels); `local_candidate_visits` counts candidates actually scanned,
 after the packed filter has excluded protected and removed simplices.
+The new `facet_discovery_mask_tests` and `local_coboundary_mask_tests` counters
+count word intersections. The existing coboundary-visit and local membership
+counters continue to count individual sparse entries, so the two units are
+not mixed.
 
 For repeated sequential gradients on an owning `FilteredComplex`, callers may
 invoke `complex_.prepare_reduction_kernel_cache()` once. ReductionKernel then
@@ -315,9 +324,9 @@ workspace and local-kernel routine. Facet cells in a round are evaluated in
 bounded batches against one immutable active-set snapshot. A reusable task pool
 is shared by level and facet work; waiting tasks cooperatively execute queued
 work, allowing nested parallelism without deadlock or repeated thread creation.
-The current facets are discovered in parallel in level-bucket chunks. Small
-levels compute their core using the packed word operations above before
-launching facet tasks. The sparse path can compute facet incidence for each
+Small levels discover facets and compute their core with the packed word
+operations above before launching facet tasks. The sparse path can discover
+facets in parallel level-bucket chunks and compute facet incidence for each
 active face in parallel once per round, saturating the count at two. Both paths
 identify the core without rescanning every other facet inside each local
 kernel, and preserve deterministic facet-result order.

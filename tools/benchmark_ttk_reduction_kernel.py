@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
+import os
+import statistics
 import sys
 import tempfile
 from dataclasses import asdict, dataclass
@@ -42,6 +45,47 @@ class DirectComparisonRow:
     reduction_kernel_ratio_vs_ttk: float
     reduction_kernel_speedup_vs_one: float
     ttk_speedup_vs_one: float
+    timing_statistic: str
+    omp_wait_policy: str
+    f_max_samples_seconds: tuple[float, ...]
+    reduction_kernel_samples_seconds: tuple[float, ...]
+    ttk_samples_seconds: tuple[float, ...]
+    f_max_iqr_seconds: tuple[float, float]
+    reduction_kernel_iqr_seconds: tuple[float, float]
+    ttk_iqr_seconds: tuple[float, float]
+
+
+def summarize_timings(result: dict, repeats: int) -> dict:
+    samples = {}
+    for name in ("f_max", "reduction_kernel", "ttk"):
+        field = f"{name}_samples_seconds"
+        if field not in result:
+            raise ValueError("Native benchmark lacks raw timing samples; rebuild it")
+        values = tuple(float(value) for value in result[field])
+        if (len(values) != repeats or not values or
+                any(not math.isfinite(v) or v <= 0 for v in values)):
+            raise ValueError(f"Invalid timing samples: {field}")
+        samples[name] = values
+    summary = {f"{name}_samples_seconds": values for name, values in samples.items()}
+    for name, values in samples.items():
+        quartiles = (statistics.quantiles(values, n=4, method="inclusive")
+                     if len(values) > 1 else [values[0]] * 3)
+        summary[f"{name}_iqr_seconds"] = (quartiles[0], quartiles[2])
+    summary.update(
+        timing_statistic="median; paired per-repetition ratios",
+        f_max_seconds=statistics.median(samples["f_max"]),
+        reduction_kernel_seconds=statistics.median(samples["reduction_kernel"]),
+        ttk_process_lower_stars_seconds=statistics.median(samples["ttk"]),
+    )
+    for field, numerator, denominator in (
+        ("reduction_kernel_ratio_vs_f_max", "reduction_kernel", "f_max"),
+        ("ttk_ratio_vs_f_max", "ttk", "f_max"),
+        ("reduction_kernel_ratio_vs_ttk", "reduction_kernel", "ttk"),
+    ):
+        summary[field] = statistics.median(
+            a / b for a, b in zip(samples[numerator], samples[denominator], strict=True)
+        )
+    return summary
 
 
 def benchmark_case(
@@ -78,14 +122,13 @@ def benchmark_case(
     )
     if one_worker is None:
         raise ValueError("workers must include the one-worker baseline")
-    one_reduction_kernel = float(one_worker["reduction_kernel_seconds"])
-    one_ttk = float(one_worker["gradient_seconds"])
+    one_timings = summarize_timings(one_worker, repeats)
+    one_reduction_kernel = one_timings["reduction_kernel_seconds"]
+    one_ttk = one_timings["ttk_process_lower_stars_seconds"]
 
     rows: list[DirectComparisonRow] = []
     for worker_count, result in raw_rows:
-        f_max_seconds = float(result["f_max_seconds"])
-        reduction_kernel_seconds = float(result["reduction_kernel_seconds"])
-        ttk_seconds = float(result["gradient_seconds"])
+        timings = summarize_timings(result, repeats)
         ttk_critical = tuple(
             int(value) for value in result["critical_simplices_by_dimension"]
         )
@@ -120,20 +163,12 @@ def benchmark_case(
                 num_simplices=num_simplices,
                 critical_simplices_by_dimension=ttk_critical,
                 critical_counts_match=counts_match,
-                f_max_seconds=f_max_seconds,
-                reduction_kernel_seconds=reduction_kernel_seconds,
-                ttk_process_lower_stars_seconds=ttk_seconds,
-                reduction_kernel_ratio_vs_f_max=(
-                    reduction_kernel_seconds / f_max_seconds
-                ),
-                ttk_ratio_vs_f_max=ttk_seconds / f_max_seconds,
-                reduction_kernel_ratio_vs_ttk=(
-                    reduction_kernel_seconds / ttk_seconds
-                ),
+                omp_wait_policy=os.environ.get("OMP_WAIT_POLICY", "runtime-default"),
+                **timings,
                 reduction_kernel_speedup_vs_one=(
-                    one_reduction_kernel / reduction_kernel_seconds
+                    one_reduction_kernel / timings["reduction_kernel_seconds"]
                 ),
-                ttk_speedup_vs_one=one_ttk / ttk_seconds,
+                ttk_speedup_vs_one=one_ttk / timings["ttk_process_lower_stars_seconds"],
             )
         )
     return rows
@@ -152,8 +187,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--volume-sizes", type=int, nargs="+", default=(4, 8, 12, 16))
     parser.add_argument("--seeds", type=int, nargs="+", default=(0, 1, 2))
     parser.add_argument("--workers", type=int, nargs="+", default=(1, 2, 4, 8))
-    parser.add_argument("--repeats", type=int, default=7)
-    parser.add_argument("--warmups", type=int, default=2)
+    parser.add_argument("--repeats", type=int, default=18)
+    parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
 

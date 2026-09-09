@@ -67,6 +67,12 @@ class TetrahedralPhaseProfileBenchmarkTest(unittest.TestCase):
             all(row.reduction_kernel_local_coboundary_visits > 0 for row in kernel_rows)
         )
         self.assertTrue(
+            all(row.reduction_kernel_local_coboundary_mask_tests > 0 for row in kernel_rows)
+        )
+        self.assertTrue(
+            all(row.reduction_kernel_facet_discovery_mask_tests > 0 for row in kernel_rows)
+        )
+        self.assertTrue(
             all(row.reduction_kernel_inline_cell_overflows == 0 for row in kernel_rows)
         )
         self.assertTrue(

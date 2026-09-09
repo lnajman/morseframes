@@ -1189,7 +1189,10 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   assert(parallel_metrics.reduction_kernel_parallel_batches > 0);
   assert(parallel_metrics.reduction_kernel_max_parallel_facets == 2);
   assert(parallel_metrics.reduction_kernel_executor_workers == 2);
-  assert(parallel_metrics.reduction_kernel_facet_discovery_parallel_tasks > 0);
+  assert(parallel_metrics.reduction_kernel_facet_discovery_parallel_tasks == 0);
+  assert(parallel_metrics.reduction_kernel_facet_discovery_mask_tests > 0);
+  assert(parallel_metrics.reduction_kernel_local_coboundary_mask_tests > 0);
+  assert(parallel_metrics.reduction_kernel_local_coboundary_visits == 0);
   // Small packed levels compute protected cores with word operations.
   assert(parallel_metrics.reduction_kernel_essential_parallel_tasks == 0);
   assert(parallel_metrics.reduction_kernel_aggregation_rounds > 0);

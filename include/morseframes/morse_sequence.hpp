@@ -61,6 +61,7 @@ struct MorseSequenceBuildMetrics {
   std::uint64_t reduction_kernel_aggregation_nanoseconds = 0;
   std::uint64_t reduction_kernel_merge_nanoseconds = 0;
   std::uint64_t reduction_kernel_closure_nanoseconds = 0;
+  std::uint64_t reduction_kernel_facet_execution_nanoseconds = 0;
   std::uint64_t reduction_kernel_setup_nanoseconds = 0;
   std::uint64_t reduction_kernel_level_wall_nanoseconds = 0;
   std::uint64_t reduction_kernel_replay_nanoseconds = 0;
@@ -319,12 +320,14 @@ class FSequenceBuilder {
 
  public:
   explicit FSequenceBuilder(const ComplexView& complex,
-                            MorseSequenceBuildMetrics* sequence_metrics = nullptr)
+                            MorseSequenceBuildMetrics* sequence_metrics = nullptr,
+                            bool detailed_reduction_kernel_metrics = true)
       : complex_(complex),
         simplex_order_rank_(complex.size(), kInvalidSimplexRank),
         simplex_levels_(complex.size(), 0),
         simplex_dimensions_(complex.size(), 0),
-        sequence_metrics_(sequence_metrics) {
+        sequence_metrics_(sequence_metrics),
+        detailed_reduction_kernel_metrics_(detailed_reduction_kernel_metrics) {
     const auto& order = complex_.filtration_order();
     if (order.size() != complex_.size()) {
       throw std::logic_error("Filtration order size does not match complex size.");
@@ -1606,7 +1609,10 @@ class FSequenceBuilder {
   template <typename StepCallback>
   MorseSequence build_flooding_reduction_kernel_with_execution_options(
       ReductionKernelExecutionOptions options, StepCallback&& on_step) const {
-    options.collect_metrics = sequence_metrics_ != nullptr;
+    // Coarse profiling retains the ordinary metrics-free local kernels. It
+    // measures only construction phases and long-lived level-worker activity.
+    const bool measure_workers = sequence_metrics_ != nullptr;
+    options.collect_metrics = measure_workers && detailed_reduction_kernel_metrics_;
     const auto setup_start = profile_start();
     const std::size_t n = complex_.size();
     MorseSequence sequence(n);
@@ -1680,9 +1686,9 @@ class FSequenceBuilder {
         std::size_t simplices = 0;
       };
       std::vector<LevelWorkerProfile> level_worker_profiles(
-          options.collect_metrics ? task_count : 0);
+          measure_workers ? task_count : 0);
       std::atomic<LevelId> next_level{0};
-      if (options.collect_metrics) {
+      if (measure_workers) {
         ++kernel_metrics.parallel_level_batches;
         kernel_metrics.max_parallel_levels = task_count;
       }
@@ -1693,10 +1699,10 @@ class FSequenceBuilder {
             [task, &next_level, num_levels, &workspace, &event_offsets,
              level_events, &level_event_counts, &level_metrics,
              collect_metrics = options.collect_metrics,
-             level_chunk_size, &level_worker_profiles]() {
+             measure_workers, level_chunk_size, &level_worker_profiles]() {
               LevelWorkerProfile worker_profile;
               const auto worker_start =
-                  collect_metrics ? SequenceClock::now()
+                  measure_workers ? SequenceClock::now()
                                   : SequenceClock::time_point{};
               while (true) {
                 const LevelId first_level = next_level.fetch_add(
@@ -1704,17 +1710,19 @@ class FSequenceBuilder {
                 if (first_level >= num_levels) {
                   break;
                 }
-                if (collect_metrics) {
+                if (measure_workers) {
                   ++worker_profile.chunks;
                 }
                 const LevelId last_level = std::min<LevelId>(
                     num_levels, first_level + level_chunk_size);
                 for (LevelId level = first_level; level < last_level;
                      ++level) {
-                  if (collect_metrics) {
+                  if (measure_workers) {
                     ++worker_profile.levels;
                     worker_profile.simplices +=
                         event_offsets[level + 1] - event_offsets[level];
+                  }
+                  if (collect_metrics) {
                     level_metrics[level] =
                         workspace.compute_level_isolated_into(
                             level, task, level_events + event_offsets[level],
@@ -1728,7 +1736,7 @@ class FSequenceBuilder {
                   }
                 }
               }
-              if (collect_metrics) {
+              if (measure_workers) {
                 worker_profile.nanoseconds = elapsed_nanoseconds(
                     worker_start, SequenceClock::now());
                 level_worker_profiles[task] = worker_profile;
@@ -1738,7 +1746,7 @@ class FSequenceBuilder {
       for (auto& future : futures) {
         executor->get(future);
       }
-      if (options.collect_metrics) {
+      if (measure_workers) {
         sequence_metrics_->reduction_kernel_level_chunk_size =
             level_chunk_size;
         sequence_metrics_->reduction_kernel_min_level_task_nanoseconds =
@@ -1829,6 +1837,8 @@ class FSequenceBuilder {
           kernel_metrics.merge_nanoseconds;
       sequence_metrics_->reduction_kernel_closure_nanoseconds =
           kernel_metrics.closure_nanoseconds;
+      sequence_metrics_->reduction_kernel_facet_execution_nanoseconds =
+          kernel_metrics.facet_execution_nanoseconds;
       sequence_metrics_->reduction_kernel_levels = kernel_metrics.levels;
       sequence_metrics_->reduction_kernel_rounds = kernel_metrics.kernel_rounds;
       sequence_metrics_->reduction_kernel_facet_kernels =
@@ -2167,6 +2177,7 @@ class FSequenceBuilder {
   std::vector<LevelId> simplex_levels_;
   std::vector<std::uint16_t> simplex_dimensions_;
   MorseSequenceBuildMetrics* sequence_metrics_ = nullptr;
+  bool detailed_reduction_kernel_metrics_ = true;
 };
 
 template <class ComplexView>

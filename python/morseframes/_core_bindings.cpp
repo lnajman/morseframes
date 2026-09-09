@@ -329,6 +329,8 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
       metrics.sequence_reduction_kernel_merge_nanoseconds;
   result["sequence_reduction_kernel_closure_nanoseconds"] =
       metrics.sequence_reduction_kernel_closure_nanoseconds;
+  result["sequence_reduction_kernel_facet_execution_nanoseconds"] =
+      metrics.sequence_reduction_kernel_facet_execution_nanoseconds;
   result["sequence_reduction_kernel_setup_nanoseconds"] =
       metrics.sequence_reduction_kernel_setup_nanoseconds;
   result["sequence_reduction_kernel_level_wall_nanoseconds"] =
@@ -448,6 +450,8 @@ nb::dict sequence_metrics_to_python(const morseframes::MorseSequenceBuildMetrics
       metrics.reduction_kernel_merge_nanoseconds;
   result["reduction_kernel_closure_nanoseconds"] =
       metrics.reduction_kernel_closure_nanoseconds;
+  result["reduction_kernel_facet_execution_nanoseconds"] =
+      metrics.reduction_kernel_facet_execution_nanoseconds;
   result["reduction_kernel_setup_nanoseconds"] =
       metrics.reduction_kernel_setup_nanoseconds;
   result["reduction_kernel_level_wall_nanoseconds"] =

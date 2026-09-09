@@ -101,6 +101,7 @@ struct MorseReferenceFrameMetrics {
   std::uint64_t sequence_reduction_kernel_aggregation_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_merge_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_closure_nanoseconds = 0;
+  std::uint64_t sequence_reduction_kernel_facet_execution_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_setup_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_level_wall_nanoseconds = 0;
   std::uint64_t sequence_reduction_kernel_replay_nanoseconds = 0;
@@ -1143,6 +1144,8 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.reduction_kernel_merge_nanoseconds;
       frame_metrics.sequence_reduction_kernel_closure_nanoseconds =
           sequence_build_metrics.reduction_kernel_closure_nanoseconds;
+      frame_metrics.sequence_reduction_kernel_facet_execution_nanoseconds =
+          sequence_build_metrics.reduction_kernel_facet_execution_nanoseconds;
       frame_metrics.sequence_reduction_kernel_setup_nanoseconds =
           sequence_build_metrics.reduction_kernel_setup_nanoseconds;
       frame_metrics.sequence_reduction_kernel_level_wall_nanoseconds =

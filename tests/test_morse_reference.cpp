@@ -1312,6 +1312,21 @@ void test_reduction_kernel_packed_core_matches_sparse_cache() {
     morseframes::MorseSequenceBuildMetrics metrics;
     compare(FSequenceBuilder(complex, &metrics)
                 .build_flooding_reduction_kernel_parallel(4));
+    for (std::size_t workers : {1, 4}) {
+      morseframes::MorseSequenceBuildMetrics coarse;
+      FSequenceBuilder builder(complex, &coarse, false);
+      compare(workers == 1 ? builder.build_flooding_reduction_kernel()
+                          : builder.build_flooding_reduction_kernel_parallel(workers));
+      assert(coarse.reduction_kernel_setup_nanoseconds > 0);
+      assert(coarse.reduction_kernel_level_wall_nanoseconds > 0);
+      assert(coarse.reduction_kernel_rounds == 0);
+      assert(coarse.reduction_kernel_local_candidate_visits == 0);
+      assert(coarse.reduction_kernel_facet_execution_nanoseconds == 0);
+      if (workers > 1 && complex.num_levels() > 1) {
+        assert(coarse.reduction_kernel_max_parallel_levels > 1);
+        assert(coarse.reduction_kernel_level_chunks > 0);
+      }
+    }
   };
 
   // Exercise both word boundaries and the packed/sparse cutoff. Combining

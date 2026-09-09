@@ -49,6 +49,9 @@ struct ReductionKernelMetrics {
   std::uint64_t aggregation_nanoseconds = 0;
   std::uint64_t merge_nanoseconds = 0;
   std::uint64_t closure_nanoseconds = 0;
+  // Per-level elapsed time, including facet dispatch/wait; do not add this to
+  // cumulative core/local times, which are nested inside facet execution.
+  std::uint64_t facet_execution_nanoseconds = 0;
   std::size_t levels = 0;
   std::size_t kernel_rounds = 0;
   std::size_t facet_kernels = 0;
@@ -531,10 +534,12 @@ class ReductionKernelWorkspace {
             }
           }
         } else {
+          const auto execution_start = profile_start<true>();
           const auto& facet_results = execute_facets<true>(
               level, facets, scratch.active_simplices, level_cells,
               scratch.diagnostic_facet_results, metrics,
               allow_intra_level_parallelism);
+          profile_add<true>(metrics.facet_execution_nanoseconds, execution_start);
           const auto aggregation_start = profile_start<true>();
           if (facet_results.size() > 1) {
             ++metrics.aggregation_rounds;
@@ -629,6 +634,7 @@ class ReductionKernelWorkspace {
     destination.aggregation_nanoseconds += source.aggregation_nanoseconds;
     destination.merge_nanoseconds += source.merge_nanoseconds;
     destination.closure_nanoseconds += source.closure_nanoseconds;
+    destination.facet_execution_nanoseconds += source.facet_execution_nanoseconds;
     destination.levels += source.levels;
     destination.kernel_rounds += source.kernel_rounds;
     destination.facet_kernels += source.facet_kernels;

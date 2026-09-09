@@ -5,8 +5,8 @@ repository. It is meant for software reproducibility: manuscript text and
 discussion notes live outside the public repository, in the private manuscript
 workspace until a public preprint or published version exists.
 
-The controlled ReductionKernel A/B and direct TTK comparison sections record
-the latest packed-coface results. Other stored tables on this page are earlier
+The controlled ReductionKernel A/B, direct TTK comparison, and current RK phase
+profile sections record the latest packed-coface results. Other stored tables on this page are earlier
 benchmark snapshots; their timings do not describe the latest implementation.
 
 Run commands from the repository root.
@@ -648,7 +648,124 @@ efficiencies are 0.33 and 0.39, respectively.
 The grid-size aggregates are generated in
 `docs/tetrahedral_worker_scaling_table.tex`.
 
-## Gradient-only Tetrahedral Phase Profile
+## Current ReductionKernel Phase Profile
+
+The September 9, 2026 profile of the packed-coface algorithm (`e1aaeaa`, with
+profiling-only additions) identifies two different optimization targets:
+large single plateaus suffer from the parallel incidence algorithm, while
+ordinary lower stars increasingly expose serial builder initialization.
+These measurements concern gradient construction only.
+
+```sh
+python3 tools/benchmark_reduction_kernel_phases.py \
+  --terrain-sizes 16 64 --volume-sizes 16 32 \
+  --plateau-terrain-sizes 16 32 --plateau-volume-sizes 4 8 12 \
+  --seeds 0 2 --workers 1 2 4 8 \
+  --blocks 8 --repeats 3 --coarse-blocks 8 --detailed-blocks 3 --warmups 2 \
+  --input-dir ../rk-ab-inputs --output ../rk-phases-cofaces-1.json
+
+python3 tools/render_reduction_kernel_phases.py \
+  --input ../rk-phases-cofaces-1.json \
+  --table-output docs/reduction_kernel_phase_table.tex
+```
+
+The run covers 13 complexes and 52 worker configurations on an Apple M1 Max
+(eight performance cores, two efficiency cores), using native ARM Clang 15,
+C++17, `-O3 -DNDEBUG -pthread`. Ordinary lower-star inputs use both seeds;
+plateaus use the first seed's topology with all vertex values set to zero.
+Each configuration retains 24 uninstrumented samples, eight coarse samples,
+and three detailed samples, plus separate warmups. Worker-count order rotates
+and reverses between blocks. All input generation and compilation finish before
+timing. Every timed and diagnostic sequence agrees field-for-field with a
+validated sequential sequence on the same input. No persistence is computed.
+
+The timer includes a fresh builder, workspace, worker pool, gradient, ordered
+replay, and internal teardown. Topology construction, protocol I/O, validation,
+and destruction of the returned sequence are excluded. Unlike the direct TTK
+table, builder construction is included here, so times from the two tables
+must not be substituted for each other.
+
+Coarse profiling disables local diagnostic timers and counters, retaining
+outer wall-clock phases and elapsed duration/load counters for long-lived
+level tasks. Detailed runs separately record mask/closure construction,
+facet discovery, protected-face incidence, local reductions, facet execution
+including dispatch/wait, aggregation, and merging. The JSON preserves every
+sample, quartiles, input/header/driver hashes, and exact-check status. The field
+`overhead_ratio` is only the ratio of diagnostic to uninstrumented medians from
+separate run groups, **not** a causal estimate of instrumentation overhead.
+Reported phase shares use each coarse run's own measured total. Residual time
+includes workspace/builder destruction and worker-pool shutdown. Detailed
+subphase durations accumulate across levels/workers, and core/local durations
+nest inside facet execution; they cannot be summed with outer wall times.
+
+At the largest ordinary 3D size (`n=32`, 792,051 simplices), median time across
+the two input medians is 60.44 ms sequentially and 22.87 ms at eight workers;
+the median per-input speedup is 2.64. At eight workers, coarse phase shares
+are approximately 30.7% builder initialization, 5.2% setup, 52.1% level
+processing, 6.9% replay, and 3.8% residual. Shares are separately aggregated
+medians and need not sum exactly to 100%. Elapsed level-task overlap is
+7.43 and 7.66 for the two seeds at eight workers. This is **not CPU utilization**
+and does not separate memory contention from OS scheduling, but gives no
+reason to prioritize another level-load-balancing change. Approximately 99.8%
+of simplices use packed-eligible levels, with maximum bucket size 75.
+Small workloads remain sensitive to worker-pool overhead: the `n=16` ordinary
+terrains take roughly 0.06--0.07 ms sequentially and 0.27--0.29 ms at eight
+workers. Increasing the worker budget is therefore not always beneficial.
+
+The constant-field plateaus exercise the sparse path and spatial parallelism.
+For the `n=32` terrain (5,891 simplices), time rises from 1.38 ms sequentially
+to 155.69 ms at eight workers. For the `n=12` volume (36,851 simplices), it rises
+from 8.56 ms to 1,501.23 ms. Thus the earlier lower-star results must not be
+generalized to large plateaus. These large slowdowns are not gradient errors:
+the sequences are identical at every worker count.
+
+Code inspection and diagnostic counters identify the mechanism. In
+`ReductionKernelWorkspace::compute_facet_incidence`, the sequential sparse
+path walks cached facet closures, but the intra-level parallel path tests
+active simplices against current facets. On the `n=12` volume this changes
+580,792 closure-entry visits into 663,665,205 simplex/facet containment tests.
+These count different operations, not interchangeable units. Protected-face
+incidence alone accounts for about 1,295 ms of the detailed eight-worker
+run. On the smaller `n=8` volume, the corresponding counts are 104,650 and
+35,725,927; incidence takes about 61 ms and facet execution about 29 ms.
+The latter includes thousands of individually submitted facet tasks; this is
+a second cost, distinct from the all-pairs scan.
+
+A fresh six-complex, 24-configuration confirmation uses the same command with
+`--terrain-sizes 64 --volume-sizes 32 --plateau-terrain-sizes 32
+--plateau-volume-sizes 8` and output
+`../rk-phases-cofaces-confirmation.json`. All exact checks pass again. The
+ordinary `n=32` volume speedup is 2.62 and the eight-worker builder share is
+29.7%. The plateau terrain takes 1.34 ms sequentially versus 156.62 ms at eight
+workers; the `n=8` plateau volume takes 1.50 ms versus 91.43 ms. The large
+`n=12` plateau is not included in this independent confirmation. Raw timing
+variability remains available; these are one-machine observations, not
+cross-machine confidence bounds or proof of the gain from an unimplemented
+optimization.
+
+An additional uninstrumented A/B control against `e1aaeaa` checks the profiling
+additions themselves. The first eight-configuration run and a fresh
+four-configuration repeat do not show a repeatable performance shift: for
+example, the large seed-0 sequential candidate/baseline ratio changes from
+1.138 to 0.917 between runs. All exact comparisons pass. These controls are
+stored in `../rk-phases-uninstrumented-control.json` and
+`../rk-phases-uninstrumented-control-2.json`. They are not evidence for a
+speed improvement or a formal equivalence margin; they reinforce the need
+for independent sessions alongside within-session timing distributions.
+
+The next implementation should **remove the parallel all-pairs incidence
+scan**, using cached closures for all execution policies while retaining
+saturated counts (zero, one, or multiple incident facets). A simple linear
+closure traversal is an important baseline; any parallel version should use
+race-free local accumulation and deterministic merging. Then address
+per-facet task batching if it remains material. For ordinary lower stars,
+inspect whether the generic builder's rank/level/dimension tables can be
+avoided or deferred for RK without weakening input validation. Ordered replay
+is not the first target in this profile. None of these algorithmic changes is
+included in the profiling-only update; each needs a controlled A/B test and
+exact-gradient checks on both packed levels and large sparse plateaus.
+
+## Gradient-only Tetrahedral Phase Profile (Historical)
 
 This benchmark times only construction of the discrete gradient. It invokes
 `FSequenceBuilder` with a no-op callback: no reference map, reduction plan, or

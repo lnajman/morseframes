@@ -55,9 +55,11 @@ def header_digest(path: Path) -> str:
 
 
 class Worker:
-    def __init__(self, binary: Path, input_path: Path, dump: Path):
+    def __init__(self, binary: Path, input_path: Path, dump: Path,
+                 input_mode: str | None = None):
         self.process = subprocess.Popen(
-            [str(binary), str(input_path), str(dump)], text=True,
+            [str(binary), str(input_path), str(dump)] +
+            ([] if input_mode is None else [input_mode]), text=True,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         )
         try:

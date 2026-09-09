@@ -311,6 +311,20 @@ count word intersections. The existing coboundary-visit and local membership
 counters continue to count individual sparse entries, so the two units are
 not mixed.
 
+For low-overhead C++ phase diagnostics, construct
+`FSequenceBuilder(complex, &metrics, false)`. The optional third argument disables
+detailed ReductionKernel instrumentation while retaining outer setup, level,
+and replay timers and long-lived level-worker activity. Local kernels then use
+the ordinary metrics-free implementation, and their detailed counters remain
+zero (unmeasured, not zero work). The default remains detailed profiling when
+a metrics object is supplied. Without a metrics object, neither mode enables
+instrumentation. This option does not change other sequence strategies.
+The detailed `reduction_kernel_facet_execution_nanoseconds` metric includes
+facet dispatch and waiting. Its per-level elapsed intervals accumulate over
+concurrently processed levels, while core and local-reduction times accumulate
+over facet tasks and are nested within execution; these must not be added to
+outer wall-clock phases.
+
 For repeated sequential gradients on an owning `FilteredComplex`, callers may
 invoke `complex_.prepare_reduction_kernel_cache()` once. ReductionKernel then
 reads immutable, precomputed same-level closure ranges and coboundary adjacency

@@ -376,6 +376,27 @@ class PythonApiTest(unittest.TestCase):
         complex_.clear_reduction_kernel_cache()
         self.assertFalse(complex_.reduction_kernel_cache_ready)
 
+    def test_parallel_reduction_kernel_chunks_many_levels(self):
+        if not mp.cpp_backend_available():
+            self.skipTest("C++ backend is not built")
+
+        vertex_count = 300
+        simplices = [([vertex], float(vertex)) for vertex in range(vertex_count)]
+        simplices.extend(
+            ([vertex - 1, vertex], float(vertex))
+            for vertex in range(1, vertex_count)
+        )
+        complex_ = mp.FilteredComplex.from_simplices(simplices)
+        sequential = mp.compute_morse_sequence(
+            complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_SEQUENCE
+        )
+        parallel = mp.compute_morse_sequence(
+            complex_,
+            algorithm=mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+            max_workers=4,
+        )
+        self.assertEqual(sequential.steps, parallel.steps)
+
     def test_low_level_cpp_api_when_available(self):
         if not mp.cpp_backend_available():
             self.skipTest("C++ backend is not built")

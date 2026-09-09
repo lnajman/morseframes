@@ -1655,6 +1655,11 @@ class FSequenceBuilder {
       // facet tasks are disabled on this path; a single large plateau still
       // uses the intra-level parallel algorithm.
       const std::size_t task_count = std::min(level_workers, num_levels);
+      // Keep enough dynamically claimed chunks for load balancing while
+      // amortizing the atomic counter on complexes with many small levels.
+      constexpr std::size_t kChunksPerWorker = 32;
+      const std::size_t level_chunk_size = std::max<std::size_t>(
+          1, num_levels / (task_count * kChunksPerWorker));
       std::atomic<LevelId> next_level{0};
       if (options.collect_metrics) {
         ++kernel_metrics.parallel_level_batches;
@@ -1666,23 +1671,30 @@ class FSequenceBuilder {
         futures.push_back(executor->submit(
             [task, &next_level, num_levels, &workspace, &event_offsets,
              level_events, &level_event_counts, &level_metrics,
-             collect_metrics = options.collect_metrics]() {
+             collect_metrics = options.collect_metrics,
+             level_chunk_size]() {
               while (true) {
-                const LevelId level = next_level.fetch_add(
-                    1, std::memory_order_relaxed);
-                if (level >= num_levels) {
+                const LevelId first_level = next_level.fetch_add(
+                    level_chunk_size, std::memory_order_relaxed);
+                if (first_level >= num_levels) {
                   return;
                 }
-                if (collect_metrics) {
-                  level_metrics[level] = workspace.compute_level_isolated_into(
-                      level, task, level_events + event_offsets[level],
-                      event_offsets[level + 1] - event_offsets[level],
-                      level_event_counts[level], false);
-                } else {
-                  workspace.compute_level_isolated_into_unprofiled(
-                      level, task, level_events + event_offsets[level],
-                      event_offsets[level + 1] - event_offsets[level],
-                      level_event_counts[level], false);
+                const LevelId last_level = std::min<LevelId>(
+                    num_levels, first_level + level_chunk_size);
+                for (LevelId level = first_level; level < last_level;
+                     ++level) {
+                  if (collect_metrics) {
+                    level_metrics[level] =
+                        workspace.compute_level_isolated_into(
+                            level, task, level_events + event_offsets[level],
+                            event_offsets[level + 1] - event_offsets[level],
+                            level_event_counts[level], false);
+                  } else {
+                    workspace.compute_level_isolated_into_unprofiled(
+                        level, task, level_events + event_offsets[level],
+                        event_offsets[level + 1] - event_offsets[level],
+                        level_event_counts[level], false);
+                  }
                 }
               }
             }));

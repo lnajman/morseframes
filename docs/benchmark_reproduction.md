@@ -593,11 +593,12 @@ The phase and concurrency aggregates are generated in
 ## Reduction-Kernel Scaling
 
 The optimized parallel scheduler launches one long-lived task per worker. Each
-task dynamically claims the next filtration level from an atomic counter,
-avoiding both thousands of tiny executor tasks and the former sorting and
-static simplex-count partition. Each task retains its facet flags, closure
-tables, incidence counters, and result buffers between claimed levels. It
-also writes into a preassigned slice of the shared event arena. It disables
+task dynamically claims a small chunk of filtration levels from an atomic
+counter, amortizing counter contention while retaining enough chunks for load
+balancing. This avoids both thousands of tiny executor tasks and the former
+sorting and static simplex-count partition. Each task retains its facet flags,
+closure tables, incidence counters, and result buffers between claimed levels.
+It also writes into a preassigned slice of the shared event arena. It disables
 nested facet tasks while multiple levels are running concurrently. A single
 large plateau still uses the facet-parallel reduction-kernel path.
 

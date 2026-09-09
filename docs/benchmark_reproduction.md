@@ -133,8 +133,8 @@ PYTHONPATH=python python3 tools/benchmark_process_lower_stars.py \
   --balanced-fans 8 32 128 \
   --light-fan 2 \
   --workers 1 2 4 8 \
-  --repeats 5 \
-  --warmups 1 \
+  --repeats 7 \
+  --warmups 2 \
   --format csv \
   --output ../work/process_lower_stars_scaling.csv
 ```
@@ -163,6 +163,60 @@ The exact paper-ready values are generated in
 `docs/process_lower_stars_scaling_table.tex`. These measurements are a local
 scheduler study, not yet the comparison with Robins' implementation; that
 external benchmark remains a separate stage.
+
+## TTK ProcessLowerStars Reference
+
+The external reference benchmark uses TTK's classic `DiscreteGradient`
+backend, which implements the Robins ProcessLowerStars algorithm for explicit
+1D--3D triangulations. TTK is pinned to revision
+`f4ffd1a1049d0ccf6e8f3eb4f7c096a6cc251ba0`. It is built separately from the
+package, without VTK, ParaView, or the standalone applications:
+
+```sh
+TTK_BENCHMARK=$(tools/build_ttk_gradient_benchmark.sh)
+
+PYTHONPATH=python python3 tools/benchmark_ttk_process_lower_stars.py \
+  --ttk-benchmark "$TTK_BENCHMARK" \
+  --terrain-sizes 16 32 64 \
+  --volume-sizes 4 8 12 16 \
+  --seeds 0 1 2 \
+  --workers 1 2 4 8 \
+  --repeats 5 \
+  --warmups 1 \
+  --output ../work/ttk_process_lower_stars.csv
+
+python3 tools/render_ttk_process_lower_stars_table.py \
+  --input ../work/ttk_process_lower_stars.csv \
+  --output docs/ttk_process_lower_stars_table.tex
+```
+
+The driver exports the same injective terrain and tetrahedral-volume cases used
+by the unified gradient comparison. For every case and worker count it checks
+TTK's critical-simplex count, including the count in each dimension, against
+both F-Max and MorseFrames ProcessLowerStars. A mismatch aborts the run.
+
+`ttk_process_lower_stars_seconds` measures only gradient construction after
+TTK's explicit triangulation has been preconditioned. Every timed call uses
+TTK's cache-bypass path, so it recomputes the gradient rather than fetching a
+cached result. `ttk_setup_seconds` and `ttk_precondition_seconds` are reported
+separately. This keeps the algorithm comparison focused on gradient
+construction while preserving the otherwise hidden topology-preparation cost.
+
+On the Apple M1 Max reference run, all 84 configurations have matching
+critical counts by dimension. Sequentially, MorseFrames ProcessLowerStars takes
+median times of 7.35 and 5.18 times F-Max in 2D and 3D, while TTK takes 0.51 and
+1.18 times F-Max. Thus the current MorseFrames implementation takes 13.46 times
+TTK's kernel time in 2D and 4.24 times in 3D. At eight workers, the median
+MorseFrames/TTK gaps are 9.42 in 2D and 5.39 in 3D. These results show that the
+earlier ProcessLowerStars slowdown is an implementation cost rather than an
+inherent property of the Robins algorithm.
+
+The aggregate ratios are recorded in
+`docs/ttk_process_lower_stars_table.tex`. Ratios below one denote a faster time
+than the denominator. ``TTK setup+kernel'' is a diagnostic estimate formed by
+adding one measured explicit-triangulation setup and preconditioning pass to
+the prepared gradient-kernel time. The other columns compare prepared gradient
+kernels only.
 
 ## Unified Gradient-Only Strategy Comparison
 

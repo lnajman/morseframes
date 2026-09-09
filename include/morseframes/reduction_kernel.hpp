@@ -489,8 +489,7 @@ class ReductionKernelWorkspace {
         }
         const auto essential_start = profile_start<CollectMetrics>();
         compute_facet_incidence<CollectMetrics>(
-            facets, scratch.active_simplices, level_cells, metrics,
-            allow_intra_level_parallelism);
+            facets, scratch.active_simplices, level_cells, metrics);
         profile_add<CollectMetrics>(metrics.essential_nanoseconds,
                                     essential_start);
         scratch.round_events.clear();
@@ -975,8 +974,7 @@ class ReductionKernelWorkspace {
       const std::vector<SimplexId>& facets,
       const std::vector<SimplexId>& bucket,
       LevelCells& level_cells,
-      ReductionKernelMetrics& metrics,
-      bool allow_parallelism) {
+      ReductionKernelMetrics& metrics) {
     if (level_cells.packed_masks != nullptr) {
       PackedMask seen{};
       PackedMask shared{};
@@ -999,12 +997,10 @@ class ReductionKernelWorkspace {
       }
       return;
     }
-    const bool use_cached_cells =
-        level_cells.enabled &&
-        (options_.policy == ReductionKernelExecutionPolicy::Sequential ||
-         !allow_parallelism || executor_ == nullptr ||
-         executor_->worker_count() <= 1);
-    if (use_cached_cells) {
+    // The coordinator completes incidence before facet tasks read it. Walking
+    // cached closures is linear in their entries for every execution policy;
+    // parallel simplex-versus-facet scans performed much more work on plateaus.
+    if (level_cells.enabled) {
       for (SimplexId simplex : bucket) {
         facet_incidence_[simplex] = 0;
       }
@@ -1023,32 +1019,26 @@ class ReductionKernelWorkspace {
       }
       return;
     }
-    std::vector<std::size_t> incidence_visits(
-        CollectMetrics ? bucket.size() : 0, 0);
-    const std::size_t parallel_tasks = parallel_for_indices(
-        bucket.size(), [this, &facets, &bucket,
-                        &incidence_visits](std::size_t index) {
-          const SimplexId simplex = bucket[index];
-          std::uint8_t incidence = 0;
-          if (active_[simplex]) {
-            for (SimplexId facet : facets) {
-              if constexpr (CollectMetrics) {
-                ++incidence_visits[index];
-              }
-              if (is_face_of(simplex, facet)) {
-                ++incidence;
-                if (incidence == 2) {
-                  break;
-                }
-              }
-            }
-          }
-          facet_incidence_[simplex] = incidence;
-        }, allow_parallelism);
-    if constexpr (CollectMetrics) {
-      metrics.essential_parallel_tasks += parallel_tasks;
-      for (std::size_t visits : incidence_visits) {
-        metrics.incidence_cell_visits += visits;
+    // Only dimension-0/1 levels omit closure storage. Their same-level closure
+    // consists of the facet itself and its immediate boundary. Filter levels
+    // before reading active_ so concurrently processed levels remain disjoint.
+    for (SimplexId simplex : bucket) {
+      facet_incidence_[simplex] = 0;
+    }
+    const auto visit = [&](SimplexId simplex) {
+      if constexpr (CollectMetrics) {
+        ++metrics.incidence_cell_visits;
+      }
+      if (active_[simplex] && facet_incidence_[simplex] < 2) {
+        ++facet_incidence_[simplex];
+      }
+    };
+    for (SimplexId facet : facets) {
+      visit(facet);
+      for (SimplexId face : complex_.boundary(facet)) {
+        if (complex_.level(face) == complex_.level(facet)) {
+          visit(face);
+        }
       }
     }
   }

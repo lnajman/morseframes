@@ -5,9 +5,10 @@ repository. It is meant for software reproducibility: manuscript text and
 discussion notes live outside the public repository, in the private manuscript
 workspace until a public preprint or published version exists.
 
-The controlled ReductionKernel A/B, direct TTK comparison, and current RK phase
-profile sections record the latest packed-coface results. Other stored tables on this page are earlier
-benchmark snapshots; their timings do not describe the latest implementation.
+The closure-based incidence section records the latest ReductionKernel update.
+The controlled packed-coface A/B, direct TTK comparison, and pre-incidence phase
+profile sections retain earlier snapshots, labeled by their measured revisions;
+those timings must not be treated as fresh measurements of subsequent changes.
 
 Run commands from the repository root.
 
@@ -242,7 +243,10 @@ python3 tools/benchmark_reduction_kernel_ab.py \
   --input-dir ../rk-ab-inputs --output ../rk-packed-cofaces-ab.json
 ```
 
-The inputs use the existing injective tetrahedral-volume generator. The timed
+By default, inputs use the existing injective tetrahedral-volume generator.
+`--family terrain` selects triangulated terrains, and `--filtration plateau`
+sets every vertex value to zero while retaining the generated topology. Both
+the family and filtration mode are saved with each case. The timed
 scope includes a fresh builder, workspace, task-pool setup/teardown and event
 replay, with no diagnostic instrumentation or persistence computation.
 Topology construction, sequence validation, protocol I/O and destruction of
@@ -648,7 +652,109 @@ efficiencies are 0.33 and 0.39, respectively.
 The grid-size aggregates are generated in
 `docs/tetrahedral_worker_scaling_table.tex`.
 
-## Current ReductionKernel Phase Profile
+## Closure-Based Incidence Update
+
+This update implements the incidence optimization identified by the `8a2bd06`
+profile below. Sparse levels now accumulate saturated incidence by traversing
+cached same-level facet closures for every execution policy. This removes the
+parallel all-pairs simplex/facet scan. Levels containing only vertices and
+edges enumerate their closures directly. Incidence remains a coordinator step
+before facet tasks begin; independent levels and facet reductions retain their
+parallel execution. Per-facet scheduling and generic builder initialization
+are deliberately unchanged in this isolated optimization.
+
+The controlled A/B comparison uses `8a2bd06` as the baseline, the same native
+driver against both header snapshots, alternating execution order, eight
+blocks of three repetitions, and two warmups. It includes fresh builder,
+workspace, worker-pool setup/teardown, and replay, without instrumentation or
+persistence; topology, validation, protocol I/O, and returned-sequence
+destruction remain outside timing.
+
+```sh
+LC_ALL=C python3 tools/benchmark_reduction_kernel_ab.py \
+  --baseline 8a2bd06 --candidate WORKTREE \
+  --family volume --filtration plateau --sizes 4 8 12 --seeds 0 \
+  --workers 1 2 4 8 --blocks 8 --repeats 3 --warmups 2 \
+  --input-dir ../rk-ab-inputs \
+  --output ../rk-closure-incidence-volume-plateau-ab.json
+```
+
+The complementary runs use the same options with these substitutions:
+
+| Family | Filtration | Sizes | Seeds | Output basename |
+| --- | --- | --- | --- | --- |
+| terrain | plateau | 16, 32 | 0 | `rk-closure-incidence-terrain-plateau-ab.json` |
+| volume | lower-star | 16, 32 | 0, 2 | `rk-closure-incidence-volume-lower-star-ab.json` |
+| terrain | lower-star | 16, 64 | 0, 2 | `rk-closure-incidence-terrain-lower-star-ab.json` |
+
+The four runs total 52 worker configurations on the Apple M1 Max using native
+ARM Clang 15, C++17, and `-O3 -DNDEBUG -pthread`. All exact sequences and
+critical counts agree across revisions and worker counts. Selected larger
+plateau timings at eight workers, in milliseconds, are:
+
+| Plateau | Before | After |
+| --- | ---: | ---: |
+| 2D terrain, `n=32` | 153.63 | 61.70 |
+| 3D volume, `n=8` | 86.97 | 24.60 |
+| 3D volume, `n=12` | 1,462.70 | 130.56 |
+
+The columns are medians of raw uninstrumented timings. For the largest volume,
+median paired candidate/baseline ratios are 0.0155, 0.0490, and 0.0895 at two,
+four, and eight workers, respectively. Its sequential ratio is 0.987, with
+the paired-bootstrap interval spanning one. The eight-worker update is about
+11 times faster than the old parallel path, but it is **still much slower
+than sequential RK on this plateau** (candidate median 7.77 ms). Removing the
+incidence problem does not remove fine-grained facet-task overhead.
+
+A fresh confirmation uses twelve blocks of three repetitions. For plateaus it
+selects volumes `8 12`, terrain `32`, seed `0`, and workers `1 8`; for ordinary
+lower stars it repeats all configurations in the table above. Output names
+replace `-ab.json` with `-confirmation.json`. These 38 additional configurations
+also preserve every exact sequence. The confirmed eight-worker paired ratios
+are 0.2725 and 0.0858 for the `n=8` and `n=12` volumes and 0.3732 for the
+`n=32` terrain. Thus the large-plateau improvements reproduce independently.
+
+The 32 ordinary lower-star controls in each session have mixed timing shifts.
+At eight workers, median paired ratios for volumes are 0.970 initially and
+0.984 in confirmation; for terrains they are 0.931 and 1.021. No ordinary
+case has a paired-bootstrap interval wholly above one in both sessions.
+This is a regression check, not a claim of a general lower-star speedup or
+formal performance equivalence; absolute timings and small differences remain
+sensitive to system state.
+
+A separate current-code phase profile confirms that the all-pairs work is
+gone. Every worker count now records identical sparse incidence-entry visit
+counts. For the `n=12` volume this is 580,792 closure-entry visits, the same as
+the sequential implementation, replacing the old parallel path's 663,665,205
+containment tests. Eight-worker diagnostic incidence time is about 1.33 ms.
+Facet execution (including dispatch/wait) takes about 139 ms, or 95.4% of the
+level-processing interval. These are separate diagnostic measurements, not
+the uninstrumented timings in the A/B table. The next plateau optimization
+should batch facet tasks while preserving canonical result order; builder
+initialization remains a separate target for ordinary lower stars.
+
+```sh
+LC_ALL=C python3 tools/benchmark_reduction_kernel_phases.py \
+  --input-dir ../rk-ab-inputs --output ../rk-phases-closure-incidence.json
+
+python3 tools/render_reduction_kernel_phases.py \
+  --input ../rk-phases-closure-incidence.json \
+  --table-output docs/reduction_kernel_incidence_phase_table.tex
+```
+
+The current phase run contains 13 inputs at 1/2/4/8 workers, with separate
+uninstrumented and diagnostic samples and exact sequence checks throughout.
+The preceding `docs/reduction_kernel_phase_table.tex` remains the historical
+pre-incidence table. Unit tests additionally bound incidence-entry visits by
+facet-closure size for sparse graph, triangle, and dimension-four inputs,
+including multiple levels, shared faces with incidence greater than two, and
+isolated vertices. Existing packed/sparse boundary tests remain in place.
+
+Raw paired-block samples, IQRs, bootstrap intervals, input/header hashes, and
+exact-check results remain in the JSON files. A bootstrap interval describes
+one session; it does not capture independent-session or machine variability.
+
+## ReductionKernel Phase Profile Before Closure-Based Incidence
 
 The September 9, 2026 profile of the packed-coface algorithm (`e1aaeaa`, with
 profiling-only additions) identifies two different optimization targets:
@@ -753,7 +859,7 @@ stored in `../rk-phases-uninstrumented-control.json` and
 speed improvement or a formal equivalence margin; they reinforce the need
 for independent sessions alongside within-session timing distributions.
 
-The next implementation should **remove the parallel all-pairs incidence
+The profile recommended **removing the parallel all-pairs incidence
 scan**, using cached closures for all execution policies while retaining
 saturated counts (zero, one, or multiple incident facets). A simple linear
 closure traversal is an important baseline; any parallel version should use
@@ -762,8 +868,10 @@ per-facet task batching if it remains material. For ordinary lower stars,
 inspect whether the generic builder's rank/level/dimension tables can be
 avoided or deferred for RK without weakening input validation. Ordered replay
 is not the first target in this profile. None of these algorithmic changes is
-included in the profiling-only update; each needs a controlled A/B test and
-exact-gradient checks on both packed levels and large sparse plateaus.
+included in the profiling-only update. The closure-based incidence update
+above subsequently implements the first recommendation; each change needs a
+controlled A/B test and exact-gradient checks on both packed levels and large
+sparse plateaus.
 
 ## Gradient-only Tetrahedral Phase Profile (Historical)
 

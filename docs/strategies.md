@@ -340,8 +340,15 @@ is shared by level and facet work; waiting tasks cooperatively execute queued
 work, allowing nested parallelism without deadlock or repeated thread creation.
 Small levels discover facets and compute their core with the packed word
 operations above before launching facet tasks. The sparse path can discover
-facets in parallel level-bucket chunks and compute facet incidence for each
-active face in parallel once per round, saturating the count at two. Both paths
+facets in parallel level-bucket chunks. Its coordinator computes incidence
+once per round by visiting cached same-level facet closures, saturating counts
+at two. This traversal is linear in the closure entries plus the active-bucket
+reset; it does not compare every active simplex against the facets. Levels
+containing only vertices and edges construct their small closures directly
+from facets and same-level endpoints. Incidence is complete before facet tasks
+read the snapshot, and independent levels still accumulate disjoint entries
+concurrently. `essential_parallel_tasks` remains available for compatibility
+but is now zero; `incidence_cell_visits` counts visited closure entries. Both paths
 identify the core without rescanning every other facet inside each local
 kernel, and preserve deterministic facet-result order.
 

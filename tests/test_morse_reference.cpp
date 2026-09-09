@@ -1380,6 +1380,64 @@ void test_reduction_kernel_packed_core_matches_sparse_cache() {
   }
 }
 
+void test_reduction_kernel_linear_sparse_incidence() {
+  const auto check = [](FilteredSimplicialComplex complex,
+                        std::size_t max_closure_size) {
+    complex.finalize();
+    assert(complex.size() > 128);
+    morseframes::MorseSequenceBuildMetrics sequential_metrics;
+    const auto expected = FSequenceBuilder(complex, &sequential_metrics)
+                              .build_flooding_reduction_kernel();
+    morseframes::validate_morse_sequence(complex, expected);
+    for (std::size_t workers : {1, 2, 4, 8}) {
+      morseframes::MorseSequenceBuildMetrics metrics;
+      const auto actual = FSequenceBuilder(complex, &metrics)
+                              .build_flooding_reduction_kernel_parallel(workers);
+      morseframes::validate_morse_sequence(complex, actual);
+      assert(expected.steps().size() == actual.steps().size());
+      for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+        const auto& a = expected.steps()[i];
+        const auto& b = actual.steps()[i];
+        assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+               a.level == b.level);
+      }
+      // These assertions detect a return to all-pairs incidence, independently
+      // of wall-clock noise. Sparse entries are visited at most once per facet.
+      assert(metrics.reduction_kernel_incidence_cell_visits <=
+             max_closure_size * metrics.reduction_kernel_facet_kernels);
+      assert(metrics.reduction_kernel_incidence_cell_visits ==
+             sequential_metrics.reduction_kernel_incidence_cell_visits);
+      assert(metrics.reduction_kernel_essential_parallel_tasks == 0);
+      if (workers > 1 && complex.num_levels() == 1) {
+        assert(metrics.reduction_kernel_parallel_batches > 0);
+      }
+    }
+  };
+
+  // More than two facets share a face: incidence must saturate at two, and
+  // remain correct as reductions expose lower-dimensional facets over rounds.
+  for (std::size_t facet_vertices : {2, 3, 5}) {
+    for (bool multiple_levels : {false, true}) {
+      FilteredSimplicialComplex complex;
+      std::vector<double> values(140, 0.0);
+      for (std::uint32_t v = 4; v < 140; ++v) {
+        if (multiple_levels) {
+          values[v] = static_cast<double>(1 + v % 3);
+        }
+        std::vector<morseframes::VertexId> facet;
+        for (std::size_t shared = 0; shared + 1 < facet_vertices; ++shared) {
+          facet.push_back(static_cast<morseframes::VertexId>(shared));
+        }
+        facet.push_back(v);
+        add_weighted_closure(complex, facet, values);
+      }
+      // An isolated vertex exercises incidence for a dimension-zero facet.
+      complex.add_simplex({140}, 0.0);
+      check(complex, (std::size_t{1} << facet_vertices) - 1);
+    }
+  }
+}
+
 void test_instrumentation_metrics() {
   FilteredSimplicialComplex complex;
   add_simplex(complex, {0}, 0.0);
@@ -1445,6 +1503,7 @@ int main() {
   test_lower_star_three_dimensional_pair();
   test_flooding_reduction_kernel_on_shared_facets();
   test_reduction_kernel_packed_core_matches_sparse_cache();
+  test_reduction_kernel_linear_sparse_incidence();
   test_instrumentation_metrics();
 
   std::cout << "All Morse persistence prototype tests passed.\n";

@@ -702,9 +702,9 @@ class PythonApiTest(unittest.TestCase):
                 self.assertTrue(level_batches > 0 or facet_tasks > 0)
                 if level_batches > 0:
                     self.assertEqual(facet_tasks, 0)
-                    self.assertEqual(essential_tasks, 0)
-                else:
-                    self.assertGreater(essential_tasks, 0)
+                # Incidence is accumulated from closures before facet tasks;
+                # it no longer launches all-pairs containment scans.
+                self.assertEqual(essential_tasks, 0)
 
     def test_morse_sequence_algorithm_rejects_unknown_or_reserved_names(self):
         complex_ = edge_complex()

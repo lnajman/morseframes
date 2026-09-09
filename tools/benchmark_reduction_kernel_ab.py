@@ -118,10 +118,13 @@ def summarize(samples: list[dict]) -> dict:
     }
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline", required=True)
     parser.add_argument("--candidate", default="WORKTREE")
+    parser.add_argument("--family", choices=("volume", "terrain"), default="volume")
+    parser.add_argument("--filtration", choices=("lower-star", "plateau"),
+                        default="lower-star")
     parser.add_argument("--sizes", type=int, nargs="+", default=[16, 24, 32])
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     parser.add_argument("--workers", type=int, nargs="+", default=[1, 2, 4, 8])
@@ -133,7 +136,7 @@ def parse_args():
     parser.add_argument("--input-dir", type=Path,
                         help="Reuse/save deterministic input complexes here")
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if (min(args.sizes) < 2 or min(args.workers) < 1 or args.blocks < 4 or
             args.blocks % 2 or args.repeats < 1 or args.warmups < 1):
         parser.error("sizes >= 2, workers/repeats/warmups >= 1; blocks even and >= 4")
@@ -163,6 +166,7 @@ def main():
                         "excludes topology, validation, protocol and output destruction",
         "blocks": args.blocks, "repeats_per_block": args.repeats,
         "warmups_per_worker_count": args.warmups,
+        "family": args.family, "filtration_mode": args.filtration,
         "interval_note": "Paired-block bootstrap; describes this session only, "
                          "not independent-machine or independent-session uncertainty",
         "builds": {}, "cases": [],
@@ -188,10 +192,11 @@ def main():
         inputs.mkdir(parents=True, exist_ok=True)
         for size in args.sizes:
             for seed in args.seeds:
-                input_path = inputs / f"volume-n{size}-seed{seed}.txt"
+                input_path = inputs / f"{args.family}-n{size}-seed{seed}.txt"
                 if not input_path.exists():
-                    print(f"Generating volume n={size}, seed={seed}", flush=True)
-                    complex_ = generators.make_injective_volume(seed, size)
+                    print(f"Generating {args.family} n={size}, seed={seed}", flush=True)
+                    generator = getattr(generators, f"make_injective_{args.family}")
+                    complex_ = generator(seed, size)
                     write_ttk_input(complex_, input_path)
                     del complex_
                     gc.collect()
@@ -200,7 +205,8 @@ def main():
                     workers = {}
                     for name in binaries:
                         workers[name] = Worker(binaries[name], input_path,
-                                               scratch / (name + ".sequence"))
+                                               scratch / (name + ".sequence"),
+                                               "plateau" if args.filtration == "plateau" else None)
                         stack.callback(workers[name].close)
                     if workers["baseline"].metadata != workers["candidate"].metadata:
                         raise AssertionError("Complex/critical counts differ between builds")
@@ -221,6 +227,7 @@ def main():
                             samples.append(sample)
                         case = {
                             "grid_size": size, "seed": seed, "workers": count,
+                            "family": args.family, "filtration_mode": args.filtration,
                             "input_sha256": input_digest,
                             **workers["baseline"].metadata,
                             "exact_sequences_match": True,

@@ -65,6 +65,13 @@ class TetrahedralPhaseProfileRow:
     process_lower_stars_setup_parallel_tasks: int
     process_lower_stars_parallel_tasks: int
     reduction_kernel_max_parallel_levels: int
+    reduction_kernel_level_chunks: int
+    reduction_kernel_level_chunk_size: int
+    reduction_kernel_task_parallelism: float
+    reduction_kernel_task_time_imbalance: float
+    reduction_kernel_chunk_imbalance: float
+    reduction_kernel_level_imbalance: float
+    reduction_kernel_simplex_imbalance: float
     reduction_kernel_setup_seconds: float
     reduction_kernel_setup_share: float
     reduction_kernel_level_wall_seconds: float
@@ -136,37 +143,23 @@ def benchmark_profile(
                 metrics, "process_lower_stars_builder_init_nanoseconds"
             )
             setup = _seconds(metrics, "process_lower_stars_setup_nanoseconds")
-            local_wall = _seconds(
-                metrics, "process_lower_stars_local_wall_nanoseconds"
-            )
-            replay = _seconds(
-                metrics, "process_lower_stars_replay_nanoseconds"
-            )
+            local_wall = _seconds(metrics, "process_lower_stars_local_wall_nanoseconds")
+            replay = _seconds(metrics, "process_lower_stars_replay_nanoseconds")
             cumulative_task = _seconds(
                 metrics,
                 "process_lower_stars_cumulative_task_nanoseconds",
             )
-            min_task = _seconds(
-                metrics, "process_lower_stars_min_task_nanoseconds"
-            )
-            max_task = _seconds(
-                metrics, "process_lower_stars_max_task_nanoseconds"
-            )
+            min_task = _seconds(metrics, "process_lower_stars_min_task_nanoseconds")
+            max_task = _seconds(metrics, "process_lower_stars_max_task_nanoseconds")
             min_load = int(metrics.get("process_lower_stars_min_task_load", 0))
             max_load = int(metrics.get("process_lower_stars_max_task_load", 0))
             is_process_lower_stars = strategy == "process-lower-stars"
-            kernel_setup = _seconds(
-                metrics, "reduction_kernel_setup_nanoseconds"
-            )
+            kernel_setup = _seconds(metrics, "reduction_kernel_setup_nanoseconds")
             kernel_level_wall = _seconds(
                 metrics, "reduction_kernel_level_wall_nanoseconds"
             )
-            kernel_replay = _seconds(
-                metrics, "reduction_kernel_replay_nanoseconds"
-            )
-            kernel_diagnostic_total = (
-                kernel_setup + kernel_level_wall + kernel_replay
-            )
+            kernel_replay = _seconds(metrics, "reduction_kernel_replay_nanoseconds")
+            kernel_diagnostic_total = kernel_setup + kernel_level_wall + kernel_replay
             parallel_steps = mp.compute_morse_sequence(
                 complex_, algorithm=algorithm, max_workers=worker_count
             ).steps
@@ -184,12 +177,9 @@ def benchmark_profile(
                     num_levels=profile.num_levels,
                     num_critical_simplices=profile.num_critical_simplices,
                     critical_simplices_by_dimension=";".join(
-                        str(count)
-                        for count in profile.critical_simplices_by_dimension
+                        str(count) for count in profile.critical_simplices_by_dimension
                     ),
-                    matches_sequential=(
-                        parallel_steps == sequential_steps[strategy]
-                    ),
+                    matches_sequential=(parallel_steps == sequential_steps[strategy]),
                     construction_seconds=construction,
                     builder_init_seconds=profile.builder_init_seconds,
                     sequence_build_seconds=profile.sequence_build_seconds,
@@ -245,6 +235,67 @@ def benchmark_profile(
                     ),
                     reduction_kernel_max_parallel_levels=int(
                         metrics.get("reduction_kernel_max_parallel_levels", 0)
+                    ),
+                    reduction_kernel_level_chunks=int(
+                        metrics.get("reduction_kernel_level_chunks", 0)
+                    ),
+                    reduction_kernel_level_chunk_size=int(
+                        metrics.get("reduction_kernel_level_chunk_size", 0)
+                    ),
+                    reduction_kernel_task_parallelism=(
+                        _ratio(
+                            _seconds(
+                                metrics,
+                                "reduction_kernel_cumulative_level_task_nanoseconds",
+                            ),
+                            kernel_level_wall,
+                        )
+                        if not is_process_lower_stars and worker_count > 1
+                        else math.nan
+                    ),
+                    reduction_kernel_task_time_imbalance=(
+                        _ratio(
+                            float(
+                                metrics.get(
+                                    "reduction_kernel_max_level_task_nanoseconds", 0
+                                )
+                            ),
+                            float(
+                                metrics.get(
+                                    "reduction_kernel_min_level_task_nanoseconds", 0
+                                )
+                            ),
+                        )
+                        if not is_process_lower_stars and worker_count > 1
+                        else math.nan
+                    ),
+                    reduction_kernel_chunk_imbalance=(
+                        _ratio(
+                            float(metrics.get("reduction_kernel_max_worker_chunks", 0)),
+                            float(metrics.get("reduction_kernel_min_worker_chunks", 0)),
+                        )
+                        if not is_process_lower_stars and worker_count > 1
+                        else math.nan
+                    ),
+                    reduction_kernel_level_imbalance=(
+                        _ratio(
+                            float(metrics.get("reduction_kernel_max_worker_levels", 0)),
+                            float(metrics.get("reduction_kernel_min_worker_levels", 0)),
+                        )
+                        if not is_process_lower_stars and worker_count > 1
+                        else math.nan
+                    ),
+                    reduction_kernel_simplex_imbalance=(
+                        _ratio(
+                            float(
+                                metrics.get("reduction_kernel_max_worker_simplices", 0)
+                            ),
+                            float(
+                                metrics.get("reduction_kernel_min_worker_simplices", 0)
+                            ),
+                        )
+                        if not is_process_lower_stars and worker_count > 1
+                        else math.nan
                     ),
                     reduction_kernel_setup_seconds=kernel_setup,
                     reduction_kernel_setup_share=(

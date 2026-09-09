@@ -50,11 +50,12 @@ def render_table(rows: list[dict[str, str]], output: Path) -> None:
         ].append(row)
 
     lines = [
-        r"\begin{tabular}{rlrrrrrrrrr}",
+        r"\begin{tabular}{rlrrrrrrrrrr}",
         r"\toprule",
         (
             r"Grid & Strategy & Workers & Gradient (ms) & Build (\%) & M simplex/s & "
-            r"Builder (\%) & Setup (\%) & Level/local (\%) & Replay (\%) & Task parallelism \\"
+            r"Builder (\%) & Setup (\%) & Level/local (\%) & Replay (\%) & "
+            r"Task parallelism & Task imbalance \\"
         ),
         r"\midrule",
     ]
@@ -80,6 +81,16 @@ def render_table(rows: list[dict[str, str]], output: Path) -> None:
                     if process_lower_stars
                     else "reduction_kernel_replay_share"
                 )
+                task_parallelism_column = (
+                    "process_lower_stars_task_parallelism"
+                    if process_lower_stars
+                    else "reduction_kernel_task_parallelism"
+                )
+                task_imbalance_column = (
+                    "process_lower_stars_task_time_imbalance"
+                    if process_lower_stars
+                    else "reduction_kernel_task_time_imbalance"
+                )
                 lines.append(
                     " & ".join(
                         (
@@ -101,9 +112,8 @@ def render_table(rows: list[dict[str, str]], output: Path) -> None:
                             _percent(_median(group, setup_column)),
                             _percent(_median(group, work_column)),
                             _percent(_median(group, replay_column)),
-                            _ratio(
-                                _median(group, "process_lower_stars_task_parallelism")
-                            ),
+                            _ratio(_median(group, task_parallelism_column)),
+                            _ratio(_median(group, task_imbalance_column)),
                         )
                     )
                     + r" \\"

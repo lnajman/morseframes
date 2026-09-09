@@ -64,6 +64,9 @@ struct MorseSequenceBuildMetrics {
   std::uint64_t reduction_kernel_setup_nanoseconds = 0;
   std::uint64_t reduction_kernel_level_wall_nanoseconds = 0;
   std::uint64_t reduction_kernel_replay_nanoseconds = 0;
+  std::uint64_t reduction_kernel_cumulative_level_task_nanoseconds = 0;
+  std::uint64_t reduction_kernel_min_level_task_nanoseconds = 0;
+  std::uint64_t reduction_kernel_max_level_task_nanoseconds = 0;
   std::uint64_t process_lower_stars_builder_init_nanoseconds = 0;
   std::uint64_t process_lower_stars_setup_nanoseconds = 0;
   std::uint64_t process_lower_stars_local_wall_nanoseconds = 0;
@@ -86,6 +89,14 @@ struct MorseSequenceBuildMetrics {
   std::size_t reduction_kernel_max_parallel_facets = 0;
   std::size_t reduction_kernel_parallel_level_batches = 0;
   std::size_t reduction_kernel_max_parallel_levels = 0;
+  std::size_t reduction_kernel_level_chunks = 0;
+  std::size_t reduction_kernel_level_chunk_size = 0;
+  std::size_t reduction_kernel_min_worker_chunks = 0;
+  std::size_t reduction_kernel_max_worker_chunks = 0;
+  std::size_t reduction_kernel_min_worker_levels = 0;
+  std::size_t reduction_kernel_max_worker_levels = 0;
+  std::size_t reduction_kernel_min_worker_simplices = 0;
+  std::size_t reduction_kernel_max_worker_simplices = 0;
   std::size_t reduction_kernel_executor_workers = 1;
   std::size_t reduction_kernel_facet_discovery_parallel_tasks = 0;
   std::size_t reduction_kernel_essential_parallel_tasks = 0;
@@ -1660,6 +1671,14 @@ class FSequenceBuilder {
       constexpr std::size_t kChunksPerWorker = 32;
       const std::size_t level_chunk_size = std::max<std::size_t>(
           1, num_levels / (task_count * kChunksPerWorker));
+      struct LevelWorkerProfile {
+        std::uint64_t nanoseconds = 0;
+        std::size_t chunks = 0;
+        std::size_t levels = 0;
+        std::size_t simplices = 0;
+      };
+      std::vector<LevelWorkerProfile> level_worker_profiles(
+          options.collect_metrics ? task_count : 0);
       std::atomic<LevelId> next_level{0};
       if (options.collect_metrics) {
         ++kernel_metrics.parallel_level_batches;
@@ -1672,18 +1691,28 @@ class FSequenceBuilder {
             [task, &next_level, num_levels, &workspace, &event_offsets,
              level_events, &level_event_counts, &level_metrics,
              collect_metrics = options.collect_metrics,
-             level_chunk_size]() {
+             level_chunk_size, &level_worker_profiles]() {
+              LevelWorkerProfile worker_profile;
+              const auto worker_start =
+                  collect_metrics ? SequenceClock::now()
+                                  : SequenceClock::time_point{};
               while (true) {
                 const LevelId first_level = next_level.fetch_add(
                     level_chunk_size, std::memory_order_relaxed);
                 if (first_level >= num_levels) {
-                  return;
+                  break;
+                }
+                if (collect_metrics) {
+                  ++worker_profile.chunks;
                 }
                 const LevelId last_level = std::min<LevelId>(
                     num_levels, first_level + level_chunk_size);
                 for (LevelId level = first_level; level < last_level;
                      ++level) {
                   if (collect_metrics) {
+                    ++worker_profile.levels;
+                    worker_profile.simplices +=
+                        event_offsets[level + 1] - event_offsets[level];
                     level_metrics[level] =
                         workspace.compute_level_isolated_into(
                             level, task, level_events + event_offsets[level],
@@ -1697,10 +1726,59 @@ class FSequenceBuilder {
                   }
                 }
               }
+              if (collect_metrics) {
+                worker_profile.nanoseconds = elapsed_nanoseconds(
+                    worker_start, SequenceClock::now());
+                level_worker_profiles[task] = worker_profile;
+              }
             }));
       }
       for (auto& future : futures) {
         executor->get(future);
+      }
+      if (options.collect_metrics) {
+        sequence_metrics_->reduction_kernel_level_chunk_size =
+            level_chunk_size;
+        sequence_metrics_->reduction_kernel_min_level_task_nanoseconds =
+            std::numeric_limits<std::uint64_t>::max();
+        sequence_metrics_->reduction_kernel_min_worker_chunks =
+            std::numeric_limits<std::size_t>::max();
+        sequence_metrics_->reduction_kernel_min_worker_levels =
+            std::numeric_limits<std::size_t>::max();
+        sequence_metrics_->reduction_kernel_min_worker_simplices =
+            std::numeric_limits<std::size_t>::max();
+        for (const auto& worker_profile : level_worker_profiles) {
+          sequence_metrics_->reduction_kernel_cumulative_level_task_nanoseconds +=
+              worker_profile.nanoseconds;
+          sequence_metrics_->reduction_kernel_min_level_task_nanoseconds =
+              std::min(
+                  sequence_metrics_->reduction_kernel_min_level_task_nanoseconds,
+                  worker_profile.nanoseconds);
+          sequence_metrics_->reduction_kernel_max_level_task_nanoseconds =
+              std::max(
+                  sequence_metrics_->reduction_kernel_max_level_task_nanoseconds,
+                  worker_profile.nanoseconds);
+          sequence_metrics_->reduction_kernel_level_chunks +=
+              worker_profile.chunks;
+          sequence_metrics_->reduction_kernel_min_worker_chunks = std::min(
+              sequence_metrics_->reduction_kernel_min_worker_chunks,
+              worker_profile.chunks);
+          sequence_metrics_->reduction_kernel_max_worker_chunks = std::max(
+              sequence_metrics_->reduction_kernel_max_worker_chunks,
+              worker_profile.chunks);
+          sequence_metrics_->reduction_kernel_min_worker_levels = std::min(
+              sequence_metrics_->reduction_kernel_min_worker_levels,
+              worker_profile.levels);
+          sequence_metrics_->reduction_kernel_max_worker_levels = std::max(
+              sequence_metrics_->reduction_kernel_max_worker_levels,
+              worker_profile.levels);
+          sequence_metrics_->reduction_kernel_min_worker_simplices = std::min(
+              sequence_metrics_->reduction_kernel_min_worker_simplices,
+              worker_profile.simplices);
+          sequence_metrics_->reduction_kernel_max_worker_simplices = std::max(
+              sequence_metrics_->reduction_kernel_max_worker_simplices,
+              worker_profile.simplices);
+        }
       }
     }
     profile_add(

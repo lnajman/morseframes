@@ -72,6 +72,16 @@ class TetrahedralPhaseProfileBenchmarkTest(unittest.TestCase):
         self.assertTrue(
             all(row.reduction_kernel_inline_event_overflows == 0 for row in kernel_rows)
         )
+        parallel_kernel = next(row for row in kernel_rows if row.max_workers == 2)
+        self.assertGreater(parallel_kernel.reduction_kernel_level_chunks, 0)
+        self.assertGreater(parallel_kernel.reduction_kernel_level_chunk_size, 0)
+        self.assertGreater(parallel_kernel.reduction_kernel_task_parallelism, 0.0)
+        self.assertGreaterEqual(
+            parallel_kernel.reduction_kernel_task_time_imbalance, 1.0
+        )
+        self.assertGreaterEqual(parallel_kernel.reduction_kernel_chunk_imbalance, 1.0)
+        self.assertGreaterEqual(parallel_kernel.reduction_kernel_level_imbalance, 1.0)
+        self.assertGreaterEqual(parallel_kernel.reduction_kernel_simplex_imbalance, 1.0)
 
         output = StringIO()
         bench.write_rows(rows, output, "csv")

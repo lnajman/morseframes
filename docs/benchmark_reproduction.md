@@ -571,16 +571,17 @@ python3 tools/render_tetrahedral_phase_profile.py \
   --table-output docs/tetrahedral_phase_profile_table.tex
 ```
 
-Across the twelve cases, eight-worker ProcessLowerStars reaches a 2.78-fold
-gradient-construction speedup; ReductionKernel reaches 3.33-fold. Their median
-eight-worker construction times are 3.22 ms and 0.90 ms, respectively. At
-eight workers, ProcessLowerStars spends 34.4 percent in global setup, 37.0
-percent in parallel local-star processing, 2.5 percent in ordered replay, and
-4.9 percent in builder initialization. ReductionKernel spends 81.9 percent of
-its diagnostic wall time processing levels; setup and replay account for 14.0
-and 3.8 percent. The CSV now also records kernel rounds, facet kernels, facet
-discovery scans, cached-cell visits, local candidate scans, coboundary scans,
-membership tests, and inline-buffer overflows. All measured triangular and
+Across the twelve cases, eight-worker ProcessLowerStars reaches a 2.37-fold
+gradient-construction speedup; ReductionKernel reaches 2.71-fold. Their median
+eight-worker construction times are 3.80 ms and 1.04 ms, respectively. At
+eight workers, ProcessLowerStars spends 30.8 percent in global setup, 40.3
+percent in parallel local-star processing, 2.8 percent in ordered replay, and
+4.9 percent in builder initialization. ReductionKernel spends 80.9 percent of
+its diagnostic wall time processing levels; setup and replay account for 14.5
+and 4.3 percent. The CSV also records ReductionKernel chunk counts, per-worker
+level and simplex loads, task time, and effective task parallelism, alongside
+kernel rounds, facet kernels, topology scans, membership tests, and inline
+buffer overflows. All measured triangular and
 tetrahedral kernels report zero inline-buffer overflows. For the `n=16`
 volumes, the medians include roughly
 458,000 local candidate visits but only 70,000 membership tests, confirming
@@ -602,6 +603,14 @@ closure tables, incidence counters, and result buffers between claimed levels.
 It also writes into a preassigned slice of the shared event arena. It disables
 nested facet tasks while multiple levels are running concurrently. A single
 large plateau still uses the facet-parallel reduction-kernel path.
+
+The diagnostic profile records claimed chunks, processed levels and simplices,
+and task durations per worker. Two- and four-worker runs are generally well
+balanced, while eight-worker runs vary substantially with operating-system
+scheduling. Experiments with a start rendezvous and reserved initial chunks
+produced contradictory repeat measurements and were therefore not retained.
+The remaining eight-worker gap cannot yet be attributed solely to either load
+imbalance or level-kernel cost.
 
 ```sh
 PYTHONPATH=python python3 tools/benchmark_reduction_kernel_scaling.py \

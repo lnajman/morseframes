@@ -450,6 +450,12 @@ nb::dict sequence_metrics_to_python(const morseframes::MorseSequenceBuildMetrics
       metrics.reduction_kernel_level_wall_nanoseconds;
   result["reduction_kernel_replay_nanoseconds"] =
       metrics.reduction_kernel_replay_nanoseconds;
+  result["reduction_kernel_cumulative_level_task_nanoseconds"] =
+      metrics.reduction_kernel_cumulative_level_task_nanoseconds;
+  result["reduction_kernel_min_level_task_nanoseconds"] =
+      metrics.reduction_kernel_min_level_task_nanoseconds;
+  result["reduction_kernel_max_level_task_nanoseconds"] =
+      metrics.reduction_kernel_max_level_task_nanoseconds;
   result["process_lower_stars_builder_init_nanoseconds"] =
       metrics.process_lower_stars_builder_init_nanoseconds;
   result["process_lower_stars_setup_nanoseconds"] =
@@ -483,6 +489,22 @@ nb::dict sequence_metrics_to_python(const morseframes::MorseSequenceBuildMetrics
       metrics.reduction_kernel_parallel_level_batches;
   result["reduction_kernel_max_parallel_levels"] =
       metrics.reduction_kernel_max_parallel_levels;
+  result["reduction_kernel_level_chunks"] =
+      metrics.reduction_kernel_level_chunks;
+  result["reduction_kernel_level_chunk_size"] =
+      metrics.reduction_kernel_level_chunk_size;
+  result["reduction_kernel_min_worker_chunks"] =
+      metrics.reduction_kernel_min_worker_chunks;
+  result["reduction_kernel_max_worker_chunks"] =
+      metrics.reduction_kernel_max_worker_chunks;
+  result["reduction_kernel_min_worker_levels"] =
+      metrics.reduction_kernel_min_worker_levels;
+  result["reduction_kernel_max_worker_levels"] =
+      metrics.reduction_kernel_max_worker_levels;
+  result["reduction_kernel_min_worker_simplices"] =
+      metrics.reduction_kernel_min_worker_simplices;
+  result["reduction_kernel_max_worker_simplices"] =
+      metrics.reduction_kernel_max_worker_simplices;
   result["reduction_kernel_executor_workers"] =
       metrics.reduction_kernel_executor_workers;
   result["reduction_kernel_facet_discovery_parallel_tasks"] =

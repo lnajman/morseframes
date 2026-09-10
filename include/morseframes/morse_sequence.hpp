@@ -2177,6 +2177,37 @@ class FSequenceBuilder {
   }
 
  private:
+  template <class>
+  friend class ReductionKernelSequenceBuilder;
+
+  struct ReductionKernelOnlyTag {};
+
+  // RK reads level buckets and metadata directly from the immutable view.
+  // Retain permutation validation without keeping the general strategy caches.
+  FSequenceBuilder(const ComplexView& complex,
+                   MorseSequenceBuildMetrics* sequence_metrics,
+                   bool detailed_reduction_kernel_metrics,
+                   ReductionKernelOnlyTag)
+      : complex_(complex),
+        sequence_metrics_(sequence_metrics),
+        detailed_reduction_kernel_metrics_(detailed_reduction_kernel_metrics) {
+    const auto& order = complex_.filtration_order();
+    const std::size_t size = complex_.size();
+    if (order.size() != size) {
+      throw std::logic_error("Filtration order size does not match complex size.");
+    }
+    std::vector<std::uint8_t> seen(size, 0);
+    for (SimplexId simplex : order) {
+      if (simplex >= size) {
+        throw std::logic_error("Filtration order contains an invalid simplex id.");
+      }
+      if (seen[simplex]) {
+        throw std::logic_error("Filtration order contains a duplicate simplex id.");
+      }
+      seen[simplex] = 1;
+    }
+  }
+
   const ComplexView& complex_;
   std::vector<std::size_t> simplex_order_rank_;
   std::vector<LevelId> simplex_levels_;

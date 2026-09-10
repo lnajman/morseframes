@@ -6,6 +6,7 @@
 #include <Triangulation.h>
 
 #include "morseframes/debug_checks.hpp"
+#include "morseframes/reduction_kernel_sequence.hpp"
 
 #include <algorithm>
 #include <array>
@@ -26,6 +27,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 using Complex = morseframes::FilteredSimplicialComplex;
 using Builder = morseframes::FSequenceBuilder<Complex>;
+using RkBuilder = morseframes::ReductionKernelSequenceBuilder<Complex>;
 using Sequence = morseframes::MorseSequence;
 using Phases = std::map<std::string, double>;
 constexpr const char* kSchema = "resident-gradient-v2";
@@ -103,6 +105,7 @@ struct MorseRun {
   Complex complex;
   morseframes::MorseSequenceBuildMetrics metrics;
   std::unique_ptr<Builder> builder;
+  std::unique_ptr<RkBuilder> rk_builder;
   std::optional<Sequence> sequence;
   Timing timing;
 };
@@ -132,16 +135,21 @@ std::unique_ptr<MorseRun> run_morse(const Input& input, int algorithm, int worke
   const auto representation_stop = Clock::now();
   // Coarse RK profiling leaves local kernels uninstrumented. F-Max's existing
   // diagnostics are finer-grained and are used only in separate phase runs.
-  run->builder = std::make_unique<Builder>(
-      run->complex, Diagnostic ? &run->metrics : nullptr, false);
+  if (algorithm == 0) {
+    run->builder = std::make_unique<Builder>(
+        run->complex, Diagnostic ? &run->metrics : nullptr, false);
+  } else {
+    run->rk_builder = std::make_unique<RkBuilder>(
+        run->complex, Diagnostic ? &run->metrics : nullptr, false);
+  }
   const auto builder_stop = Clock::now();
   if (algorithm == 0) {
     run->sequence.emplace(run->builder->build_f_max());
   } else if (workers == 1) {
-    run->sequence.emplace(run->builder->build_flooding_reduction_kernel());
+    run->sequence.emplace(run->rk_builder->build_flooding_reduction_kernel());
   } else {
     run->sequence.emplace(
-        run->builder->build_flooding_reduction_kernel_parallel(workers));
+        run->rk_builder->build_flooding_reduction_kernel_parallel(workers));
   }
   const auto stop = Clock::now(); // Gradient is now available; keep it alive.
   run->timing.total = seconds(start, stop);

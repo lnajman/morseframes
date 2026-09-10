@@ -8,8 +8,9 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
-The direct RK/F-Max/TTK tables have been refreshed on revision `591b658`.
-The work-aware facet-execution section records the latest ReductionKernel update.
+The direct RK/F-Max/TTK tables record revision `591b658`; they predate lightweight
+RK initialization and are not fresh measurements of that subsequent change.
+The lightweight RK initialization section records the latest ReductionKernel update.
 The closure-based incidence, controlled packed-coface A/B, direct TTK comparison,
 and earlier phase-profile sections retain historical snapshots; those timings
 must not be treated as fresh measurements of subsequent changes.
@@ -244,7 +245,7 @@ repetition level. F-Max is sequential at every displayed worker setting; it is
 remeasured alongside RK and TTK. Raw input/binary/source hashes, revision, wait policy,
 orders, exact reference checks and critical counts remain recorded as described below.
 
-### Current construction-separated results (`591b658`)
+### Construction-separated snapshot (`591b658`)
 
 The refreshed main study covers eight inputs at 1/2/4/8 workers: 32 configurations,
 12 performance repetitions, six separate diagnostic repetitions, and two warmups
@@ -1038,6 +1039,134 @@ efficiencies are 0.33 and 0.39, respectively.
 
 The grid-size aggregates are generated in
 `docs/tetrahedral_worker_scaling_table.tex`.
+
+## Lightweight RK Initialization
+
+`ReductionKernelSequenceBuilder` reuses the existing RK kernel without allocating
+the general-purpose builder's rank, level, and dimension caches. Initialization
+still validates the complete filtration-order permutation with a temporary byte
+per simplex. Generic `FSequenceBuilder` initialization is unchanged. The shared
+reference-frame and compact persistence-input paths and native Python RK entry
+points select the lightweight builder. See the
+[C++ API contract](cpp_complex_view_api.md#lightweight-reductionkernel-initialization).
+
+This is an implementation change on the current development branch, not a change
+to the gradient algorithm or a migration of `main`. It applies to RK's gradient
+stage within full persistence computations; total persistence speedup must be
+measured separately and is not inferred from gradient timings.
+
+The A/B driver selects the lightweight builder when its header is available and
+the legacy general-purpose builder otherwise. The same driver is compiled against
+both snapshots. Both versions time fresh builder initialization, workspace, worker
+pool, matching, replay and internal teardown. Neither moves preparation outside
+the timer. Native complex construction, file loading, correctness checks and
+returned-gradient destruction remain excluded. The resident-array three-way driver
+also selects the new RK builder, with loading and native construction still
+reported separately; the older tracked three-way tables remain historical.
+
+The controlled baseline is `afeaa9bf8d1034864f88661e4d48223258ceafae`.
+Main runs use eight alternating blocks of three unprofiled measurements, two
+warmups, workers 1/2/4/8, and the following families. Reuse the input directory but
+choose fresh output paths when reproducing these commands:
+
+```sh
+python3 tools/benchmark_reduction_kernel_ab.py \
+  --baseline afeaa9b --family terrain --filtration lower-star \
+  --sizes 16 64 --seeds 0 2 --workers 1 2 4 8 --blocks 8 --repeats 3 --warmups 2 \
+  --input-dir ../rk-ab-inputs --output ../rk-lean-builder-terrain-ab.json
+python3 tools/benchmark_reduction_kernel_ab.py \
+  --baseline afeaa9b --family volume --filtration lower-star \
+  --sizes 16 32 --seeds 0 2 --workers 1 2 4 8 --blocks 8 --repeats 3 --warmups 2 \
+  --input-dir ../rk-ab-inputs --output ../rk-lean-builder-volume-ab.json
+python3 tools/benchmark_reduction_kernel_ab.py \
+  --baseline afeaa9b --family terrain --filtration plateau \
+  --sizes 16 32 --seeds 0 --workers 1 2 4 8 --blocks 8 --repeats 3 --warmups 2 \
+  --input-dir ../rk-ab-inputs --output ../rk-lean-builder-terrain-plateau-ab.json
+python3 tools/benchmark_reduction_kernel_ab.py \
+  --baseline afeaa9b --family volume --filtration plateau \
+  --sizes 4 8 12 --seeds 0 --workers 1 2 4 8 --blocks 8 --repeats 3 --warmups 2 \
+  --input-dir ../rk-ab-inputs --output ../rk-lean-builder-volume-plateau-ab.json
+```
+
+The scripts retain raw timings, alternating orders, source/header/binary/input
+hashes, exact sequence checks and critical counts. Bootstrap intervals describe
+paired blocks within one desktop session, not independent-machine uncertainty.
+Diagnostic phase timings are separate from performance estimates. No builds or
+test runs overlap the measurements; unrelated desktop activity is not suppressed.
+
+### Controlled results and validation
+
+The main study contains 52 configurations. A second study repeats all 52 with
+12 blocks of five measurements; use the same four commands above with
+`--blocks 12 --repeats 5` and replace each output suffix `-ab.json` with
+`-confirmation.json`. Both studies use two warmups. Every configuration passes
+exact old/new gradient checks; input hashes, critical counts, repetition counts,
+all raw-sample medians and paired summaries have also been checked independently.
+
+Both studies measured the same candidate header snapshot, SHA-256
+`03636fd51de667e246fe3c8f9629dad2200b8a38171fa6a3d1d66d6388d3aa7b`,
+against baseline header digest
+`babf46699673de2aee8dee6c9091893f52c257f62b5a9efc995a09c2a47fd927`.
+The common driver digest is
+`e86b237a81d057e2bac530c9ce65aee78728989c679272673acd503278bf7fd5`.
+The candidate was an uncommitted worktree based on `afeaa9b`; an immutable rerun
+should select the revision with the matching header digest via `--candidate`.
+The native ARM builds use Apple Clang 15 and `-std=c++17 -O3 -DNDEBUG -pthread`.
+Each raw file records its actual binary digest and timing scope.
+
+For the largest ordinary volume (`n=32`, 792,051 simplices), every one of the
+eight seed/worker configurations has a below-one paired bootstrap interval in
+both studies. Confirmation times are:
+
+| Workers | Previous RK (ms) | Lightweight RK (ms) |
+| --- | ---: | ---: |
+| 1 | 61.865 | 55.045 |
+| 2 | 38.937 | 32.691 |
+| 4 | 29.524 | 21.383 |
+| 8 | 25.264 | 17.619 |
+
+Entries are medians over the two seed-specific sample medians, with native
+construction excluded. At eight workers, the main-study paired ratios are
+0.696 and 0.701; confirmation ratios are 0.628 and 0.734 (approximately 27--37%
+less gradient time). Confirmation intervals are [0.580, 0.677] and [0.701, 0.822].
+At one worker, confirmation paired reductions are about 12--13%. Paired ratios
+are computed per alternating block and need not equal quotients of table entries.
+
+Ordinary volume `n=16` also improves at eight workers in both studies, but its
+estimated gain varies between sessions. Terrain and constant-value plateau
+results do not establish a broad, repeatable improvement. No configuration has
+an above-one interval in either study; that is not proof of equivalence or absence
+of regressions on other inputs. Small inputs remain sensitive to scheduling and
+desktop noise. All samples, including outliers, are retained.
+
+### Separate initialization profile
+
+```sh
+LC_ALL=C python3 tools/benchmark_reduction_kernel_phases.py \
+  --input-dir ../rk-ab-inputs --output ../rk-phases-lean-builder.json
+```
+
+This covers the same 13 inputs at 1/2/4/8 workers, with 24 unprofiled, eight coarse,
+and three detailed samples per configuration. Every raw summary and speedup was
+recomputed. Input/sequence hashes, critical counts, and 16 deterministic work
+counters match `rk-phases-facet-work.json` in all 52 configurations. In particular,
+kernel rounds, facet work and scheduling counts have not changed.
+
+On volume `n=32` at eight workers, coarse builder initialization is now
+0.632/0.788 ms for seeds 0/2, about 3.7/4.0% of coarse total time. The earlier
+profile recorded 7.743/7.275 ms and 31.5/30.8%. These profiles explain the removed
+work but are separate sessions and do not supply the performance speedup claims;
+those come from the unprofiled A/B samples above. The new phase binary digest is
+`f68fb800518de42ffe4e8db91a43eb629f960c0e3f669d4395da54f8801d59a1`.
+
+Normal and address/undefined-behavior-sanitized C++ tests pass, including malformed
+permutations, generic views, repeated/concurrent const calls, callbacks, cached
+and uncached kernels, exact gradients and persistence barcodes. Native Python:
+147 tests pass, including the rebuilt resident TTK integration. The fallback
+suite runs 147 tests with nine native-only skips; both backend corpus checks pass
+all nine cases. Strict documentation and generated-summary checks pass. Full
+persistence correctness is verified, but full persistence runtime is not measured
+by this gradient-only study.
 
 ## Work-Aware Facet Execution
 

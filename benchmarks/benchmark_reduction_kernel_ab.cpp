@@ -3,6 +3,9 @@
 #include "morseframes/debug_checks.hpp"
 #include "morseframes/filtered_complex.hpp"
 #include "morseframes/morse_sequence.hpp"
+#if __has_include("morseframes/reduction_kernel_sequence.hpp")
+#include "morseframes/reduction_kernel_sequence.hpp"
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -17,6 +20,13 @@
 namespace {
 using Complex = morseframes::FilteredSimplicialComplex;
 using Sequence = morseframes::MorseSequence;
+// Compile the same driver with old and new header snapshots. Both paths time
+// fresh production initialization; no preparation is moved outside the timer.
+#if __has_include("morseframes/reduction_kernel_sequence.hpp")
+using Builder = morseframes::ReductionKernelSequenceBuilder<Complex>;
+#else
+using Builder = morseframes::FSequenceBuilder<Complex>;
+#endif
 
 Complex read_complex(const std::string& path, const std::string& mode = "lower-star") {
   std::ifstream input(path);
@@ -67,7 +77,7 @@ Complex read_complex(const std::string& path, const std::string& mode = "lower-s
 
 Sequence build(const Complex& complex, std::size_t workers) {
   // Include a fresh builder, workspace, task pool and event replay in timing.
-  morseframes::FSequenceBuilder<Complex> builder(complex);
+  Builder builder(complex);
   return workers == 1 ? builder.build_flooding_reduction_kernel()
                       : builder.build_flooding_reduction_kernel_parallel(workers);
 }
@@ -148,7 +158,7 @@ int main(int argc, char** argv) {
           double builder_seconds = 0;
           const auto start = std::chrono::steady_clock::now();
           const auto sequence = [&]() {
-            morseframes::FSequenceBuilder<Complex> builder(
+            Builder builder(
                 complex, &metrics, command == "detailed");
             builder_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - start).count();

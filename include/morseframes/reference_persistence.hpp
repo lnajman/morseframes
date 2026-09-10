@@ -15,6 +15,7 @@
 #include "morseframes/filtered_complex.hpp"
 #include "morseframes/inverse_annotation_store.hpp"
 #include "morseframes/morse_sequence.hpp"
+#include "morseframes/reduction_kernel_sequence.hpp"
 #include "morseframes/working_sets.hpp"
 
 namespace morseframes {
@@ -597,7 +598,7 @@ class MorseReferenceFrameBuilder {
     std::vector<Annotation> references(complex_.size());
     Annotation reference_update_scratch;
     auto sequence =
-        FSequenceBuilder(complex_).build_flooding_reduction_kernel_with_step_callback(
+        ReductionKernelSequenceBuilder(complex_).build_flooding_reduction_kernel_with_step_callback(
             [&](const MorseSequence& sequence, const MorseStep& step) {
               update_reference_for_step(sequence, step, references,
                                         reference_update_scratch);
@@ -609,7 +610,7 @@ class MorseReferenceFrameBuilder {
       std::size_t max_workers = 0) const {
     std::vector<Annotation> references(complex_.size());
     Annotation reference_update_scratch;
-    auto sequence = FSequenceBuilder(complex_)
+    auto sequence = ReductionKernelSequenceBuilder(complex_)
                         .build_flooding_reduction_kernel_parallel_with_step_callback(
                             [&](const MorseSequence& sequence,
                                 const MorseStep& step) {
@@ -730,7 +731,7 @@ class MorseReferenceFrameBuilder {
   build_flooding_reduction_kernel_reduction_input() const {
     return build_reduction_input_with([&](auto&& step_callback,
                                           auto* sequence_metrics) {
-      return FSequenceBuilder(complex_, sequence_metrics)
+      return ReductionKernelSequenceBuilder(complex_, sequence_metrics)
           .build_flooding_reduction_kernel_with_step_callback(
               std::forward<decltype(step_callback)>(step_callback));
     });
@@ -741,7 +742,7 @@ class MorseReferenceFrameBuilder {
       std::size_t max_workers = 0) const {
     return build_reduction_input_with([&](auto&& step_callback,
                                           auto* sequence_metrics) {
-      return FSequenceBuilder(complex_, sequence_metrics)
+      return ReductionKernelSequenceBuilder(complex_, sequence_metrics)
           .build_flooding_reduction_kernel_parallel_with_step_callback(
               std::forward<decltype(step_callback)>(step_callback),
               max_workers);

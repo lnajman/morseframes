@@ -54,6 +54,44 @@ The lower-level MorseFrames headers remain available under `morseframes/...`:
 points, and `morseframes/simplex_tree_morse.hpp` contains the direct
 Simplex-tree adapter used by the public wrapper.
 
+## Lightweight ReductionKernel initialization
+
+For RK-only sequence construction, include
+`morseframes/reduction_kernel_sequence.hpp`:
+
+```cpp
+#include <morseframes/reduction_kernel_sequence.hpp>
+
+morseframes::ReductionKernelSequenceBuilder builder(complex_view);
+auto sequence = builder.build_flooding_reduction_kernel_parallel(8);
+```
+
+This builder exposes the sequential and parallel RK methods, their step-callback
+variants, and the execution-options variant. It reuses the existing RK
+implementation; it does not introduce another gradient algorithm. The view must
+remain valid and unchanged while the builder is used. Optional sequence metrics
+and the detailed/coarse profiling flag have the same meaning as on
+`FSequenceBuilder`.
+
+Initialization still validates that `filtration_order()` is a permutation of
+`[0, size())`, rejecting incorrect lengths, invalid IDs, and duplicates. It uses
+a temporary byte per simplex for that check, then releases it. It does not build
+the general-purpose rank, level, and dimension caches: RK reads the view's level
+buckets and metadata directly. On a 64-bit build, this avoids retaining 14 bytes
+per simplex of cache payload (excluding vector/allocator overhead). This is not
+a claim about the peak memory of the entire algorithm.
+
+The shared RK reference-frame and compact persistence-input entry points, and
+the native Python RK sequence, profiling, and persistence paths use this builder.
+`FSequenceBuilder` retains its existing eager initialization and all strategy
+methods, including its backward-compatible RK methods. Callers that construct
+`FSequenceBuilder` directly must opt into the new RK-only type to obtain the
+initialization saving. Other strategies, including F-Max, are unchanged.
+
+No lazy mutable cache is introduced. Repeated const builds use independent
+workspace state; concurrent calls require a thread-safe immutable view and no
+shared writable metrics object, as with the existing kernels.
+
 ## GUDHI-style Simplex_tree entry point
 
 Include `gudhi/Morse_persistence.h` to use the direct Simplex-tree path:

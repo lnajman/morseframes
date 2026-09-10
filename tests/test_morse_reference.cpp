@@ -3,6 +3,7 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <future>
 #include <initializer_list>
 #include <iostream>
 #include <random>
@@ -10,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -21,6 +23,7 @@
 #include "morseframes/inverse_annotation_store.hpp"
 #include "morseframes/morse_reference_api.hpp"
 #include "morseframes/morse_sequence.hpp"
+#include "morseframes/reduction_kernel_sequence.hpp"
 #include "morseframes/reference_persistence.hpp"
 #include "morseframes/simplex_tree_builder.hpp"
 #include "morseframes/standard_persistence.hpp"
@@ -702,6 +705,186 @@ void test_f_sequence_builder_accepts_simplex_tree_view() {
   assert(sequence.critical_simplices().size() + 2 * regular_pairs == view.size());
   assert(frame.sequence.critical_simplices() == sequence.critical_simplices());
   assert(frame.references == references);
+}
+
+template <class T, class = void>
+struct HasFMaxBuilderMethod : std::false_type {};
+
+template <class T>
+struct HasFMaxBuilderMethod<T, std::void_t<decltype(std::declval<T>().build_f_max())>>
+    : std::true_type {};
+
+void test_reduction_kernel_lightweight_initialization() {
+  using Lean = morseframes::ReductionKernelSequenceBuilder<>;
+  static_assert(!HasFMaxBuilderMethod<Lean>::value);
+  static_assert(HasFMaxBuilderMethod<FSequenceBuilder<>>::value);
+  static_assert(!std::is_convertible_v<Lean*, FSequenceBuilder<>*>);
+
+  // The low-level view/builder can be empty, although the owning complex's
+  // public finalize() API requires at least one simplex.
+  const FilteredSimplicialComplex empty;
+  const Lean empty_builder(empty);
+  assert(empty_builder.build_flooding_reduction_kernel().steps().empty());
+  assert(empty_builder.build_flooding_reduction_kernel_parallel(2).steps().empty());
+
+  struct CountingView : FilteredSimplicialComplex {
+    mutable std::size_t level_reads = 0, dimension_reads = 0;
+    bool override_order = false;
+    std::vector<morseframes::SimplexId> order;
+    const std::vector<morseframes::SimplexId>& filtration_order() const {
+      return override_order ? order : FilteredSimplicialComplex::filtration_order();
+    }
+    morseframes::LevelId level(morseframes::SimplexId id) const {
+      ++level_reads;
+      return FilteredSimplicialComplex::level(id);
+    }
+    std::uint16_t dimension(morseframes::SimplexId id) const {
+      ++dimension_reads;
+      return FilteredSimplicialComplex::dimension(id);
+    }
+  };
+  CountingView view;
+  add_simplex(view, {0}, 0.0);
+  add_simplex(view, {1}, 0.0);
+  add_simplex(view, {0, 1}, 0.0);
+  view.finalize();
+  view.level_reads = view.dimension_reads = 0;
+  FSequenceBuilder eager(view);
+  assert(view.level_reads == view.size() && view.dimension_reads == view.size());
+  view.level_reads = view.dimension_reads = 0;
+  morseframes::ReductionKernelSequenceBuilder lean(view);
+  assert(view.level_reads == 0 && view.dimension_reads == 0);
+
+  // Both constructors reject the same malformed permutations before kernels
+  // run, including the sentinel ID and duplicate entries that omit a simplex.
+  view.override_order = true;
+  for (const auto& order : std::vector<std::vector<morseframes::SimplexId>>{
+           {0, 1}, {0, 1, 3}, {0, 1, morseframes::kInvalidSimplex}, {0, 0, 2}}) {
+    view.order = order;
+    std::string eager_error, lean_error;
+    try { (void)FSequenceBuilder(view); }
+    catch (const std::logic_error& e) { eager_error = e.what(); }
+    try { (void)morseframes::ReductionKernelSequenceBuilder(view); }
+    catch (const std::logic_error& e) { lean_error = e.what(); }
+    assert(!eager_error.empty() && eager_error == lean_error);
+  }
+
+  // The lightweight path also accepts non-owning/generic complex views.
+  FakeGudhiLikeSimplexTree tree;
+  morseframes::SimplexTreeComplexView<FakeGudhiLikeSimplexTree> tree_view(tree);
+  const auto sequence = morseframes::ReductionKernelSequenceBuilder(tree_view)
+                            .build_flooding_reduction_kernel();
+  const auto expected = FSequenceBuilder(tree_view).build_flooding_reduction_kernel();
+  assert(sequence.steps().size() == expected.steps().size());
+  for (std::size_t i = 0; i < sequence.steps().size(); ++i) {
+    const auto& a = sequence.steps()[i];
+    const auto& b = expected.steps()[i];
+    assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau && a.level == b.level);
+  }
+}
+
+void test_reduction_kernel_lightweight_persistence() {
+  std::vector<FilteredSimplicialComplex> inputs;
+  for (std::size_t vertices : {3, 7, 8}) {
+    for (bool multilevel : {false, true}) {
+      FilteredSimplicialComplex complex;
+      std::vector<double> values(vertices, 0.0);
+      std::vector<morseframes::VertexId> facet;
+      for (std::size_t v = 0; v < vertices; ++v) {
+        facet.push_back(static_cast<morseframes::VertexId>(v));
+        if (multilevel) values[v] = static_cast<double>(v % 3);
+      }
+      add_weighted_closure(complex, facet, values);
+      inputs.push_back(std::move(complex));
+    }
+  }
+  FilteredSimplicialComplex graph;
+  const std::vector<double> graph_values(131, 0.0);
+  for (morseframes::VertexId v = 1; v < graph_values.size(); ++v) {
+    add_weighted_closure(graph, {0, v}, graph_values);
+  }
+  inputs.push_back(std::move(graph));
+
+  for (auto original : inputs) {
+    original.finalize();
+    for (bool cached : {false, true}) {
+      auto complex = original;
+      if (cached) complex.prepare_same_level_closure_cache();
+      const FSequenceBuilder eager(complex);
+      const auto expected = eager.build_flooding_reduction_kernel();
+      const auto f_max = eager.build_f_max();
+      const auto compare = [&](const auto& a, const auto& b) {
+        assert(a.steps().size() == b.steps().size());
+        for (std::size_t i = 0; i < a.steps().size(); ++i) {
+          const auto& x = a.steps()[i];
+          const auto& y = b.steps()[i];
+          assert(x.type == y.type && x.sigma == y.sigma && x.tau == y.tau &&
+                 x.level == y.level);
+        }
+        morseframes::validate_morse_sequence(complex, b);
+      };
+      const morseframes::ReductionKernelSequenceBuilder lean(complex);
+      const auto copied = lean;
+      compare(expected, copied.build_flooding_reduction_kernel());
+      // No mutable lazy cache: repeated const calls can run independently.
+      auto concurrent = std::async(std::launch::async, [&]() {
+        return lean.build_flooding_reduction_kernel();
+      });
+      compare(expected, lean.build_flooding_reduction_kernel());
+      compare(expected, concurrent.get());
+      for (std::size_t workers : {1, 2, 4, 8}) {
+        std::size_t callbacks = 0;
+        compare(expected, lean.build_flooding_reduction_kernel_parallel_with_step_callback(
+            [&](const auto& sequence, const auto& step) {
+              assert(sequence.steps().size() == ++callbacks);
+              const auto& e = expected.steps()[callbacks - 1];
+              assert(e.type == step.type && e.sigma == step.sigma &&
+                     e.tau == step.tau && e.level == step.level);
+            }, workers));
+        assert(callbacks == expected.steps().size());
+        for (bool detailed : {false, true}) {
+          morseframes::MorseSequenceBuildMetrics metrics;
+          compare(expected, morseframes::ReductionKernelSequenceBuilder(complex, &metrics, detailed)
+                                .build_flooding_reduction_kernel_parallel(workers));
+        }
+      }
+      if (!expected.steps().empty()) {
+        bool propagated = false;
+        try {
+          lean.build_flooding_reduction_kernel_with_step_callback(
+              [](const auto&, const auto&) { throw std::runtime_error("callback failure"); });
+        } catch (const std::runtime_error& e) {
+          propagated = std::string(e.what()) == "callback failure";
+        }
+        assert(propagated);
+        compare(expected, lean.build_flooding_reduction_kernel());
+      }
+
+      const auto references = morseframes::MorseReferenceComputer(complex, expected)
+                                  .compute_full_references();
+      const auto standard = morseframes::compute_standard_z2_persistence(complex);
+      const morseframes::MorseReferenceFrameBuilder frame_builder(complex);
+      for (bool parallel : {false, true}) {
+        const auto frame = parallel ? frame_builder.build_flooding_reduction_kernel_parallel(4)
+                                    : frame_builder.build_flooding_reduction_kernel();
+        compare(expected, frame.sequence);
+        assert(frame.references == references);
+        auto compact = parallel ? frame_builder.build_flooding_reduction_kernel_parallel_reduction_input(4)
+                                : frame_builder.build_flooding_reduction_kernel_reduction_input();
+        compare(expected, compact.sequence);
+        auto reducer = morseframes::MorseReferencePersistenceReducer(
+            complex, compact.sequence, std::move(compact.reduction_plan),
+            std::move(compact.annotations));
+        assert_same_barcode(standard, reducer.compute());
+        const auto strategy = parallel ? morseframes::MorseSequenceStrategy::FloodingReductionKernelParallel
+                                       : morseframes::MorseSequenceStrategy::FloodingReductionKernel;
+        assert_same_barcode(standard, morseframes::compute_morse_reference_persistence(complex, strategy));
+      }
+      assert_field_reference_matches_standard(complex, expected, 3);
+      assert_field_coreference_matches_standard(complex, expected, 3);
+      compare(f_max, eager.build_f_max());
+    }
+  }
 }
 
 void test_process_lower_stars_triangle_boundary() {
@@ -1798,6 +1981,8 @@ int main() {
   test_lower_star_three_dimensional_pair();
   test_flooding_reduction_kernel_on_shared_facets();
   test_reduction_kernel_packed_core_matches_sparse_cache();
+  test_reduction_kernel_lightweight_initialization();
+  test_reduction_kernel_lightweight_persistence();
   test_reduction_kernel_linear_sparse_incidence();
   test_reduction_kernel_batched_facets();
   test_reduction_kernel_facet_work_scheduling();

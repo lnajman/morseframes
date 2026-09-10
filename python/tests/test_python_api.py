@@ -756,6 +756,50 @@ class PythonApiTest(unittest.TestCase):
         if mp.cpp_backend_available():
             self.assertTrue(frame.cpp_reference_map_active())
 
+    def test_reduction_kernel_lightweight_entry_points(self):
+        for complex_ in (plateau_complex(), priority_plateau_complex()):
+            standard = mp.compute_standard_persistence(complex_)
+            expected = mp.compute_morse_sequence(complex_, algorithm="reduction-kernel")
+            for algorithm, options in (
+                ("reduction-kernel", {}),
+                ("reduction-kernel-parallel", {"max_workers": 2}),
+            ):
+                with self.subTest(algorithm=algorithm, size=complex_.size):
+                    frame = mp.compute_morse_sequence_and_reference_map(
+                        complex_, algorithm=algorithm, **options)
+                    self.assertEqual(frame.sequence.steps, expected.steps)
+                    self.assertEqual(frame.references,
+                                     mp.compute_reference_map(complex_, expected))
+                    coframe = mp.compute_morse_sequence_and_coreference_map(
+                        complex_, algorithm=algorithm, **options)
+                    self.assertEqual(coframe.sequence.steps, expected.steps)
+                    self.assertEqual(coframe.coreferences,
+                                     mp.compute_coreference_map(complex_, expected))
+                    diagram = mp.compute_morse_coreference_persistence(
+                        complex_, coframe.sequence, coframe.coreferences)
+                    self.assertEqual(diagram.finite_barcode(), standard.finite_barcode())
+                    self.assertEqual(diagram.essential_barcode(), standard.essential_barcode())
+                    for frame_mode in ("fused", "separate"):
+                        for materialize in (False, True):
+                            result = mp.benchmark_persistence(
+                                complex_, repeats=1, sequence_algorithm=algorithm,
+                                frame_mode=frame_mode, materialize_barcodes=materialize)
+                            self.assertEqual(result.finite_interval_count,
+                                             len(standard.finite_barcode()))
+                            self.assertEqual(result.essential_interval_count,
+                                             len(standard.essential_barcode()))
+                            if result.barcodes_materialized:
+                                self.assertEqual(result.finite_barcode,
+                                                 standard.finite_barcode())
+                                self.assertEqual(result.essential_barcode,
+                                                 standard.essential_barcode())
+                    if mp.cpp_backend_available() and complex_.cpp_backend_active():
+                        profile = mp.profile_morse_sequence(
+                            complex_, algorithm=algorithm, **options)
+                        self.assertEqual(profile.num_critical_simplices,
+                                         len(expected.critical_simplices))
+                        self.assertGreaterEqual(profile.builder_init_seconds, 0.0)
+
     def test_coreduction_coreference_frame_matches_separate_construction(self):
         complex_ = plateau_complex()
         frame = mp.compute_morse_sequence_and_coreference_map(

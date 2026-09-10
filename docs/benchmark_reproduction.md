@@ -8,7 +8,7 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
-The facet-discovery scheduling section records the latest ReductionKernel update.
+The work-aware facet-execution section records the latest ReductionKernel update.
 The closure-based incidence, controlled packed-coface A/B, direct TTK comparison,
 and earlier phase-profile sections retain historical snapshots; those timings
 must not be treated as fresh measurements of subsequent changes.
@@ -934,7 +934,147 @@ efficiencies are 0.33 and 0.39, respectively.
 The grid-size aggregates are generated in
 `docs/tetrahedral_worker_scaling_table.tex`.
 
-## Facet-Discovery Scheduling Update
+## Work-Aware Facet Execution
+
+Local facet execution now uses a work estimate to select the task count, rather
+than always dispatching up to one task per worker whenever two facets remain.
+For each current facet, the estimate counts:
+
+- sparse/cached closure entries, including inactive entries the kernel still scans;
+- live closure bits in the packed representation;
+- the active-list length for the graph fallback, whose local kernel scans that list.
+
+The task budget is `min(workers, facet_count, floor(estimated_work / 1024))`.
+Budgets below two use sequential execution. Estimation stops once the maximum
+budget is reached and uses saturating arithmetic. It does not reconstruct local
+cells, inspect every sparse closure entry, or run the kernel twice. The 1,024-unit
+threshold is an implementation heuristic, not a hardware-independent optimum or
+a prediction of local reduction cost. Unequal closures and repeated reduction
+searches can still produce unequal task costs.
+
+The same decision feeds metrics-free, coarse-profiled and detailed execution.
+Detailed facet-execution wall time includes estimation. Sequential policy and
+independent-level tasks bypass estimation; level parallelism and the shared worker
+budget are unchanged. The existing dynamic chunk claiming, canonical result slots,
+ordered merge and exception draining are retained. No gradient choice changes.
+
+Tests cover work totals 2,047/2,048/2,049, partial worker budgets, contraction to
+cheap rounds, cached/uncached topology, graph scans, packed masks, uneven facets,
+and 9-dimensional simplices with overflowing inline storage. They compare exact
+sequence fields and work counters with sequential execution; failure-injection
+tests still require all submitted tasks to drain before an exception escapes.
+
+Local validation passes the C++ suite both normally and with AddressSanitizer /
+UndefinedBehaviorSanitizer, all 146 native Python tests (including the rebuilt
+optional resident TTK benchmark integration), and the fallback suite (146 run,
+nine native-only tests skipped). The nine-case correctness corpus passes with
+both backends at 1/2/4 workers. Strict Sphinx and generated-summary checks pass.
+
+### Controlled comparison
+
+Baseline: `012d804`. Candidate: the work-aware implementation, identified in the
+raw outputs by header SHA-256
+`babf46699673de2aee8dee6c9091893f52c257f62b5a9efc995a09c2a47fd927`.
+The native ARM Clang 15 flags are `-std=c++17 -O3 -DNDEBUG -pthread` on the
+Apple M1 Max. Each timing includes fresh builder, workspace, pool, gradient,
+replay and internal teardown from an already finalized native complex.
+Loading/construction, validation, protocol I/O and returned-sequence destruction
+are excluded equally. There is no persistence computation or new TTK/F-Max run.
+
+```sh
+LC_ALL=C python3 tools/benchmark_reduction_kernel_ab.py \
+  --baseline 012d804 --candidate WORKTREE \
+  --family terrain --filtration plateau --sizes 16 32 --seeds 0 \
+  --workers 1 2 4 8 --blocks 8 --repeats 3 --warmups 2 \
+  --input-dir ../rk-ab-inputs \
+  --output ../rk-facet-work-terrain-plateau-ab.json
+```
+
+Run the other families with the same options and the following substitutions:
+
+| Family | Filtration | Sizes | Seeds | Output basename |
+| --- | --- | --- | --- | --- |
+| volume | plateau | 4, 8, 12 | 0 | `rk-facet-work-volume-plateau-ab.json` |
+| terrain | lower-star | 16, 64 | 0, 2 | `rk-facet-work-terrain-lower-star-ab.json` |
+| volume | lower-star | 16, 32 | 0, 2 | `rk-facet-work-volume-lower-star-ab.json` |
+
+The confirmation repeats **every** configuration with `--blocks 16 --repeats 5`
+and output suffix `-confirmation.json` in place of `-ab.json`. Both studies
+alternate revision order within each configuration and retain every raw sample.
+No benchmark timings overlap our test or build processes. Other desktop
+applications were active; the paired-block bootstrap describes these sessions,
+not independent-machine uncertainty or a quiet-machine performance guarantee.
+
+Confirmed eight-worker plateau results are:
+
+| Input | Before (ms) | After (ms) | Paired after/before ratio | 95% paired-block interval |
+| --- | ---: | ---: | ---: | --- |
+| 2D terrain, `n=16` | 0.844 | 0.445 | 0.541 | [0.504, 0.644] |
+| 2D terrain, `n=32` | 2.807 | 2.236 | 0.805 | [0.753, 0.825] |
+| 3D volume, `n=4` | 0.504 | 0.303 | 0.597 | [0.552, 0.705] |
+| 3D volume, `n=8` | 2.191 | 1.934 | 0.898 | [0.885, 0.947] |
+| 3D volume, `n=12` | 8.456 | 7.966 | 0.941 | [0.906, 0.975] |
+
+Times are medians of raw samples; ratios are medians of paired block ratios,
+not quotients of those displayed medians. These are within-RK improvements over
+the facet-discovery revision, not RK speedups relative to TTK or F-Max.
+
+All 52 main and 52 confirmation configurations preserve every gradient-sequence
+field and critical count. Raw timings, paired summaries, input hashes and the
+candidate header digest were independently checked. All five eight-worker plateau
+paired medians improve in both runs; all five confirmation intervals lie below
+one. Smaller worker budgets have mixed or inconclusive effects: the larger
+terrain's two-worker ratio changes from 1.180 in the main run to 1.001 in the
+confirmation, and the larger volume's from 1.029 to 0.987.
+
+No ordinary lower-star control has an above-one bootstrap interval in both runs.
+The conspicuous main-run sequential `n=32`, seed-2 volume slowdown (ratio 1.286)
+does not repeat (0.988). Eight-worker median control ratios are 0.975 / 0.978 for
+terrains and 1.011 / 1.030 for volumes (main / confirmation). This supports the
+plateau improvement with a variability caveat, not proven equivalence on ordinary
+inputs, universal speedup, or a claim that all facet time was scheduling overhead.
+The 1,024-unit threshold was not tuned between these two studies.
+
+### Separate phase and scheduling check
+
+```sh
+LC_ALL=C python3 tools/benchmark_reduction_kernel_phases.py \
+  --input-dir ../rk-ab-inputs --output ../rk-phases-facet-work.json
+
+python3 tools/render_reduction_kernel_phases.py \
+  --input ../rk-phases-facet-work.json \
+  --table-output docs/reduction_kernel_facet_work_phases_table.tex
+```
+
+This records 13 inputs at 1/2/4/8 workers, with 24 uninstrumented, eight coarse
+and three detailed samples per configuration. All 52 exact-sequence checks pass.
+Against `rk-phases-discovery.json`, sequence hashes, kernel/round counts,
+incidence/candidate/coface visits, overflow counts and discovery task counts are
+unchanged. Submitted local facet tasks at eight workers decrease as follows:
+
+| Plateau input | Before tasks | After tasks | Before parallel rounds | After parallel rounds |
+| --- | ---: | ---: | ---: | ---: |
+| 2D terrain, `n=16` | 121 | 9 | 16 | 4 |
+| 2D terrain, `n=32` | 249 | 113 | 32 | 20 |
+| 3D volume, `n=4` | 47 | 2 | 6 | 1 |
+| 3D volume, `n=8` | 95 | 46 | 12 | 7 |
+| 3D volume, `n=12` | 143 | 94 | 18 | 13 |
+
+The smaller terrain uses at most three facet tasks per round, and the smallest
+volume uses two despite an eight-worker budget. Local execution remains about
+67% of detailed level wall time on the larger terrain, and about 31% on the
+larger volume. These separate diagnostic shares are not causal decompositions
+of the uninstrumented A/B improvement; cumulative core/local times nest inside
+facet execution and must not be added to it.
+
+Parallel RK still does not consistently beat sequential RK on plateaus. The
+unprofiled phase samples give 2.089 ms versus 1.377 ms on the larger terrain,
+and 8.226 ms versus 8.160 ms on the larger volume (eight workers versus one).
+Ordinary largest-volume inputs retain roughly 2.62-fold eight-worker speedup
+in this profile; builder initialization is about 31% of coarse total time.
+This remains a distinct optimization target, not part of the scheduling change.
+
+## Facet-Discovery Scheduling Update (Historical `3c18fa7`)
 
 Sparse facet discovery now dispatches work according to the **remaining active
 simplex count**, not the original level-bucket size. It submits

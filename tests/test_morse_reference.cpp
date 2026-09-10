@@ -1187,10 +1187,10 @@ void test_flooding_reduction_kernel_on_shared_facets() {
               2);
   morseframes::validate_morse_sequence(complex, parallel_sequence);
   assert_same_sequence(sequence, parallel_sequence);
-  assert(parallel_metrics.reduction_kernel_parallel_batches > 0);
-  assert(parallel_metrics.reduction_kernel_max_parallel_facets == 2);
-  assert(parallel_metrics.reduction_kernel_facet_parallel_tasks ==
-         2 * parallel_metrics.reduction_kernel_parallel_batches);
+  // A pair of tiny packed facets no longer warrants task dispatch.
+  assert(parallel_metrics.reduction_kernel_parallel_batches == 0);
+  assert(parallel_metrics.reduction_kernel_max_parallel_facets == 0);
+  assert(parallel_metrics.reduction_kernel_facet_parallel_tasks == 0);
   assert(parallel_metrics.reduction_kernel_executor_workers == 2);
   assert(parallel_metrics.reduction_kernel_facet_discovery_parallel_tasks == 0);
   assert(parallel_metrics.reduction_kernel_facet_discovery_mask_tests > 0);
@@ -1413,7 +1413,10 @@ void test_reduction_kernel_linear_sparse_incidence() {
              sequential_metrics.reduction_kernel_incidence_cell_visits);
       assert(metrics.reduction_kernel_essential_parallel_tasks == 0);
       if (workers > 1 && complex.num_levels() == 1) {
-        assert(metrics.reduction_kernel_parallel_batches > 0);
+        // 136 triangle closures are below the local-execution threshold;
+        // graph scans and the larger high-dimensional closures exceed it.
+        assert((metrics.reduction_kernel_parallel_batches > 0) ==
+               (max_closure_size != 7));
         assert(metrics.reduction_kernel_parallel_batches <=
                metrics.reduction_kernel_rounds);
         assert(metrics.reduction_kernel_facet_parallel_tasks <=
@@ -1451,14 +1454,17 @@ void test_reduction_kernel_linear_sparse_incidence() {
 void test_reduction_kernel_batched_facets() {
   // Unequal cells exercise chunk tails, result ordering, and both inline and
   // overflow result storage, including dimensions above three.
-  for (std::size_t facet_count : {1, 2, 3, 7, 8, 9, 31, 32, 33, 65}) {
+  for (std::size_t facet_count :
+       {1, 2, 3, 7, 8, 9, 31, 32, 33, 65, 86, 87, 129, 257}) {
     FilteredSimplicialComplex complex;
     const std::vector<double> values(6 * facet_count + 1, 0.0);
+    std::size_t closure_work = 1; // The additional isolated vertex.
     for (std::size_t i = 0; i < facet_count; ++i) {
       std::vector<morseframes::VertexId> facet;
       for (std::size_t j = 0; j < 2 + i % 5; ++j) {
         facet.push_back(static_cast<morseframes::VertexId>(6 * i + j));
       }
+      closure_work += (std::size_t{1} << facet.size()) - 1;
       add_weighted_closure(complex, facet, values);
     }
     complex.add_simplex(
@@ -1488,12 +1494,103 @@ void test_reduction_kernel_batched_facets() {
         assert(metrics.reduction_kernel_facet_parallel_tasks <=
                workers * metrics.reduction_kernel_parallel_batches);
         assert(metrics.reduction_kernel_max_parallel_facets <= workers);
-        if (!detailed || workers == 1) {
-          assert(metrics.reduction_kernel_facet_parallel_tasks == 0);
-        } else {
-          assert(metrics.reduction_kernel_facet_parallel_tasks > 0);
+        // All disjoint facets collapse in the first round; remaining isolated
+        // roots are cheap. Small graph-only fixtures are also below threshold.
+        const auto tasks = std::min(workers, closure_work / 1024);
+        assert(metrics.reduction_kernel_facet_parallel_tasks ==
+               (detailed && tasks > 1 ? tasks : 0));
+      }
+    }
+  }
+}
+
+void test_reduction_kernel_facet_work_scheduling() {
+  // Check exact threshold boundaries, partial worker budgets, and shrinking
+  // rounds without introducing a second policy in the metrics-free path.
+  for (std::size_t work : {1024, 2047, 2048, 2049, 3072, 8192}) {
+    FilteredSimplicialComplex original;
+    const std::size_t edges = (work - 7) / 3;
+    const std::size_t extras = (work - 7) % 3;
+    const std::vector<double> values(edges + extras + 3, 0.0);
+    add_weighted_closure(original, {0, 1, 2}, values);
+    for (std::size_t i = 0; i < edges; ++i) {
+      add_weighted_closure(
+          original, {0, static_cast<morseframes::VertexId>(i + 3)}, values);
+    }
+    for (std::size_t i = 0; i < extras; ++i) {
+      original.add_simplex({static_cast<morseframes::VertexId>(edges + 3 + i)}, 0.0);
+    }
+    original.finalize();
+    assert(original.size() > 128);
+    for (bool cached : {false, true}) {
+      auto complex = original;
+      if (cached) complex.prepare_same_level_closure_cache();
+      morseframes::MorseSequenceBuildMetrics sequential_metrics;
+      const auto expected = FSequenceBuilder(complex, &sequential_metrics)
+                                .build_flooding_reduction_kernel();
+      const auto compare = [&](const auto& actual) {
+        morseframes::validate_morse_sequence(complex, actual);
+        assert(expected.steps().size() == actual.steps().size());
+        for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+          const auto& a = expected.steps()[i];
+          const auto& b = actual.steps()[i];
+          assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+                 a.level == b.level);
+        }
+      };
+      for (std::size_t workers : {1, 2, 4, 8}) {
+        compare(FSequenceBuilder(complex)
+                    .build_flooding_reduction_kernel_parallel(workers));
+        for (bool detailed : {false, true}) {
+          morseframes::MorseSequenceBuildMetrics metrics;
+          compare(FSequenceBuilder(complex, &metrics, detailed)
+                      .build_flooding_reduction_kernel_parallel(workers));
+          const auto tasks = std::min(workers, work / 1024);
+          assert(metrics.reduction_kernel_facet_parallel_tasks ==
+                 (detailed && tasks > 1 ? tasks : 0));
+          assert(metrics.reduction_kernel_parallel_batches ==
+                 (detailed && tasks > 1 ? 1 : 0));
+          if (detailed) {
+            assert(metrics.reduction_kernel_incidence_cell_visits ==
+                   sequential_metrics.reduction_kernel_incidence_cell_visits);
+            assert(metrics.reduction_kernel_facet_cell_visits ==
+                   sequential_metrics.reduction_kernel_facet_cell_visits);
+            assert(metrics.reduction_kernel_local_candidate_visits ==
+                   sequential_metrics.reduction_kernel_local_candidate_visits);
+          }
         }
       }
+    }
+  }
+
+  // Two large closures can justify parallelism where hundreds of small ones
+  // do not. Include dimensions above three and overflow cell/event storage.
+  for (std::size_t extras : {0, 2}) {
+    FilteredSimplicialComplex complex;
+    const std::vector<double> values(20 + extras, 0.0);
+    add_weighted_closure(complex, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, values);
+    add_weighted_closure(complex, {10, 11, 12, 13, 14, 15, 16, 17, 18, 19}, values);
+    for (std::size_t i = 0; i < extras; ++i) {
+      complex.add_simplex({static_cast<morseframes::VertexId>(20 + i)}, 0.0);
+    }
+    complex.finalize();
+    const auto expected = FSequenceBuilder(complex).build_flooding_reduction_kernel();
+    for (bool detailed : {false, true}) {
+      morseframes::MorseSequenceBuildMetrics metrics;
+      const auto actual = FSequenceBuilder(complex, &metrics, detailed)
+                              .build_flooding_reduction_kernel_parallel(8);
+      morseframes::validate_morse_sequence(complex, actual);
+      assert(expected.steps().size() == actual.steps().size());
+      for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+        const auto& a = expected.steps()[i];
+        const auto& b = actual.steps()[i];
+        assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+               a.level == b.level);
+      }
+      // Initial work is 2 * 1023 plus the isolated vertices; later rounds
+      // contain only the two roots and the additional isolated vertices.
+      assert(metrics.reduction_kernel_facet_parallel_tasks ==
+             (detailed && extras == 2 ? 2 : 0));
     }
   }
 }
@@ -1703,6 +1800,7 @@ int main() {
   test_reduction_kernel_packed_core_matches_sparse_cache();
   test_reduction_kernel_linear_sparse_incidence();
   test_reduction_kernel_batched_facets();
+  test_reduction_kernel_facet_work_scheduling();
   test_reduction_kernel_discovery_granularity();
   test_reduction_kernel_discovery_failure_drains_tasks();
   test_reduction_kernel_facet_failure_drains_tasks();

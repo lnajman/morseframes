@@ -1580,9 +1580,12 @@ class PythonApiTest(unittest.TestCase):
                     mp.assert_matches_gudhi(complex_)
 
     def test_reduction_kernel_batched_facet_metrics(self):
+        # Native task batching needs enough work to cross its scheduling gate;
+        # the sequential Python fallback keeps the small semantic fixture.
+        facet_count = 300 if mp.cpp_backend_available() else 33
         complex_ = mp.FilteredComplex.from_lower_star(
-            [(0, v, v + 1) for v in range(1, 34)],
-            {v: 0.0 for v in range(35)},
+            [(0, v, v + 1) for v in range(1, facet_count + 1)],
+            {v: 0.0 for v in range(facet_count + 2)},
         )
         sequential = mp.compute_morse_sequence(
             complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_SEQUENCE
@@ -1605,6 +1608,34 @@ class PythonApiTest(unittest.TestCase):
             self.assertLess(metrics["reduction_kernel_facet_parallel_tasks"],
                             metrics["reduction_kernel_facet_kernels"])
             self.assertEqual(metrics["reduction_kernel_facet_discovery_parallel_tasks"], 0)
+
+    def test_reduction_kernel_facet_work_scheduling(self):
+        if not mp.cpp_backend_available():
+            self.skipTest("requires native facet scheduling")
+        for work in (2047, 2048, 2049, 3072):
+            edges, extras = divmod(work - 7, 3)
+            complex_ = mp.FilteredComplex.from_lower_star(
+                [(0, 1, 2)] + [(0, v) for v in range(3, edges + 3)]
+                + [(v,) for v in range(edges + 3, edges + 3 + extras)],
+                {v: 0.0 for v in range(edges + 3 + extras)},
+            )
+            if not complex_.cpp_backend_active():
+                self.skipTest("requires a native complex")
+            expected = mp.compute_morse_sequence(
+                complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_SEQUENCE)
+            for workers in (2, 8):
+                actual = mp.compute_morse_sequence(
+                    complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+                    max_workers=workers)
+                self.assertEqual(expected.steps, actual.steps)
+                metrics = mp.profile_morse_sequence(
+                    complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+                    max_workers=workers).metrics
+                tasks = min(workers, work // 1024)
+                self.assertEqual(metrics["reduction_kernel_facet_parallel_tasks"],
+                                 tasks if tasks > 1 else 0)
+                self.assertEqual(metrics["reduction_kernel_parallel_batches"],
+                                 1 if tasks > 1 else 0)
 
     def test_reduction_kernel_discovery_active_count_scheduling(self):
         if not mp.cpp_backend_available():

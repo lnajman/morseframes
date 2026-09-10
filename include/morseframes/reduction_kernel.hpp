@@ -122,6 +122,10 @@ class ReductionKernelWorkspace {
   // enough active candidates to amortize dispatch/wait, including shrinking
   // rounds on large plateaus. This does not gate local facet execution.
   static constexpr std::size_t kMinFacetDiscoveryTaskSize = 4096;
+  // A cheap work proxy, not a time prediction: sparse closure entries visited,
+  // live packed cells, or full-list candidates in the graph fallback. Avoid
+  // dispatch/wait for small rounds and scale the task budget as rounds shrink.
+  static constexpr std::size_t kMinFacetExecutionTaskWork = 1024;
   using PackedMask =
       std::array<std::uint64_t, (kPackedClosureBucketCapacity + 63) / 64>;
 
@@ -312,6 +316,20 @@ class ReductionKernelWorkspace {
     std::size_t count = 0;
     while ((bits & std::uint64_t{1}) == 0) {
       bits >>= 1;
+      ++count;
+    }
+    return count;
+#endif
+  }
+
+  static std::size_t population_count(std::uint64_t bits) {
+#if defined(__clang__) || defined(__GNUC__)
+    return static_cast<std::size_t>(
+        __builtin_popcountll(static_cast<unsigned long long>(bits)));
+#else
+    std::size_t count = 0;
+    while (bits != 0) {
+      bits &= bits - 1;
       ++count;
     }
     return count;
@@ -517,14 +535,12 @@ class ReductionKernelWorkspace {
           }
         };
 
+        const auto execution_start = profile_start<CollectMetrics>();
+        const std::size_t facet_tasks = facet_task_count(
+            facets, scratch.active_simplices, level_cells,
+            allow_intra_level_parallelism);
         if constexpr (!CollectMetrics) {
-          const std::size_t workers =
-              executor_ == nullptr ? 1 : executor_->worker_count();
-          const bool execute_sequentially =
-              !allow_intra_level_parallelism ||
-              options_.policy == ReductionKernelExecutionPolicy::Sequential ||
-              workers <= 1 || facets.size() <= 1;
-          if (execute_sequentially) {
+          if (facet_tasks <= 1) {
             for (SimplexId facet : facets) {
               const auto result = compute_facet_kernel<false>(
                   level, facet, scratch.active_simplices, level_cells);
@@ -533,18 +549,15 @@ class ReductionKernelWorkspace {
           } else {
             const auto& facet_results = execute_facets<false>(
                 level, facets, scratch.active_simplices, level_cells,
-                scratch.facet_results, metrics,
-                allow_intra_level_parallelism);
+                scratch.facet_results, metrics, facet_tasks);
             for (const auto& result : facet_results) {
               record_facet_events(result);
             }
           }
         } else {
-          const auto execution_start = profile_start<true>();
           const auto& facet_results = execute_facets<true>(
               level, facets, scratch.active_simplices, level_cells,
-              scratch.diagnostic_facet_results, metrics,
-              allow_intra_level_parallelism);
+              scratch.diagnostic_facet_results, metrics, facet_tasks);
           profile_add<true>(metrics.facet_execution_nanoseconds, execution_start);
           const auto aggregation_start = profile_start<true>();
           if (facet_results.size() > 1) {
@@ -1289,6 +1302,44 @@ class ReductionKernelWorkspace {
     return result;
   }
 
+  std::size_t facet_task_count(
+      const std::vector<SimplexId>& facets,
+      const std::vector<SimplexId>& bucket,
+      const LevelCells& cells, bool allow_parallelism) const {
+    const std::size_t workers =
+        executor_ == nullptr ? 1 : executor_->worker_count();
+    if (!allow_parallelism ||
+        options_.policy == ReductionKernelExecutionPolicy::Sequential ||
+        workers <= 1 || facets.size() <= 1) {
+      return 1;
+    }
+    const std::size_t max_tasks = std::min(workers, facets.size());
+    std::size_t work = 0;
+    for (SimplexId facet : facets) {
+      std::size_t cost = 0;
+      if (cells.packed_masks != nullptr) {
+        const auto* mask = cells.packed_masks->data() +
+                           bucket_index_[facet] * cells.packed_block_count;
+        for (std::size_t block = 0; block < cells.packed_block_count; ++block) {
+          cost += population_count(mask[block] & cells.packed_active[block]);
+        }
+      } else if (cells.enabled) {
+        const auto [first, last] = cell_range(cells, facet);
+        // The local kernel scans this full range even if some cells were
+        // removed in earlier rounds. Do not walk it again for an exact count.
+        cost = last - first;
+      } else {
+        cost = bucket.size();
+      }
+      // Saturate rather than overflowing for unusually large generic views.
+      work += std::min(cost, std::numeric_limits<std::size_t>::max() - work);
+      if (work / kMinFacetExecutionTaskWork >= max_tasks) {
+        return max_tasks;
+      }
+    }
+    return std::max<std::size_t>(1, work / kMinFacetExecutionTaskWork);
+  }
+
   template <bool CollectMetrics>
   const std::vector<FacetKernelResult<CollectMetrics>>& execute_facets(
       LevelId level, const std::vector<SimplexId>& facets,
@@ -1296,17 +1347,13 @@ class ReductionKernelWorkspace {
       const LevelCells& level_cells,
       std::vector<FacetKernelResult<CollectMetrics>>& results,
       ReductionKernelMetrics& metrics,
-      bool allow_parallelism) const {
+      std::size_t task_count) const {
     results.clear();
     if (results.capacity() < facets.size()) {
       results.reserve(facets.size());
     }
 
-    const std::size_t workers =
-        executor_ == nullptr ? 1 : executor_->worker_count();
-    if (!allow_parallelism ||
-        options_.policy == ReductionKernelExecutionPolicy::Sequential ||
-        workers <= 1 || facets.size() <= 1) {
+    if (task_count <= 1) {
       for (SimplexId facet : facets) {
         results.push_back(
             compute_facet_kernel<CollectMetrics>(
@@ -1318,7 +1365,6 @@ class ReductionKernelWorkspace {
     // Allocate before dispatch: tasks write disjoint, stable slots, and the
     // coordinator consumes them in canonical facet order after all tasks join.
     results.resize(facets.size());
-    const std::size_t task_count = std::min(workers, facets.size());
     // Roughly four chunks per worker balance unequal facet costs without a
     // future, queue lock, notification, and barrier for every individual facet.
     const std::size_t chunk_size =

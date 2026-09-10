@@ -1,0 +1,12 @@
+\begin{tabular}{lrrrrrr}
+\hline
+Workload & $n$ & 1 worker (ms) & 8 workers (ms) & Speedup & Builder (\%) & Levels (\%) \\
+\hline
+Lower-star 2D & 64 & 1.12 & 0.79 & 1.41 & 14.7 & 50.4 \\
+Lower-star 3D & 32 & 66.86 & 22.40 & 2.98 & 30.7 & 53.4 \\
+Plateau 2D & 32 & 2.76 & 54.38 & 0.0507 & 0.1 & 99.5 \\
+Plateau 3D & 12 & 7.75 & 132.73 & 0.0584 & 0.1 & 99.6 \\
+\hline
+\end{tabular}
+% Time and speedup: uninstrumented; phase shares: separate coarse runs at 8 workers.
+% Medians over case medians at the largest measured size in each family.

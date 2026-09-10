@@ -43,6 +43,32 @@ The current public alpha can be installed from PyPI:
 
    benchmark_summary
    benchmark_reproduction
+   native_construction_benchmark
+   native_bulk_construction_benchmark
+   native_finalization_benchmark
+   native_order_reuse_benchmark
+   simplicial_gradient_benchmark
+   pls_ttk_gradient_benchmark
+   pls_key_arena_benchmark
+   rk_lazy_closure_benchmark
+   rk_ordered_lookup_benchmark
+   rk_eligible_candidates_benchmark
+   rk_boundary_index_benchmark
+   rk_worker_scaling_benchmark
+   rk_worker_scaling_protocol
+   rk_worker_scaling_tables
+   rk_level_profile_protocol
+   rk_level_profile_benchmark
+   rk_level_profile_tables
+   rk_binary_isolation_protocol
+   rk_binary_isolation_benchmark
+   rk_binary_isolation_tables
+   rk_parallel_closure_protocol
+   rk_parallel_closure_benchmark
+   rk_parallel_closure_tables
+   rk_selective_closure_protocol
+   rk_selective_closure_benchmark
+   rk_selective_closure_tables
    reduction_kernel_correctness
    phase0_conventions
 

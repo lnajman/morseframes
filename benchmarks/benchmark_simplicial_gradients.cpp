@@ -1,0 +1,479 @@
+// Prepared-complex gradients in arbitrary tested dimensions. All function-
+// specific PLS/RK setup and fresh builders stay inside algorithm timing.
+#include "morseframes/debug_checks.hpp"
+#include "morseframes/lower_star_complex.hpp"
+#include "morseframes/reduction_kernel_sequence.hpp"
+#include <array>
+#ifndef MORSEFRAMES_BENCHMARK_ORDINARY_ONLY
+#include "pls_profile.hpp"
+#endif
+#include <chrono>
+#include <cstring>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <memory>
+#include <optional>
+#include <sys/resource.h>
+#include <type_traits>
+#include <utility>
+
+namespace {
+using Complex = morseframes::FilteredSimplicialComplex;
+using Sequence = morseframes::MorseSequence;
+using FBuilder = morseframes::FSequenceBuilder<Complex>;
+using RBuilder = morseframes::ReductionKernelSequenceBuilder<Complex>;
+using Clock = std::chrono::steady_clock;
+constexpr std::array<const char*, 3> names{{"f_max", "process_lower_stars", "reduction_kernel"}};
+constexpr std::array<std::array<int, 3>, 6> orders{{
+    {{0, 1, 2}}, {{2, 1, 0}}, {{1, 2, 0}}, {{0, 2, 1}}, {{2, 0, 1}}, {{1, 0, 2}}}};
+double seconds(Clock::time_point a, Clock::time_point b) {
+  return std::chrono::duration<double>(b - a).count();
+}
+// New counters must not break reproduction against historical header sets.
+#ifndef MORSEFRAMES_BENCHMARK_ORDINARY_ONLY
+template <typename Metrics, typename = void>
+struct HasSearchProfile : std::false_type {};
+template <typename Metrics>
+struct HasSearchProfile<Metrics, std::void_t<
+    decltype(std::declval<Metrics>().reduction_kernel_local_membership_comparisons),
+    decltype(std::declval<Metrics>().reduction_kernel_local_large_membership_tests),
+    decltype(std::declval<Metrics>().reduction_kernel_local_large_membership_comparisons),
+    decltype(std::declval<Metrics>().reduction_kernel_local_sparse_scan_passes),
+    decltype(std::declval<Metrics>().reduction_kernel_local_sparse_candidate_visits),
+    decltype(std::declval<Metrics>().reduction_kernel_local_removed_candidate_visits),
+    decltype(std::declval<Metrics>().reduction_kernel_local_protected_candidate_visits)>>
+    : std::true_type {};
+template <typename Metrics>
+void search_profile(const Metrics& m) {
+  if constexpr (HasSearchProfile<Metrics>::value) {
+#define RK_SEARCH_COUNT(name) std::cout << ",\"" #name "\":" << m.reduction_kernel_##name
+    RK_SEARCH_COUNT(local_membership_comparisons);
+    RK_SEARCH_COUNT(local_large_membership_tests);
+    RK_SEARCH_COUNT(local_large_membership_comparisons);
+    RK_SEARCH_COUNT(local_sparse_scan_passes);
+    RK_SEARCH_COUNT(local_sparse_candidate_visits);
+    RK_SEARCH_COUNT(local_removed_candidate_visits);
+    RK_SEARCH_COUNT(local_protected_candidate_visits);
+#undef RK_SEARCH_COUNT
+  }
+}
+template <typename Metrics, typename = void>
+struct HasClosureProfile : std::false_type {};
+template <typename Metrics>
+struct HasClosureProfile<Metrics, std::void_t<
+    decltype(std::declval<Metrics>().reduction_kernel_closure_initial_nanoseconds),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_packed_nanoseconds),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_traversal_nanoseconds),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_sort_nanoseconds),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_materialize_nanoseconds),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_sparse_cells),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_sparse_entries),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_boundary_visits),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_duplicate_faces),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_index_growths),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_entry_growths)>> : std::true_type {};
+template <typename Metrics>
+void closure_profile(const Metrics& m) {
+  if constexpr (HasClosureProfile<Metrics>::value) {
+#define RK_CLOSURE_TIME(name) std::cout << ",\"" #name "_seconds\":" << 1e-9 * m.reduction_kernel_##name##_nanoseconds
+#define RK_CLOSURE_COUNT(name) std::cout << ",\"" #name "\":" << m.reduction_kernel_##name
+    RK_CLOSURE_TIME(closure_initial);
+    RK_CLOSURE_TIME(closure_packed);
+    RK_CLOSURE_TIME(closure_traversal);
+    RK_CLOSURE_TIME(closure_sort);
+    RK_CLOSURE_TIME(closure_materialize);
+    RK_CLOSURE_COUNT(closure_sparse_cells);
+    RK_CLOSURE_COUNT(closure_sparse_entries);
+    RK_CLOSURE_COUNT(closure_boundary_visits);
+    RK_CLOSURE_COUNT(closure_duplicate_faces);
+    RK_CLOSURE_COUNT(closure_index_growths);
+    RK_CLOSURE_COUNT(closure_entry_growths);
+#undef RK_CLOSURE_TIME
+#undef RK_CLOSURE_COUNT
+  }
+}
+template <typename Metrics, typename = void>
+struct HasBoundaryIndexProfile : std::false_type {};
+template <typename Metrics>
+struct HasBoundaryIndexProfile<Metrics, std::void_t<
+    decltype(std::declval<Metrics>().reduction_kernel_closure_boundary_index_nanoseconds),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_boundary_index_visits),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_boundary_index_entries)>> : std::true_type {};
+template <typename Metrics>
+void boundary_index_profile(const Metrics& m) {
+  if constexpr (HasBoundaryIndexProfile<Metrics>::value) {
+    std::cout << ",\"closure_boundary_index_seconds\":" << 1e-9 * m.reduction_kernel_closure_boundary_index_nanoseconds
+              << ",\"closure_boundary_index_visits\":" << m.reduction_kernel_closure_boundary_index_visits
+              << ",\"closure_boundary_index_entries\":" << m.reduction_kernel_closure_boundary_index_entries;
+  }
+}
+#endif
+std::uint64_t peak_bytes() {
+  rusage usage{};
+  if (getrusage(RUSAGE_SELF, &usage)) throw std::runtime_error("getrusage failed");
+#ifdef __APPLE__
+  return usage.ru_maxrss;
+#else
+  return std::uint64_t(usage.ru_maxrss) * 1024;
+#endif
+}
+struct Input {
+  unsigned dimension = 0;
+  std::vector<double> values;
+  std::vector<std::vector<morseframes::VertexId>> cells;
+};
+Input read(const char* path) {
+  std::ifstream stream(path);
+  Input input;
+  std::string magic;
+  std::size_t vertices = 0, cells = 0;
+  stream >> magic >> input.dimension >> vertices >> cells;
+  if (!stream || magic != "morseframes-ttk-v1" || input.dimension < 1 ||
+      input.dimension > 15 || !vertices || !cells || vertices >= morseframes::kInvalidSimplex)
+    throw std::runtime_error("Invalid simplicial input header");
+  input.values.resize(vertices);
+  for (auto& value : input.values) {
+    stream >> value;
+    if (!stream || !std::isfinite(value)) throw std::runtime_error("Invalid scalar value");
+  }
+  auto sorted = input.values;
+  std::sort(sorted.begin(), sorted.end());
+  if (std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end())
+    throw std::runtime_error("This comparison requires injective vertex values");
+  std::vector<bool> used(vertices, false);
+  input.cells.assign(cells, std::vector<morseframes::VertexId>(input.dimension + 1));
+  for (auto& cell : input.cells) {
+    for (auto& vertex : cell) {
+      stream >> vertex;
+      if (!stream || vertex >= vertices) throw std::runtime_error("Invalid cell vertex");
+      used[vertex] = true;
+    }
+    auto canonical = cell;
+    std::sort(canonical.begin(), canonical.end());
+    if (std::adjacent_find(canonical.begin(), canonical.end()) != canonical.end())
+      throw std::runtime_error("Repeated cell vertex");
+  }
+  std::string trailing;
+  if (stream >> trailing) throw std::runtime_error("Unexpected trailing input");
+  if (std::find(used.begin(), used.end(), false) != used.end())
+    throw std::runtime_error("Pure-mesh input has an unused vertex");
+  return input;
+}
+struct Run {
+  morseframes::MorseSequenceBuildMetrics metrics;
+  std::unique_ptr<FBuilder> f;
+  std::unique_ptr<RBuilder> rk;
+  std::optional<Sequence> sequence;
+  double builder_seconds = 0, kernel_seconds = 0, algorithm_seconds = 0;
+};
+std::unique_ptr<Run> run(const Complex& complex, int algorithm, std::size_t workers,
+                         bool diagnostic = false, bool detailed = false,
+                         bool parallel_closure = true) {
+  const auto start = Clock::now();
+  auto result = std::make_unique<Run>();
+#ifdef MORSEFRAMES_BENCHMARK_ORDINARY_ONLY
+  // Same Run layout/ownership and timing boundaries, but no diagnostic call
+  // site or runtime flag can enable collection in this executable.
+  (void)diagnostic;
+  auto* metrics = static_cast<morseframes::MorseSequenceBuildMetrics*>(nullptr);
+  detailed = false;
+#else
+  auto* metrics = diagnostic ? &result->metrics : nullptr;
+#endif
+  if (algorithm == 2) result->rk = std::make_unique<RBuilder>(complex, metrics, detailed);
+  else result->f = std::make_unique<FBuilder>(complex, metrics, false);
+  const auto ready = Clock::now();
+  if (algorithm == 0) result->sequence.emplace(result->f->build_f_max());
+  else if (algorithm == 1) result->sequence.emplace(workers == 1
+      ? result->f->build_process_lower_stars() : result->f->build_process_lower_stars_parallel(workers));
+  else {
+#ifdef MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION
+    morseframes::ReductionKernelExecutionOptions options;
+    options.policy = workers == 1 ? morseframes::ReductionKernelExecutionPolicy::Sequential
+                                  : morseframes::ReductionKernelExecutionPolicy::Parallel;
+    options.max_workers = workers;
+    options.parallel_closure_preparation = parallel_closure;
+    result->sequence.emplace(result->rk->build_flooding_reduction_kernel_with_execution_options(
+        options, [](const auto&, const auto&) {}));
+#else
+    (void)parallel_closure;
+    result->sequence.emplace(workers == 1
+      ? result->rk->build_flooding_reduction_kernel()
+      : result->rk->build_flooding_reduction_kernel_parallel(workers));
+#endif
+  }
+  const auto stop = Clock::now();
+  result->builder_seconds = seconds(start, ready);
+  result->kernel_seconds = seconds(ready, stop);
+  result->algorithm_seconds = seconds(start, stop);
+  return result; // Builders and output remain alive beyond the timed interval.
+}
+struct Hash {
+  std::uint64_t value = 14695981039346656037ull;
+  std::ostream* dump = nullptr;
+  void add(std::uint64_t x) {
+    if (dump) *dump << x << ' ';
+    for (unsigned i = 0; i < 8; ++i) { value ^= (x >> (i * 8)) & 255; value *= 1099511628211ull; }
+  }
+  template <class Range> void list(const Range& values) {
+    add(values.size()); for (auto value : values) add(value);
+  }
+  void real(double x) { std::uint64_t bits; std::memcpy(&bits, &x, sizeof bits); add(bits); }
+};
+std::uint64_t fingerprint(const Sequence& sequence, std::ostream* dump = nullptr) {
+  Hash hash; hash.dump = dump; hash.add(sequence.steps().size());
+  for (const auto& s : sequence.steps()) {
+    hash.add(static_cast<unsigned>(s.type)); hash.add(s.sigma); hash.add(s.tau); hash.add(s.level);
+  }
+  return hash.value;
+}
+#if defined(MORSEFRAMES_RK_LEVEL_PROFILE_VERSION) && !defined(MORSEFRAMES_BENCHMARK_ORDINARY_ONLY)
+std::unique_ptr<Run> run_levels(const Complex& complex, std::size_t workers,
+                               bool detailed, morseframes::ReductionKernelLevelProfile& trace) {
+  const auto start = Clock::now();
+  auto result = std::make_unique<Run>();
+  result->rk = std::make_unique<RBuilder>(complex, &result->metrics, detailed);
+  const auto ready = Clock::now();
+  morseframes::ReductionKernelExecutionOptions options;
+  if (workers > 1) options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+  options.max_workers = workers;
+#ifdef MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION
+  // Match run()/rk_plain: profiling must describe the same opt-in policy.
+  options.parallel_closure_preparation = true;
+#endif
+  result->sequence.emplace(result->rk->build_flooding_reduction_kernel_with_level_profile(trace, options));
+  const auto stop = Clock::now();
+  result->builder_seconds = seconds(start, ready);
+  result->kernel_seconds = seconds(ready, stop);
+  result->algorithm_seconds = seconds(start, stop);
+  return result;
+}
+
+void level_profile_json(const morseframes::ReductionKernelLevelProfile& trace) {
+  std::cout << ",\"level_trace\":{\"completed\":" << (trace.completed ? "true" : "false")
+            << ",\"detailed\":" << (trace.detailed ? "true" : "false")
+            << ",\"executor_workers\":" << trace.executor_workers
+            << ",\"level_tasks\":" << trace.level_tasks
+            << ",\"level_wall_seconds\":" << 1e-9 * trace.level_wall_nanoseconds << ",\"levels\":[";
+  bool first = true;
+  for (const auto& row : trace.levels) {
+    if (!first) std::cout << ',';
+    first = false;
+    std::cout << "{\"level\":" << row.level << ",\"task\":" << row.task
+              << ",\"simplices\":" << row.simplices << ",\"events\":" << row.events
+              << ",\"completed\":" << (row.completed ? "true" : "false")
+              << ",\"start_seconds\":" << 1e-9 * row.start_nanoseconds
+              << ",\"duration_seconds\":" << 1e-9 * row.duration_nanoseconds;
+    const auto& m = row.metrics;
+#define LEVEL_TIME(name) std::cout << ",\"" #name "_seconds\":" << 1e-9 * m.name##_nanoseconds
+#define LEVEL_COUNT(name) std::cout << ",\"" #name "\":" << m.name
+    LEVEL_TIME(closure); LEVEL_TIME(facet); LEVEL_TIME(essential);
+    LEVEL_TIME(facet_execution); LEVEL_TIME(aggregation); LEVEL_TIME(merge);
+    LEVEL_TIME(core); LEVEL_TIME(local_reduction);
+    LEVEL_TIME(closure_initial); LEVEL_TIME(closure_packed); LEVEL_TIME(closure_boundary_index);
+    LEVEL_TIME(closure_traversal); LEVEL_TIME(closure_sort); LEVEL_TIME(closure_materialize);
+#ifdef MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION
+    LEVEL_TIME(closure_parallel); LEVEL_TIME(closure_parallel_traversal);
+    LEVEL_TIME(closure_parallel_sort); LEVEL_TIME(closure_parallel_materialize);
+    LEVEL_TIME(closure_parallel_merge);
+    LEVEL_COUNT(closure_parallel_batches); LEVEL_COUNT(closure_parallel_tasks);
+#endif
+    LEVEL_COUNT(kernel_rounds); LEVEL_COUNT(facet_kernels);
+    LEVEL_COUNT(reductions); LEVEL_COUNT(perforations); LEVEL_COUNT(parallel_batches);
+    LEVEL_COUNT(closure_sparse_cells); LEVEL_COUNT(closure_sparse_entries);
+    LEVEL_COUNT(closure_boundary_visits); LEVEL_COUNT(closure_duplicate_faces);
+    LEVEL_COUNT(closure_boundary_index_visits); LEVEL_COUNT(closure_boundary_index_entries);
+    LEVEL_COUNT(local_candidate_visits); LEVEL_COUNT(local_coboundary_visits);
+    LEVEL_COUNT(local_membership_tests); LEVEL_COUNT(local_membership_comparisons);
+#undef LEVEL_TIME
+#undef LEVEL_COUNT
+    std::cout << '}';
+  }
+  std::cout << "]}";
+}
+#endif
+template <class T> void array(const std::vector<T>& values) {
+  std::cout << '[';
+  for (std::size_t i = 0; i < values.size(); ++i) { if (i) std::cout << ','; std::cout << values[i]; }
+  std::cout << ']';
+}
+void timing(const Run& r) {
+  std::cout << "{\"builder_seconds\":" << r.builder_seconds
+            << ",\"kernel_seconds\":" << r.kernel_seconds
+            << ",\"algorithm_seconds\":" << r.algorithm_seconds << '}';
+}
+} // namespace
+
+int main(int argc, char** argv) {
+  try {
+    if (argc != 3 && argc != 5) throw std::runtime_error("Usage: worker INPUT DUMP|--memory ALGORITHM WORKERS");
+    std::cout << std::setprecision(17);
+    const auto load_start = Clock::now();
+    const auto input = read(argv[1]);
+    const auto load_stop = Clock::now();
+    Complex complex;
+    morseframes::add_lower_star_cells(complex, input.values, input.cells);
+    complex.finalize();
+    const auto construct_stop = Clock::now();
+    if (std::string(argv[2]) == "--memory") {
+      if (argc != 5) throw std::runtime_error("Memory mode needs algorithm and workers");
+      const int a = std::stoi(argv[3]); const auto workers = std::stoul(argv[4]);
+      if (a < 0 || a > 2 || !workers) throw std::runtime_error("Invalid memory mode");
+      const auto before = peak_bytes();
+      const auto result = run(complex, a, workers);
+      const auto after = peak_bytes(); // Before reference/validation allocations.
+      std::cout << "{\"complex_peak_bytes\":" << before << ",\"gradient_peak_bytes\":" << after
+                << ",\"simplices\":" << complex.size() << ",\"steps\":" << result->sequence->steps().size() << "}\n";
+      return 0;
+    }
+    if (argc != 3) throw std::runtime_error("Unexpected arguments");
+    std::ofstream dump(argv[2]);
+    if (!dump) throw std::runtime_error("Cannot write reference dump");
+    Hash topology; topology.dump = &dump; topology.add(complex.size());
+    std::vector<std::size_t> stars(input.values.size(), 0);
+    std::size_t incidences = 0;
+    std::int64_t euler = 0;
+    for (morseframes::SimplexId id = 0; id < complex.size(); ++id) {
+      topology.list(complex.vertices(id)); topology.add(complex.dimension(id));
+      topology.real(complex.filtration(id)); topology.add(complex.level(id));
+      topology.list(complex.boundary(id)); topology.list(complex.coboundary(id));
+      incidences += complex.boundary(id).size();
+      euler += complex.dimension(id) % 2 ? -1 : 1;
+      const auto& v = complex.vertices(id);
+      ++stars[*std::max_element(v.begin(), v.end(), [&](auto a, auto b) { return input.values[a] < input.values[b]; })];
+    }
+    topology.list(complex.filtration_order());
+    for (morseframes::LevelId l = 0; l < complex.num_levels(); ++l) {
+      topology.real(complex.level_values()[l]); topology.list(complex.simplices_of_level(l));
+    }
+    std::array<std::uint64_t, 3> references{};
+    std::cout << "{\"identity\":{\"dimension\":" << input.dimension << ",\"vertices\":" << input.values.size()
+              << ",\"cells\":" << input.cells.size() << ",\"simplices\":" << complex.size()
+              << ",\"incidences\":" << incidences << ",\"euler\":" << euler
+              << ",\"complex_fingerprint\":\"" << topology.value << "\",\"lower_star_sizes\":";
+    array(stars);
+    std::cout << ",\"algorithms\":{";
+    for (int a = 0; a < 3; ++a) {
+      const auto result = run(complex, a, 1);
+      morseframes::validate_morse_sequence(complex, *result->sequence);
+      references[a] = fingerprint(*result->sequence, &dump);
+      std::vector<std::size_t> counts(input.dimension + 1, 0);
+      for (auto id : result->sequence->critical_simplices()) ++counts[complex.dimension(id)];
+      if (a) std::cout << ',';
+      std::cout << '"' << names[a] << "\":{\"fingerprint\":\"" << references[a] << "\",\"critical_counts\":";
+      array(counts); std::cout << ",\"steps\":" << result->sequence->steps().size() << '}';
+    }
+    dump.close(); if (!dump) throw std::runtime_error("Reference dump failed");
+    std::cout << "}},\"loading_seconds\":" << seconds(load_start, load_stop)
+              << ",\"construction_seconds\":" << seconds(load_stop, construct_stop) << '}' << std::endl;
+    std::string command;
+    std::size_t round = 0;
+    while (std::cin >> command && command != "quit") {
+      std::size_t workers = 0, repeats = 0;
+      if (command == "run" || command == "run_closure_serial") {
+#ifndef MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION
+        if (command != "run") throw std::runtime_error("These headers do not support the closure control");
+#endif
+        std::cin >> workers >> repeats;
+        if (!std::cin || !workers || !repeats) throw std::runtime_error("Invalid run command");
+        std::cout << '[';
+        for (std::size_t i = 0; i < repeats; ++i, ++round) {
+          if (i) std::cout << ',';
+          std::cout << '{'; bool first = true;
+          for (int a : orders[round % orders.size()]) {
+            const auto r = run(complex, a, workers, false, false, command == "run");
+            if (fingerprint(*r->sequence) != references[a]) throw std::runtime_error("Gradient differs from sequential reference");
+            if (!first) std::cout << ','; first = false;
+            std::cout << '"' << names[a] << "\":"; timing(*r);
+          }
+          std::cout << '}';
+        }
+        std::cout << ']' << std::endl;
+      } else if (command == "rk_plain") {
+        std::cin >> workers;
+        if (!std::cin || !workers) throw std::runtime_error("Invalid RK command");
+        const auto r = run(complex, 2, workers);
+        if (fingerprint(*r->sequence) != references[2]) throw std::runtime_error("RK differs");
+        timing(*r); std::cout << std::endl;
+#ifndef MORSEFRAMES_BENCHMARK_ORDINARY_ONLY
+      } else if (command == "rk_coarse" || command == "rk_detailed" ||
+                 command == "rk_levels_coarse" || command == "rk_levels_detailed") {
+        std::cin >> workers;
+        if (!std::cin || !workers) throw std::runtime_error("Invalid RK profile command");
+        const bool trace_levels = command == "rk_levels_coarse" || command == "rk_levels_detailed";
+        const bool detailed = command == "rk_detailed" || command == "rk_levels_detailed";
+        std::unique_ptr<Run> r;
+#ifdef MORSEFRAMES_RK_LEVEL_PROFILE_VERSION
+        morseframes::ReductionKernelLevelProfile trace;
+        if (trace_levels) r = run_levels(complex, workers, detailed, trace);
+        else r = run(complex, 2, workers, true, detailed);
+#else
+        if (trace_levels) throw std::runtime_error("These headers do not support level traces");
+        r = run(complex, 2, workers, true, detailed);
+#endif
+        if (fingerprint(*r->sequence) != references[2]) throw std::runtime_error("RK profile differs");
+        const auto& m = r->metrics;
+        std::cout << "{\"builder_seconds\":" << r->builder_seconds
+                  << ",\"algorithm_seconds\":" << r->algorithm_seconds
+                  << ",\"kernel_seconds\":" << r->kernel_seconds;
+#define RK_TIME(name) std::cout << ",\"" #name "_seconds\":" << 1e-9 * m.reduction_kernel_##name##_nanoseconds
+#define RK_COUNT(name) std::cout << ",\"" #name "\":" << m.reduction_kernel_##name
+        RK_TIME(setup); RK_TIME(level_wall); RK_TIME(replay);
+        RK_TIME(closure); RK_TIME(facet); RK_TIME(essential); RK_TIME(core);
+        RK_TIME(local_reduction); RK_TIME(facet_execution); RK_TIME(aggregation); RK_TIME(merge);
+        RK_TIME(cumulative_level_task); RK_TIME(min_level_task); RK_TIME(max_level_task);
+        RK_COUNT(level_chunks); RK_COUNT(level_chunk_size);
+        RK_COUNT(min_worker_levels); RK_COUNT(max_worker_levels);
+        RK_COUNT(min_worker_simplices); RK_COUNT(max_worker_simplices);
+        RK_COUNT(rounds); RK_COUNT(facet_kernels); RK_COUNT(executor_workers);
+        RK_COUNT(facet_cell_visits); RK_COUNT(local_candidate_visits);
+        RK_COUNT(local_coboundary_visits); RK_COUNT(local_membership_tests);
+        search_profile(m);
+        closure_profile(m);
+        boundary_index_profile(m);
+#ifdef MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION
+        RK_TIME(closure_parallel); RK_TIME(closure_parallel_traversal);
+        RK_TIME(closure_parallel_sort); RK_TIME(closure_parallel_materialize);
+        RK_TIME(closure_parallel_merge);
+        RK_COUNT(closure_parallel_batches); RK_COUNT(closure_parallel_tasks);
+#endif
+        RK_COUNT(inline_cell_overflows); RK_COUNT(inline_event_overflows);
+#undef RK_TIME
+#undef RK_COUNT
+#ifdef MORSEFRAMES_RK_LEVEL_PROFILE_VERSION
+        if (trace_levels) level_profile_json(trace);
+#endif
+        std::cout << '}' << std::endl;
+      } else if (command == "profile") {
+        std::cin >> workers;
+        if (!std::cin || !workers) throw std::runtime_error("Invalid profile command");
+        const auto r = run(complex, 1, workers, true);
+        if (fingerprint(*r->sequence) != references[1]) throw std::runtime_error("Profile differs");
+        const auto& m = r->metrics;
+        std::cout << "{\"builder_seconds\":" << r->builder_seconds
+                  << ",\"algorithm_seconds\":" << r->algorithm_seconds;
+#define PLS_TIME(name) std::cout << ",\"" #name "_seconds\":" << 1e-9 * m.process_lower_stars_##name##_nanoseconds
+        PLS_TIME(setup); PLS_TIME(local_wall); PLS_TIME(replay);
+#undef PLS_TIME
+        const auto detail = pls_phase_profile(m);
+        if (!detail.empty()) {
+          std::cout << ",\"pls_profile_seconds\":{";
+          bool first = true;
+          for (const auto& [key, value] : detail) {
+            if (!first) std::cout << ',';
+            first = false;
+            std::cout << '"' << key << "\":" << value;
+          }
+          std::cout << '}';
+        }
+        std::cout << ",\"stars\":" << m.process_lower_stars_count
+                  << ",\"max_star_size\":" << m.process_lower_stars_max_star_size
+                  << ",\"executor_workers\":" << m.process_lower_stars_executor_workers << '}' << std::endl;
+#endif
+      } else throw std::runtime_error("Unknown worker command");
+    }
+  } catch (const std::exception& error) {
+    std::cerr << error.what() << '\n'; return 1;
+  }
+}

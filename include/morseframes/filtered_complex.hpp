@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <map>
@@ -12,6 +13,8 @@
 #include <vector>
 
 namespace morseframes {
+
+namespace detail { struct LowerStarComplexBuilder; }
 
 using SimplexId = std::uint32_t;
 using VertexId = std::uint32_t;
@@ -28,7 +31,18 @@ struct Simplex {
   std::vector<SimplexId> coboundary;
 };
 
+// Separate diagnostic runs only: ordinary finalize() has no internal clocks.
+struct ComplexConstructionMetrics {
+  double reset_seconds = 0;
+  double index_and_simplices_seconds = 0;
+  double levels_seconds = 0;
+  double boundaries_seconds = 0;
+  double coboundaries_seconds = 0;
+  double orders_and_buckets_seconds = 0;
+};
+
 class FilteredSimplicialComplex {
+  friend struct detail::LowerStarComplexBuilder;
  public:
   void add_simplex(std::vector<VertexId> vertices, double filtration) {
     canonicalize(vertices);
@@ -40,36 +54,67 @@ class FilteredSimplicialComplex {
     if (!inserted && std::fabs(it->second - filtration) > 1e-12) {
       throw std::invalid_argument("Duplicate simplex inserted with a different filtration value.");
     }
+    clear_same_level_closure_cache();
   }
 
-  void finalize() {
+  void finalize() { finalize_impl<false>(nullptr); }
+
+  void finalize_with_metrics(ComplexConstructionMetrics& metrics) {
+    metrics = {};
+    finalize_impl<true>(&metrics);
+  }
+
+ private:
+  template <bool Diagnostic>
+  void finalize_impl(ComplexConstructionMetrics* metrics) {
+    using Clock = std::chrono::steady_clock;
+    Clock::time_point last;
+    if constexpr (Diagnostic) last = Clock::now();
+    auto record = [&](double ComplexConstructionMetrics::* field) {
+      if constexpr (Diagnostic) {
+        const auto now = Clock::now();
+        metrics->*field = std::chrono::duration<double>(now - last).count();
+        last = now;
+      }
+    };
     if (pending_.empty()) {
       throw std::invalid_argument("Cannot finalize an empty complex.");
     }
 
     simplices_.clear();
-    simplex_to_id_.clear();
+    first_vertex_ranges_.clear();
     level_values_.clear();
     level_buckets_.clear();
     filtration_order_.clear();
+    clear_same_level_closure_cache();
+    record(&ComplexConstructionMetrics::reset_seconds);
 
+    // The records themselves are the sorted lookup index. Keep only the start
+    // of each first-vertex range, not a second tree with copied vertex keys.
+    simplices_.reserve(pending_.size());
     for (const auto& [vertices, filtration] : pending_) {
-      (void)filtration;
-      const SimplexId id = checked_id(simplices_.size());
-      simplex_to_id_.emplace(vertices, id);
+      (void)checked_id(simplices_.size());
+      if (first_vertex_ranges_.empty() || first_vertex_ranges_.back().vertex != vertices.front())
+        first_vertex_ranges_.push_back({vertices.front(), simplices_.size()});
       simplices_.push_back(Simplex{});
       simplices_.back().vertices = vertices;
       simplices_.back().dimension = checked_dimension(vertices.size() - 1);
-      simplices_.back().filtration = pending_.at(vertices);
+      simplices_.back().filtration = filtration;
     }
 
+    record(&ComplexConstructionMetrics::index_and_simplices_seconds);
     build_levels();
+    record(&ComplexConstructionMetrics::levels_seconds);
     build_boundaries_and_check_filtration();
+    record(&ComplexConstructionMetrics::boundaries_seconds);
     build_coboundaries();
+    record(&ComplexConstructionMetrics::coboundaries_seconds);
     build_orders_and_buckets();
+    record(&ComplexConstructionMetrics::orders_and_buckets_seconds);
     finalized_ = true;
   }
 
+ public:
   std::size_t size() const { return simplices_.size(); }
 
   const Simplex& simplex(SimplexId simplex) const {
@@ -105,17 +150,174 @@ class FilteredSimplicialComplex {
   const std::vector<double>& level_values() const { return level_values_; }
   std::size_t num_levels() const { return level_values_.size(); }
 
+  void prepare_same_level_closure_cache() {
+    if (!finalized_) {
+      throw std::logic_error(
+          "Cannot prepare a closure cache before finalization.");
+    }
+    if (same_level_closure_cache_ready_) {
+      return;
+    }
+
+    same_level_closure_entries_.clear();
+    same_level_closure_ranges_.assign(size(), {0, 0});
+    same_level_coboundary_entries_.clear();
+    same_level_coboundary_ranges_.assign(size(), {0, 0});
+    std::vector<std::size_t> bucket_index(
+        size(), std::numeric_limits<std::size_t>::max());
+    std::vector<std::uint8_t> included;
+    std::vector<std::size_t> closure_indices;
+
+    for (const auto& bucket : level_buckets_) {
+      included.assign(bucket.size(), 0);
+      for (std::size_t index = 0; index < bucket.size(); ++index) {
+        bucket_index[bucket[index]] = index;
+      }
+      for (std::size_t simplex_index = 0; simplex_index < bucket.size();
+           ++simplex_index) {
+        const SimplexId simplex = bucket[simplex_index];
+        const std::size_t first = same_level_closure_entries_.size();
+        closure_indices.clear();
+        included[simplex_index] = 1;
+        closure_indices.push_back(simplex_index);
+        for (SimplexId face : boundary(simplex)) {
+          if (level(face) != level(simplex)) {
+            continue;
+          }
+          const std::size_t face_index = bucket_index[face];
+          if (face_index >= simplex_index) {
+            throw std::logic_error(
+                "Same-level closure cache requires face-first buckets.");
+          }
+          const auto [face_first, face_last] =
+              same_level_closure_ranges_[face];
+          for (std::size_t entry = face_first; entry < face_last; ++entry) {
+            const std::size_t local_index =
+                bucket_index[same_level_closure_entries_[entry]];
+            if (!included[local_index]) {
+              included[local_index] = 1;
+              closure_indices.push_back(local_index);
+            }
+          }
+        }
+        std::sort(closure_indices.begin(), closure_indices.end());
+        for (std::size_t local_index : closure_indices) {
+          same_level_closure_entries_.push_back(bucket[local_index]);
+          included[local_index] = 0;
+        }
+        same_level_closure_ranges_[simplex] =
+            {first, same_level_closure_entries_.size()};
+      }
+    }
+    for (SimplexId simplex = 0; simplex < size(); ++simplex) {
+      const std::size_t first = same_level_coboundary_entries_.size();
+      for (SimplexId coface : coboundary(simplex)) {
+        if (level(coface) == level(simplex)) {
+          same_level_coboundary_entries_.push_back(coface);
+        }
+      }
+      same_level_coboundary_ranges_[simplex] =
+          {first, same_level_coboundary_entries_.size()};
+    }
+    same_level_closure_cache_ready_ = true;
+  }
+
+  bool has_same_level_closure_cache() const {
+    return same_level_closure_cache_ready_;
+  }
+
+  const std::vector<SimplexId>& same_level_closure_entries() const {
+    if (!same_level_closure_cache_ready_) {
+      throw std::logic_error("Same-level closure cache is not prepared.");
+    }
+    return same_level_closure_entries_;
+  }
+
+  const std::vector<std::pair<std::size_t, std::size_t>>&
+  same_level_closure_ranges() const {
+    if (!same_level_closure_cache_ready_) {
+      throw std::logic_error("Same-level closure cache is not prepared.");
+    }
+    return same_level_closure_ranges_;
+  }
+
+  const std::vector<SimplexId>& same_level_coboundary_entries() const {
+    if (!same_level_closure_cache_ready_) {
+      throw std::logic_error("Same-level closure cache is not prepared.");
+    }
+    return same_level_coboundary_entries_;
+  }
+
+  const std::vector<std::pair<std::size_t, std::size_t>>&
+  same_level_coboundary_ranges() const {
+    if (!same_level_closure_cache_ready_) {
+      throw std::logic_error("Same-level closure cache is not prepared.");
+    }
+    return same_level_coboundary_ranges_;
+  }
+
+  std::size_t same_level_closure_cache_bytes() const {
+    return same_level_closure_entries_.capacity() * sizeof(SimplexId) +
+           same_level_closure_ranges_.capacity() *
+               sizeof(std::pair<std::size_t, std::size_t>) +
+           same_level_coboundary_entries_.capacity() * sizeof(SimplexId) +
+           same_level_coboundary_ranges_.capacity() *
+               sizeof(std::pair<std::size_t, std::size_t>);
+  }
+
+  void release_same_level_closure_cache() {
+    clear_same_level_closure_cache();
+  }
+
   SimplexId find_simplex(const std::vector<VertexId>& vertices) const {
     std::vector<VertexId> canonical = vertices;
     canonicalize(canonical);
-    auto it = simplex_to_id_.find(canonical);
-    if (it == simplex_to_id_.end()) {
-      return kInvalidSimplex;
-    }
-    return it->second;
+    return find_canonical_simplex(canonical);
   }
 
  private:
+  struct FirstVertexRange {
+    VertexId vertex;
+    std::size_t first;
+  };
+
+  SimplexId find_canonical_simplex(const std::vector<VertexId>& vertices) const {
+    if (vertices.empty()) return kInvalidSimplex;
+    const auto range = std::lower_bound(
+        first_vertex_ranges_.begin(), first_vertex_ranges_.end(), vertices.front(),
+        [](const FirstVertexRange& entry, VertexId vertex) { return entry.vertex < vertex; });
+    if (range == first_vertex_ranges_.end() || range->vertex != vertices.front())
+      return kInvalidSimplex;
+    const auto last = range + 1 == first_vertex_ranges_.end()
+                          ? simplices_.size() : (range + 1)->first;
+    return find_canonical_simplex_in_range(vertices, range->first, last);
+  }
+
+  // All records in [first_id, last_id) have vertices.front() as their first
+  // vertex. Callers may reuse a known range without searching the prefix index.
+  SimplexId find_canonical_simplex_in_range(const std::vector<VertexId>& vertices,
+                                           std::size_t first_id,
+                                           std::size_t last_id) const {
+    const auto first = simplices_.begin() + first_id;
+    const auto last = simplices_.begin() + last_id;
+    const auto match = std::lower_bound(first, last, vertices,
+        [](const Simplex& simplex, const std::vector<VertexId>& key) {
+          // The first vertices are equal throughout this range.
+          return std::lexicographical_compare(simplex.vertices.begin() + 1, simplex.vertices.end(),
+                                               key.begin() + 1, key.end());
+        });
+    if (match == last || match->vertices != vertices) return kInvalidSimplex;
+    return static_cast<SimplexId>(match - simplices_.begin());
+  }
+
+  void clear_same_level_closure_cache() {
+    same_level_closure_cache_ready_ = false;
+    same_level_closure_entries_ = {};
+    same_level_closure_ranges_ = {};
+    same_level_coboundary_entries_ = {};
+    same_level_coboundary_ranges_ = {};
+  }
+
   struct VectorLess {
     bool operator()(const std::vector<VertexId>& lhs, const std::vector<VertexId>& rhs) const {
       return std::lexicographical_compare(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
@@ -164,7 +366,18 @@ class FilteredSimplicialComplex {
   }
 
   void build_boundaries_and_check_filtration() {
+    std::vector<VertexId> face_vertices;
+    std::size_t range_index = 0;
+    std::size_t range_end = first_vertex_ranges_.size() > 1
+                                ? first_vertex_ranges_[1].first : simplices_.size();
     for (SimplexId simplex_id = 0; simplex_id < simplices_.size(); ++simplex_id) {
+      // Lexicographic IDs visit each first-vertex range contiguously, including
+      // singleton ranges. Only deleting the first vertex changes this range.
+      if (simplex_id == range_end) {
+        ++range_index;
+        range_end = range_index + 1 < first_vertex_ranges_.size()
+                        ? first_vertex_ranges_[range_index + 1].first : simplices_.size();
+      }
       auto& simplex = simplices_[simplex_id];
       simplex.boundary.clear();
 
@@ -172,8 +385,9 @@ class FilteredSimplicialComplex {
         continue;
       }
 
+      simplex.boundary.reserve(simplex.vertices.size());
       for (std::size_t removed = 0; removed < simplex.vertices.size(); ++removed) {
-        std::vector<VertexId> face_vertices;
+        face_vertices.clear();
         face_vertices.reserve(simplex.vertices.size() - 1);
         for (std::size_t i = 0; i < simplex.vertices.size(); ++i) {
           if (i != removed) {
@@ -181,12 +395,14 @@ class FilteredSimplicialComplex {
           }
         }
 
-        auto face_it = simplex_to_id_.find(face_vertices);
-        if (face_it == simplex_to_id_.end()) {
+        const SimplexId face_id = removed == 0
+            ? find_canonical_simplex(face_vertices)
+            : find_canonical_simplex_in_range(
+                  face_vertices, first_vertex_ranges_[range_index].first, range_end);
+        if (face_id == kInvalidSimplex) {
           throw std::invalid_argument("Input is not closed under faces.");
         }
 
-        const SimplexId face_id = face_it->second;
         if (simplices_[face_id].filtration > simplex.filtration + 1e-12) {
           throw std::invalid_argument("Filtration is not monotone on faces.");
         }
@@ -222,7 +438,8 @@ class FilteredSimplicialComplex {
       if (a.dimension != b.dimension) {
         return a.dimension < b.dimension;
       }
-      return a.vertices < b.vertices;
+      // IDs are positions in the lexicographically sorted simplex array.
+      return lhs < rhs;
     };
     std::sort(filtration_order_.begin(), filtration_order_.end(), simplex_less);
 
@@ -234,10 +451,17 @@ class FilteredSimplicialComplex {
 
   bool finalized_ = false;
   std::map<std::vector<VertexId>, double, VectorLess> pending_;
-  std::map<std::vector<VertexId>, SimplexId, VectorLess> simplex_to_id_;
+  std::vector<FirstVertexRange> first_vertex_ranges_;
   std::vector<Simplex> simplices_;
   std::vector<double> level_values_;
   std::vector<std::vector<SimplexId>> level_buckets_;
+  bool same_level_closure_cache_ready_ = false;
+  std::vector<SimplexId> same_level_closure_entries_;
+  std::vector<std::pair<std::size_t, std::size_t>>
+      same_level_closure_ranges_;
+  std::vector<SimplexId> same_level_coboundary_entries_;
+  std::vector<std::pair<std::size_t, std::size_t>>
+      same_level_coboundary_ranges_;
   std::vector<SimplexId> filtration_order_;
 };
 

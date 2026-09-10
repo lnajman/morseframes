@@ -3,11 +3,15 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <future>
 #include <initializer_list>
 #include <iostream>
+#include <random>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -17,8 +21,10 @@
 #include "morseframes/filtered_complex.hpp"
 #include "morseframes/instrumentation.hpp"
 #include "morseframes/inverse_annotation_store.hpp"
+#include "morseframes/lower_star_complex.hpp"
 #include "morseframes/morse_reference_api.hpp"
 #include "morseframes/morse_sequence.hpp"
+#include "morseframes/reduction_kernel_sequence.hpp"
 #include "morseframes/reference_persistence.hpp"
 #include "morseframes/simplex_tree_builder.hpp"
 #include "morseframes/standard_persistence.hpp"
@@ -702,6 +708,418 @@ void test_f_sequence_builder_accepts_simplex_tree_view() {
   assert(frame.references == references);
 }
 
+template <class T, class = void>
+struct HasFMaxBuilderMethod : std::false_type {};
+
+template <class T>
+struct HasFMaxBuilderMethod<T, std::void_t<decltype(std::declval<T>().build_f_max())>>
+    : std::true_type {};
+
+void test_reduction_kernel_lightweight_initialization() {
+  using Lean = morseframes::ReductionKernelSequenceBuilder<>;
+  static_assert(!HasFMaxBuilderMethod<Lean>::value);
+  static_assert(HasFMaxBuilderMethod<FSequenceBuilder<>>::value);
+  static_assert(!std::is_convertible_v<Lean*, FSequenceBuilder<>*>);
+
+  // The low-level view/builder can be empty, although the owning complex's
+  // public finalize() API requires at least one simplex.
+  const FilteredSimplicialComplex empty;
+  const Lean empty_builder(empty);
+  assert(empty_builder.build_flooding_reduction_kernel().steps().empty());
+  assert(empty_builder.build_flooding_reduction_kernel_parallel(2).steps().empty());
+
+  struct CountingView : FilteredSimplicialComplex {
+    mutable std::size_t level_reads = 0, dimension_reads = 0;
+    bool override_order = false;
+    std::vector<morseframes::SimplexId> order;
+    const std::vector<morseframes::SimplexId>& filtration_order() const {
+      return override_order ? order : FilteredSimplicialComplex::filtration_order();
+    }
+    morseframes::LevelId level(morseframes::SimplexId id) const {
+      ++level_reads;
+      return FilteredSimplicialComplex::level(id);
+    }
+    std::uint16_t dimension(morseframes::SimplexId id) const {
+      ++dimension_reads;
+      return FilteredSimplicialComplex::dimension(id);
+    }
+  };
+  CountingView view;
+  add_simplex(view, {0}, 0.0);
+  add_simplex(view, {1}, 0.0);
+  add_simplex(view, {0, 1}, 0.0);
+  view.finalize();
+  view.level_reads = view.dimension_reads = 0;
+  FSequenceBuilder eager(view);
+  assert(view.level_reads == view.size() && view.dimension_reads == view.size());
+  view.level_reads = view.dimension_reads = 0;
+  morseframes::ReductionKernelSequenceBuilder lean(view);
+  assert(view.level_reads == 0 && view.dimension_reads == 0);
+
+  // Both constructors reject the same malformed permutations before kernels
+  // run, including the sentinel ID and duplicate entries that omit a simplex.
+  view.override_order = true;
+  for (const auto& order : std::vector<std::vector<morseframes::SimplexId>>{
+           {0, 1}, {0, 1, 3}, {0, 1, morseframes::kInvalidSimplex}, {0, 0, 2}}) {
+    view.order = order;
+    std::string eager_error, lean_error;
+    try { (void)FSequenceBuilder(view); }
+    catch (const std::logic_error& e) { eager_error = e.what(); }
+    try { (void)morseframes::ReductionKernelSequenceBuilder(view); }
+    catch (const std::logic_error& e) { lean_error = e.what(); }
+    assert(!eager_error.empty() && eager_error == lean_error);
+  }
+
+  // The lightweight path also accepts non-owning/generic complex views.
+  FakeGudhiLikeSimplexTree tree;
+  morseframes::SimplexTreeComplexView<FakeGudhiLikeSimplexTree> tree_view(tree);
+  const auto sequence = morseframes::ReductionKernelSequenceBuilder(tree_view)
+                            .build_flooding_reduction_kernel();
+  const auto expected = FSequenceBuilder(tree_view).build_flooding_reduction_kernel();
+  assert(sequence.steps().size() == expected.steps().size());
+  for (std::size_t i = 0; i < sequence.steps().size(); ++i) {
+    const auto& a = sequence.steps()[i];
+    const auto& b = expected.steps()[i];
+    assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau && a.level == b.level);
+  }
+}
+
+void test_reduction_kernel_lightweight_persistence() {
+  std::vector<FilteredSimplicialComplex> inputs;
+  for (std::size_t vertices : {3, 7, 8}) {
+    for (bool multilevel : {false, true}) {
+      FilteredSimplicialComplex complex;
+      std::vector<double> values(vertices, 0.0);
+      std::vector<morseframes::VertexId> facet;
+      for (std::size_t v = 0; v < vertices; ++v) {
+        facet.push_back(static_cast<morseframes::VertexId>(v));
+        if (multilevel) values[v] = static_cast<double>(v % 3);
+      }
+      add_weighted_closure(complex, facet, values);
+      inputs.push_back(std::move(complex));
+    }
+  }
+  FilteredSimplicialComplex graph;
+  const std::vector<double> graph_values(131, 0.0);
+  for (morseframes::VertexId v = 1; v < graph_values.size(); ++v) {
+    add_weighted_closure(graph, {0, v}, graph_values);
+  }
+  inputs.push_back(std::move(graph));
+
+  for (auto original : inputs) {
+    original.finalize();
+    for (bool cached : {false, true}) {
+      auto complex = original;
+      if (cached) complex.prepare_same_level_closure_cache();
+      const FSequenceBuilder eager(complex);
+      const auto expected = eager.build_flooding_reduction_kernel();
+      const auto f_max = eager.build_f_max();
+      const auto compare = [&](const auto& a, const auto& b) {
+        assert(a.steps().size() == b.steps().size());
+        for (std::size_t i = 0; i < a.steps().size(); ++i) {
+          const auto& x = a.steps()[i];
+          const auto& y = b.steps()[i];
+          assert(x.type == y.type && x.sigma == y.sigma && x.tau == y.tau &&
+                 x.level == y.level);
+        }
+        morseframes::validate_morse_sequence(complex, b);
+      };
+      const morseframes::ReductionKernelSequenceBuilder lean(complex);
+      const auto copied = lean;
+      compare(expected, copied.build_flooding_reduction_kernel());
+      // No mutable lazy cache: repeated const calls can run independently.
+      auto concurrent = std::async(std::launch::async, [&]() {
+        return lean.build_flooding_reduction_kernel();
+      });
+      compare(expected, lean.build_flooding_reduction_kernel());
+      compare(expected, concurrent.get());
+      for (std::size_t workers : {1, 2, 4, 8}) {
+        std::size_t callbacks = 0;
+        compare(expected, lean.build_flooding_reduction_kernel_parallel_with_step_callback(
+            [&](const auto& sequence, const auto& step) {
+              assert(sequence.steps().size() == ++callbacks);
+              const auto& e = expected.steps()[callbacks - 1];
+              assert(e.type == step.type && e.sigma == step.sigma &&
+                     e.tau == step.tau && e.level == step.level);
+            }, workers));
+        assert(callbacks == expected.steps().size());
+        for (bool detailed : {false, true}) {
+          morseframes::MorseSequenceBuildMetrics metrics;
+          compare(expected, morseframes::ReductionKernelSequenceBuilder(complex, &metrics, detailed)
+                                .build_flooding_reduction_kernel_parallel(workers));
+        }
+      }
+      if (!expected.steps().empty()) {
+        bool propagated = false;
+        try {
+          lean.build_flooding_reduction_kernel_with_step_callback(
+              [](const auto&, const auto&) { throw std::runtime_error("callback failure"); });
+        } catch (const std::runtime_error& e) {
+          propagated = std::string(e.what()) == "callback failure";
+        }
+        assert(propagated);
+        compare(expected, lean.build_flooding_reduction_kernel());
+      }
+
+      const auto references = morseframes::MorseReferenceComputer(complex, expected)
+                                  .compute_full_references();
+      const auto standard = morseframes::compute_standard_z2_persistence(complex);
+      const morseframes::MorseReferenceFrameBuilder frame_builder(complex);
+      for (bool parallel : {false, true}) {
+        const auto frame = parallel ? frame_builder.build_flooding_reduction_kernel_parallel(4)
+                                    : frame_builder.build_flooding_reduction_kernel();
+        compare(expected, frame.sequence);
+        assert(frame.references == references);
+        auto compact = parallel ? frame_builder.build_flooding_reduction_kernel_parallel_reduction_input(4)
+                                : frame_builder.build_flooding_reduction_kernel_reduction_input();
+        compare(expected, compact.sequence);
+        auto reducer = morseframes::MorseReferencePersistenceReducer(
+            complex, compact.sequence, std::move(compact.reduction_plan),
+            std::move(compact.annotations));
+        assert_same_barcode(standard, reducer.compute());
+        const auto strategy = parallel ? morseframes::MorseSequenceStrategy::FloodingReductionKernelParallel
+                                       : morseframes::MorseSequenceStrategy::FloodingReductionKernel;
+        assert_same_barcode(standard, morseframes::compute_morse_reference_persistence(complex, strategy));
+      }
+      assert_field_reference_matches_standard(complex, expected, 3);
+      assert_field_coreference_matches_standard(complex, expected, 3);
+      compare(f_max, eager.build_f_max());
+    }
+  }
+}
+
+void test_process_lower_stars_triangle_boundary() {
+  FilteredSimplicialComplex complex;
+  add_simplex(complex, {0}, 2.0);
+  add_simplex(complex, {1}, 1.0);
+  add_simplex(complex, {2}, 0.0);
+  add_simplex(complex, {0, 1}, 2.0);
+  add_simplex(complex, {0, 2}, 2.0);
+  add_simplex(complex, {1, 2}, 1.0);
+  complex.finalize();
+
+  const auto sequence = FSequenceBuilder(complex).build_process_lower_stars();
+  morseframes::validate_morse_sequence(complex, sequence);
+  assert(sequence.steps().size() == 4);
+
+  const auto v0 = complex.find_simplex({0});
+  const auto v1 = complex.find_simplex({1});
+  const auto v2 = complex.find_simplex({2});
+  const auto e01 = complex.find_simplex({0, 1});
+  const auto e02 = complex.find_simplex({0, 2});
+  const auto e12 = complex.find_simplex({1, 2});
+  const auto& steps = sequence.steps();
+  assert(steps[0].type == morseframes::MorseStepType::Critical &&
+         steps[0].sigma == v2);
+  assert(steps[1].type == morseframes::MorseStepType::RegularPair &&
+         steps[1].sigma == v1 && steps[1].tau == e12);
+  assert(steps[2].type == morseframes::MorseStepType::RegularPair &&
+         steps[2].sigma == v0 && steps[2].tau == e02);
+  assert(steps[3].type == morseframes::MorseStepType::Critical &&
+         steps[3].sigma == e01);
+
+  morseframes::MorseSequenceBuildMetrics parallel_metrics;
+  const auto parallel_sequence =
+      FSequenceBuilder(complex, &parallel_metrics)
+          .build_process_lower_stars_parallel(2);
+  morseframes::validate_morse_sequence(complex, parallel_sequence);
+  assert(sequence.steps().size() == parallel_sequence.steps().size());
+  for (std::size_t index = 0; index < sequence.steps().size(); ++index) {
+    const auto& expected = sequence.steps()[index];
+    const auto& actual = parallel_sequence.steps()[index];
+    assert(expected.type == actual.type);
+    assert(expected.sigma == actual.sigma);
+    assert(expected.tau == actual.tau);
+    assert(expected.level == actual.level);
+  }
+  assert(parallel_metrics.process_lower_stars_executor_workers == 2);
+  assert(parallel_metrics.process_lower_stars_parallel_tasks == 2);
+  assert(parallel_metrics.process_lower_stars_count == 3);
+  assert(parallel_metrics.process_lower_stars_max_star_size == 3);
+  assert(parallel_metrics.process_lower_stars_min_task_load == 3);
+  assert(parallel_metrics.process_lower_stars_max_task_load == 3);
+  assert(parallel_metrics.process_lower_stars_setup_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_local_wall_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_replay_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_cleanup_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_cleanup_nanoseconds ==
+         parallel_metrics.process_lower_stars_events_index_cleanup_nanoseconds +
+         parallel_metrics.process_lower_stars_keys_cleanup_nanoseconds +
+         parallel_metrics.process_lower_stars_membership_cleanup_nanoseconds +
+         parallel_metrics.process_lower_stars_executor_cleanup_nanoseconds +
+         parallel_metrics.process_lower_stars_vertices_cleanup_nanoseconds);
+  assert(parallel_metrics.process_lower_stars_setup_nanoseconds >=
+         parallel_metrics.process_lower_stars_output_init_nanoseconds +
+         parallel_metrics.process_lower_stars_vertex_order_nanoseconds +
+         parallel_metrics.process_lower_stars_executor_init_nanoseconds +
+         parallel_metrics.process_lower_stars_storage_init_nanoseconds +
+         parallel_metrics.process_lower_stars_owner_keys_nanoseconds +
+         parallel_metrics.process_lower_stars_partition_nanoseconds);
+  assert(parallel_metrics.process_lower_stars_local_wall_nanoseconds >=
+         parallel_metrics.process_lower_stars_schedule_nanoseconds +
+         parallel_metrics.process_lower_stars_execution_nanoseconds);
+  assert(parallel_metrics.process_lower_stars_cumulative_task_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_max_task_nanoseconds >=
+         parallel_metrics.process_lower_stars_min_task_nanoseconds);
+  const auto single_worker_sequence =
+      FSequenceBuilder(complex).build_process_lower_stars_parallel(1);
+  assert(single_worker_sequence.steps().size() == sequence.steps().size());
+  for (std::size_t index = 0; index < sequence.steps().size(); ++index) {
+    assert(single_worker_sequence.steps()[index].type == steps[index].type);
+    assert(single_worker_sequence.steps()[index].sigma == steps[index].sigma);
+    assert(single_worker_sequence.steps()[index].tau == steps[index].tau);
+  }
+
+  const auto diagram = morseframes::compute_morse_reference_persistence(
+      complex, morseframes::MorseSequenceStrategy::ProcessLowerStars);
+  assert_same_barcode(diagram,
+                      morseframes::compute_standard_z2_persistence(complex));
+  assert(morseframes::morse_sequence_strategy_from_name("process-lower-stars") ==
+         morseframes::MorseSequenceStrategy::ProcessLowerStars);
+  assert(morseframes::morse_sequence_strategy_from_name(
+             "process-lower-stars-parallel") ==
+         morseframes::MorseSequenceStrategy::ProcessLowerStarsParallel);
+
+  FilteredSimplicialComplex tied_vertices;
+  add_simplex(tied_vertices, {0}, 0.0);
+  add_simplex(tied_vertices, {1}, 0.0);
+  add_simplex(tied_vertices, {0, 1}, 0.0);
+  tied_vertices.finalize();
+  bool rejected_tie = false;
+  try {
+    (void)FSequenceBuilder(tied_vertices).build_process_lower_stars();
+  } catch (const std::invalid_argument&) {
+    rejected_tie = true;
+  }
+  assert(rejected_tie);
+
+  FilteredSimplicialComplex delayed_edge;
+  add_simplex(delayed_edge, {0}, 0.0);
+  add_simplex(delayed_edge, {1}, 1.0);
+  add_simplex(delayed_edge, {0, 1}, 2.0);
+  delayed_edge.finalize();
+  bool rejected_extension = false;
+  try {
+    (void)FSequenceBuilder(delayed_edge).build_process_lower_stars();
+  } catch (const std::invalid_argument&) {
+    rejected_extension = true;
+  }
+  assert(rejected_extension);
+}
+
+// Deliberately slow oracle: rescan the remaining local boundary on every step.
+// It shares neither the production counters/XORs nor its heaps/direct-index map.
+morseframes::MorseSequence scan_process_lower_stars(
+    const FilteredSimplicialComplex& complex) {
+  using morseframes::SimplexId;
+  std::map<morseframes::VertexId, std::size_t> ranks;
+  for (auto id : complex.filtration_order()) {
+    if (complex.dimension(id) == 0) {
+      const auto rank = ranks.size();
+      ranks.emplace(complex.vertices(id)[0], rank);
+    }
+  }
+  std::vector<std::vector<std::size_t>> keys(complex.size());
+  std::vector<std::vector<SimplexId>> stars(ranks.size());
+  for (SimplexId id = 0; id < complex.size(); ++id) {
+    for (auto vertex : complex.vertices(id)) keys[id].push_back(ranks.at(vertex));
+    std::sort(keys[id].begin(), keys[id].end(), std::greater<std::size_t>());
+    stars[keys[id][0]].push_back(id);
+  }
+  const auto before = [&](SimplexId a, SimplexId b) {
+    return keys[a] != keys[b] ? keys[a] < keys[b] : a < b;
+  };
+  morseframes::MorseSequence result(complex.size());
+  std::vector<bool> classified(complex.size(), false);
+  for (const auto& star : stars) {
+    auto ordered = star;
+    std::sort(ordered.begin(), ordered.end(), before);
+    std::size_t remaining = star.size();
+    while (remaining) {
+      SimplexId pair = morseframes::kInvalidSimplex, face = pair, critical = pair;
+      for (auto id : ordered) {
+        if (classified[id]) continue;
+        std::vector<SimplexId> boundary;
+        for (auto f : complex.boundary(id)) {
+          if (!classified[f] && keys[f][0] == keys[id][0]) boundary.push_back(f);
+        }
+        if (boundary.size() == 1) { pair = id; face = boundary[0]; break; }
+        if (boundary.empty() && critical == morseframes::kInvalidSimplex) critical = id;
+      }
+      if (pair != morseframes::kInvalidSimplex) {
+        result.add_regular_pair(face, pair, complex.level(pair));
+        classified[face] = classified[pair] = true;
+        remaining -= 2;
+      } else {
+        assert(critical != morseframes::kInvalidSimplex);
+        result.add_critical(critical, complex.level(critical));
+        classified[critical] = true;
+        --remaining;
+      }
+    }
+  }
+  return result;
+}
+
+void test_process_lower_stars_workspace_and_dimensions() {
+  const auto compare_step = [](const auto& a, const auto& b) {
+    assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau && a.level == b.level);
+  };
+  for (unsigned dimension = 0; dimension <= 9; ++dimension) {
+    for (unsigned seed : {0u, 2u, 7u}) {
+      // Sparse vertex identifiers and filtration ranks unrelated to their order.
+      const unsigned vertices = dimension + 4;
+      std::vector<double> values(vertices);
+      std::iota(values.begin(), values.end(), -3.0);
+      std::mt19937 rng(seed);
+      std::shuffle(values.begin(), values.end(), rng);
+      FilteredSimplicialComplex complex;
+      const auto add_cell = [&](const std::vector<unsigned>& cell) {
+        for (unsigned mask = 1; mask < (1u << cell.size()); ++mask) {
+          std::vector<morseframes::VertexId> face;
+          double value = -std::numeric_limits<double>::infinity();
+          for (unsigned i = 0; i < cell.size(); ++i) {
+            if (mask & (1u << i)) {
+              face.push_back(10 + 17 * cell[i]);
+              value = std::max(value, values[cell[i]]);
+            }
+          }
+          complex.add_simplex(face, value);
+        }
+      };
+      for (unsigned i = 0; i < vertices; ++i) add_cell({i});
+      std::vector<unsigned> cell(dimension + 1);
+      std::iota(cell.begin(), cell.end(), 0);
+      add_cell(cell);
+      for (auto& v : cell) ++v;
+      add_cell(cell);
+      if (dimension) add_cell({0, vertices - 1}); // Non-pure when dimension > 1.
+      complex.finalize();
+      const auto expected = scan_process_lower_stars(complex);
+      morseframes::validate_morse_sequence(complex, expected);
+      FSequenceBuilder builder(complex);
+      for (unsigned workers : {1u, 2u, 4u, 8u}) {
+        std::size_t callbacks = 0;
+        const auto callback = [&](const auto& prefix, const auto& step) {
+          compare_step(expected.steps()[callbacks], step);
+          ++callbacks;
+          assert(prefix.steps().size() == callbacks);
+        };
+        const auto actual = builder.build_process_lower_stars_parallel_with_step_callback(callback, workers);
+        assert(callbacks == expected.steps().size());
+        assert(actual.steps().size() == expected.steps().size());
+        morseframes::validate_morse_sequence(complex, actual);
+        const auto repeated = builder.build_process_lower_stars();
+        assert(repeated.steps().size() == expected.steps().size());
+        for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+          compare_step(expected.steps()[i], actual.steps()[i]);
+          compare_step(expected.steps()[i], repeated.steps()[i]);
+        }
+      }
+    }
+  }
+}
+
 void test_one_vertex() {
   FilteredSimplicialComplex complex;
   add_simplex(complex, {0}, 0.0);
@@ -1083,11 +1501,17 @@ void test_flooding_reduction_kernel_on_shared_facets() {
               2);
   morseframes::validate_morse_sequence(complex, parallel_sequence);
   assert_same_sequence(sequence, parallel_sequence);
-  assert(parallel_metrics.reduction_kernel_parallel_batches > 0);
-  assert(parallel_metrics.reduction_kernel_max_parallel_facets == 2);
+  // A pair of tiny packed facets no longer warrants task dispatch.
+  assert(parallel_metrics.reduction_kernel_parallel_batches == 0);
+  assert(parallel_metrics.reduction_kernel_max_parallel_facets == 0);
+  assert(parallel_metrics.reduction_kernel_facet_parallel_tasks == 0);
   assert(parallel_metrics.reduction_kernel_executor_workers == 2);
-  assert(parallel_metrics.reduction_kernel_facet_discovery_parallel_tasks > 0);
-  assert(parallel_metrics.reduction_kernel_essential_parallel_tasks > 0);
+  assert(parallel_metrics.reduction_kernel_facet_discovery_parallel_tasks == 0);
+  assert(parallel_metrics.reduction_kernel_facet_discovery_mask_tests > 0);
+  assert(parallel_metrics.reduction_kernel_local_coboundary_mask_tests > 0);
+  assert(parallel_metrics.reduction_kernel_local_coboundary_visits == 0);
+  // Small packed levels compute protected cores with word operations.
+  assert(parallel_metrics.reduction_kernel_essential_parallel_tasks == 0);
   assert(parallel_metrics.reduction_kernel_aggregation_rounds > 0);
   const auto single_worker_sequence =
       FSequenceBuilder(complex).build_flooding_reduction_kernel_parallel(1);
@@ -1113,6 +1537,14 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   assert_same_sequence(multilevel_sequence, multilevel_parallel_sequence);
   assert(multilevel_parallel_metrics
              .reduction_kernel_parallel_level_batches > 0);
+  assert(multilevel_parallel_metrics
+             .reduction_kernel_facet_discovery_parallel_tasks == 0);
+  assert(multilevel_parallel_metrics
+             .reduction_kernel_essential_parallel_tasks == 0);
+  assert(multilevel_parallel_metrics.reduction_kernel_parallel_batches == 0);
+  assert(multilevel_parallel_metrics.reduction_kernel_facet_parallel_tasks == 0);
+  assert(multilevel_parallel_metrics
+             .reduction_kernel_aggregation_parallel_tasks == 0);
   assert(multilevel_parallel_metrics.reduction_kernel_max_parallel_levels ==
          std::min<std::size_t>(multilevel_complex.num_levels(), 4));
   assert(multilevel_parallel_metrics.reduction_kernel_executor_workers == 4);
@@ -1143,8 +1575,9 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   morseframes::validate_morse_sequence(four_facet_complex,
                                        four_facet_parallel_sequence);
   assert_same_sequence(four_facet_sequence, four_facet_parallel_sequence);
+  assert(four_facet_parallel_metrics.reduction_kernel_aggregation_rounds > 0);
   assert(four_facet_parallel_metrics
-             .reduction_kernel_aggregation_parallel_tasks > 0);
+             .reduction_kernel_aggregation_parallel_tasks == 0);
 
   const auto strategy =
       morseframes::morse_sequence_strategy_from_name("reduction-kernel");
@@ -1172,6 +1605,783 @@ void test_flooding_reduction_kernel_on_shared_facets() {
          metrics.sequence_regular_pairs);
   assert(metrics.sequence_reduction_kernel_perforations ==
          metrics.sequence_criticals);
+}
+
+void test_reduction_kernel_packed_core_matches_sparse_cache() {
+  const auto check = [](FilteredSimplicialComplex complex) {
+    complex.finalize();
+    auto cached = complex;
+    cached.prepare_same_level_closure_cache();
+    // The cache retains the independent sparse incidence/cell implementation.
+    const auto expected =
+        FSequenceBuilder(cached).build_flooding_reduction_kernel();
+    const auto compare = [&](const auto& actual) {
+      morseframes::validate_morse_sequence(complex, actual);
+      assert(expected.steps().size() == actual.steps().size());
+      for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+        const auto& a = expected.steps()[i];
+        const auto& b = actual.steps()[i];
+        assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+               a.level == b.level);
+      }
+    };
+    compare(FSequenceBuilder(complex).build_flooding_reduction_kernel());
+    compare(FSequenceBuilder(complex).build_flooding_reduction_kernel_parallel(4));
+    morseframes::MorseSequenceBuildMetrics metrics;
+    compare(FSequenceBuilder(complex, &metrics)
+                .build_flooding_reduction_kernel_parallel(4));
+    for (std::size_t workers : {1, 4}) {
+      morseframes::MorseSequenceBuildMetrics coarse;
+      FSequenceBuilder builder(complex, &coarse, false);
+      compare(workers == 1 ? builder.build_flooding_reduction_kernel()
+                          : builder.build_flooding_reduction_kernel_parallel(workers));
+      assert(coarse.reduction_kernel_setup_nanoseconds > 0);
+      assert(coarse.reduction_kernel_level_wall_nanoseconds > 0);
+      assert(coarse.reduction_kernel_rounds == 0);
+      assert(coarse.reduction_kernel_local_candidate_visits == 0);
+      assert(coarse.reduction_kernel_facet_execution_nanoseconds == 0);
+      if (workers > 1 && complex.num_levels() > 1) {
+        assert(coarse.reduction_kernel_max_parallel_levels > 1);
+        assert(coarse.reduction_kernel_level_chunks > 0);
+      }
+    }
+  };
+
+  // Exercise both word boundaries and the packed/sparse cutoff. Combining
+  // these components also reuses worker scratch across different bucket sizes.
+  FilteredSimplicialComplex multilevel;
+  std::uint32_t offset = 0;
+  std::size_t level = 0;
+  for (std::size_t count : {63, 64, 65, 127, 128, 129, 255}) {
+    const std::size_t vertices = count < 127 ? 6 : (count < 255 ? 7 : 8);
+    FilteredSimplicialComplex single_level;
+    for (std::size_t mask = 1; mask < (std::size_t{1} << vertices); ++mask) {
+      std::vector<morseframes::VertexId> simplex;
+      for (std::size_t v = 0; v < vertices; ++v) {
+        if ((mask & (std::size_t{1} << v)) != 0) {
+          simplex.push_back(offset + static_cast<std::uint32_t>(v));
+        }
+      }
+      single_level.add_simplex(simplex, 0.0);
+      multilevel.add_simplex(simplex, static_cast<double>(level));
+    }
+    const auto extras = count - ((std::size_t{1} << vertices) - 1);
+    for (std::size_t i = 0; i < extras; ++i) {
+      const auto v = offset + static_cast<std::uint32_t>(vertices + i);
+      single_level.add_simplex({v}, 0.0);
+      multilevel.add_simplex({v}, static_cast<double>(level));
+    }
+    check(single_level);
+    offset += static_cast<std::uint32_t>(vertices + extras);
+    ++level;
+  }
+  check(multilevel);
+
+  // Shared high-dimensional facets exercise protected faces, tied weights,
+  // perforations and repeated kernel rounds against the sparse oracle.
+  for (unsigned seed = 0; seed < 12; ++seed) {
+    std::mt19937 rng(seed);
+    FilteredSimplicialComplex complex;
+    std::vector<double> weights(9, 0.0);
+    if (seed % 2 != 0) {
+      for (std::size_t v = 0; v < weights.size(); ++v) {
+        weights[v] = static_cast<double>((v * 13 + seed) % 4);
+      }
+    }
+    for (std::size_t facet = 0; facet < 5; ++facet) {
+      std::vector<morseframes::VertexId> vertices{0, 1, 2, 3, 4, 5, 6, 7, 8};
+      std::shuffle(vertices.begin(), vertices.end(), rng);
+      vertices.resize(4 + seed % 2);
+      add_weighted_closure(complex, vertices, weights, 0.0);
+    }
+    check(complex);
+  }
+}
+
+void test_reduction_kernel_lazy_sparse_closures() {
+  // Shared facets expose new facets over multiple rounds. Sparse vertex IDs
+  // and varied filtrations prevent global simplex IDs from standing in for
+  // canonical level-bucket order. The independently prepared eager cache is
+  // unchanged by the on-demand workspace implementation.
+  for (std::size_t dimension : {4, 7, 9}) {
+    for (unsigned filtration : {0, 1, 2}) {
+      FilteredSimplicialComplex complex;
+      std::vector<double> values(10000, 0.0);
+      std::vector<morseframes::VertexId> shared;
+      for (std::size_t i = 0; i < dimension; ++i) {
+        const auto v = static_cast<morseframes::VertexId>(11 + (i * 5 % dimension) * 101);
+        shared.push_back(v);
+        values[v] = filtration == 0 ? 0.0
+                    : filtration == 1 ? static_cast<double>(i % 3)
+                                      : static_cast<double>(i + 1);
+      }
+      // Use a permutation coprime to each tested dimension.
+      std::sort(shared.begin(), shared.end());
+      assert(std::unique(shared.begin(), shared.end()) == shared.end());
+      const std::size_t facet_count = dimension == 4 ? 20 : 3;
+      for (std::size_t i = 0; i < facet_count; ++i) {
+        auto facet = shared;
+        const auto v = static_cast<morseframes::VertexId>(4000 + 73 * i);
+        facet.push_back(v);
+        values[v] = filtration == 2 ? static_cast<double>(dimension + i + 1) : 0.0;
+        add_weighted_closure(complex, facet, values);
+      }
+      // Reuse level scratch for a graph-only level after the large closures.
+      complex.add_simplex({9000}, 100.0);
+      complex.add_simplex({9001}, 100.0);
+      complex.add_simplex({9000, 9001}, 100.0);
+      complex.finalize();
+      bool sparse_level = false;
+      bool non_numeric_bucket = false;
+      for (morseframes::LevelId level = 0; level < complex.num_levels(); ++level) {
+        const auto& bucket = complex.simplices_of_level(level);
+        sparse_level |= bucket.size() > 128;
+        non_numeric_bucket |= !std::is_sorted(bucket.begin(), bucket.end());
+      }
+      assert(non_numeric_bucket);
+      // Injective 4D/7D stars are small; retain packed-path controls.
+      assert(sparse_level || (dimension <= 7 && filtration == 2));
+      auto cached = complex;
+      cached.prepare_same_level_closure_cache();
+      morseframes::MorseSequenceBuildMetrics linear_metrics;
+      const auto expected = FSequenceBuilder(cached, &linear_metrics)
+                                .build_flooding_reduction_kernel();
+      assert(linear_metrics.reduction_kernel_closure_sparse_cells == 0);
+      assert(linear_metrics.reduction_kernel_closure_boundary_index_visits == 0);
+      for (std::size_t workers : {1, 2, 4, 8}) {
+        for (bool detailed : {false, true}) {
+          morseframes::MorseSequenceBuildMetrics metrics;
+          FSequenceBuilder builder(complex, &metrics, detailed);
+          const auto actual = workers == 1 ? builder.build_flooding_reduction_kernel()
+                                          : builder.build_flooding_reduction_kernel_parallel(workers);
+          assert(metrics.reduction_kernel_closure_packed_nanoseconds +
+                     metrics.reduction_kernel_closure_boundary_index_nanoseconds <=
+                 metrics.reduction_kernel_closure_initial_nanoseconds);
+          assert(metrics.reduction_kernel_closure_initial_nanoseconds +
+                     metrics.reduction_kernel_closure_traversal_nanoseconds +
+                     metrics.reduction_kernel_closure_sort_nanoseconds +
+                     metrics.reduction_kernel_closure_materialize_nanoseconds <=
+                 metrics.reduction_kernel_closure_nanoseconds);
+          if (!detailed) {
+            assert(metrics.reduction_kernel_closure_boundary_index_visits == 0);
+            assert(metrics.reduction_kernel_closure_initial_nanoseconds == 0);
+            assert(metrics.reduction_kernel_closure_sparse_cells == 0);
+            assert(metrics.reduction_kernel_local_membership_comparisons == 0);
+            assert(metrics.reduction_kernel_local_sparse_scan_passes == 0);
+          } else if (dimension == 9 && filtration == 0) {
+            assert(metrics.reduction_kernel_closure_boundary_index_entries > 0);
+            assert(metrics.reduction_kernel_closure_boundary_visits ==
+                   metrics.reduction_kernel_closure_sparse_entries -
+                       metrics.reduction_kernel_closure_sparse_cells +
+                       metrics.reduction_kernel_closure_duplicate_faces);
+            // The external cache retains both linear membership and the full
+            // candidate scan, independently of the workspace optimizations.
+            // Protected cells must remain visible to coface queries. Only
+            // their repeated candidate visits disappear, even with threading.
+            assert(metrics.reduction_kernel_local_large_membership_tests > 0);
+            assert(metrics.reduction_kernel_local_membership_tests ==
+                   linear_metrics.reduction_kernel_local_membership_tests);
+            assert(metrics.reduction_kernel_local_membership_comparisons <
+                   linear_metrics.reduction_kernel_local_membership_comparisons);
+            assert(metrics.reduction_kernel_local_sparse_candidate_visits <
+                   linear_metrics.reduction_kernel_local_sparse_candidate_visits);
+            assert(metrics.reduction_kernel_local_sparse_candidate_visits -
+                       metrics.reduction_kernel_local_protected_candidate_visits ==
+                   linear_metrics.reduction_kernel_local_sparse_candidate_visits -
+                       linear_metrics.reduction_kernel_local_protected_candidate_visits);
+            assert(metrics.reduction_kernel_local_removed_candidate_visits ==
+                   linear_metrics.reduction_kernel_local_removed_candidate_visits);
+            assert(metrics.reduction_kernel_local_coboundary_visits ==
+                   linear_metrics.reduction_kernel_local_coboundary_visits);
+            assert(metrics.reduction_kernel_local_sparse_scan_passes ==
+                   linear_metrics.reduction_kernel_local_sparse_scan_passes);
+          }
+          morseframes::validate_morse_sequence(complex, actual);
+          assert(expected.steps().size() == actual.steps().size());
+          for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+            const auto& a = expected.steps()[i];
+            const auto& b = actual.steps()[i];
+            assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+                   a.level == b.level);
+          }
+        }
+      }
+    }
+  }
+}
+
+void test_reduction_kernel_linear_sparse_incidence() {
+  const auto check = [](FilteredSimplicialComplex complex,
+                        std::size_t max_closure_size) {
+    complex.finalize();
+    assert(complex.size() > 128);
+    morseframes::MorseSequenceBuildMetrics sequential_metrics;
+    const auto expected = FSequenceBuilder(complex, &sequential_metrics)
+                              .build_flooding_reduction_kernel();
+    morseframes::validate_morse_sequence(complex, expected);
+    for (std::size_t workers : {1, 2, 4, 8}) {
+      morseframes::MorseSequenceBuildMetrics metrics;
+      const auto actual = FSequenceBuilder(complex, &metrics)
+                              .build_flooding_reduction_kernel_parallel(workers);
+      morseframes::validate_morse_sequence(complex, actual);
+      assert(expected.steps().size() == actual.steps().size());
+      for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+        const auto& a = expected.steps()[i];
+        const auto& b = actual.steps()[i];
+        assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+               a.level == b.level);
+      }
+      // These assertions detect a return to all-pairs incidence, independently
+      // of wall-clock noise. Sparse entries are visited at most once per facet.
+      assert(metrics.reduction_kernel_incidence_cell_visits <=
+             max_closure_size * metrics.reduction_kernel_facet_kernels);
+      assert(metrics.reduction_kernel_incidence_cell_visits ==
+             sequential_metrics.reduction_kernel_incidence_cell_visits);
+      assert(metrics.reduction_kernel_essential_parallel_tasks == 0);
+      if (workers > 1 && complex.num_levels() == 1) {
+        // 136 triangle closures are below the local-execution threshold;
+        // graph scans and the larger high-dimensional closures exceed it.
+        assert((metrics.reduction_kernel_parallel_batches > 0) ==
+               (max_closure_size != 7));
+        assert(metrics.reduction_kernel_parallel_batches <=
+               metrics.reduction_kernel_rounds);
+        assert(metrics.reduction_kernel_facet_parallel_tasks <=
+               workers * metrics.reduction_kernel_parallel_batches);
+        assert(metrics.reduction_kernel_facet_parallel_tasks <
+               metrics.reduction_kernel_facet_kernels);
+      }
+    }
+  };
+
+  // More than two facets share a face: incidence must saturate at two, and
+  // remain correct as reductions expose lower-dimensional facets over rounds.
+  for (std::size_t facet_vertices : {2, 3, 5}) {
+    for (bool multiple_levels : {false, true}) {
+      FilteredSimplicialComplex complex;
+      std::vector<double> values(140, 0.0);
+      for (std::uint32_t v = 4; v < 140; ++v) {
+        if (multiple_levels) {
+          values[v] = static_cast<double>(1 + v % 3);
+        }
+        std::vector<morseframes::VertexId> facet;
+        for (std::size_t shared = 0; shared + 1 < facet_vertices; ++shared) {
+          facet.push_back(static_cast<morseframes::VertexId>(shared));
+        }
+        facet.push_back(v);
+        add_weighted_closure(complex, facet, values);
+      }
+      // An isolated vertex exercises incidence for a dimension-zero facet.
+      complex.add_simplex({140}, 0.0);
+      check(complex, (std::size_t{1} << facet_vertices) - 1);
+    }
+  }
+}
+
+void test_reduction_kernel_batched_facets() {
+  // Unequal cells exercise chunk tails, result ordering, and both inline and
+  // overflow result storage, including dimensions above three.
+  for (std::size_t facet_count :
+       {1, 2, 3, 7, 8, 9, 31, 32, 33, 65, 86, 87, 129, 257}) {
+    FilteredSimplicialComplex complex;
+    const std::vector<double> values(6 * facet_count + 1, 0.0);
+    std::size_t closure_work = 1; // The additional isolated vertex.
+    for (std::size_t i = 0; i < facet_count; ++i) {
+      std::vector<morseframes::VertexId> facet;
+      for (std::size_t j = 0; j < 2 + i % 5; ++j) {
+        facet.push_back(static_cast<morseframes::VertexId>(6 * i + j));
+      }
+      closure_work += (std::size_t{1} << facet.size()) - 1;
+      add_weighted_closure(complex, facet, values);
+    }
+    complex.add_simplex(
+        {static_cast<morseframes::VertexId>(6 * facet_count)}, 0.0);
+    complex.finalize();
+    const auto expected =
+        FSequenceBuilder(complex).build_flooding_reduction_kernel();
+    for (std::size_t workers : {1, 2, 4, 8}) {
+      const auto compare = [&](const auto& actual) {
+        morseframes::validate_morse_sequence(complex, actual);
+        assert(expected.steps().size() == actual.steps().size());
+        for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+          const auto& a = expected.steps()[i];
+          const auto& b = actual.steps()[i];
+          assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+                 a.level == b.level);
+        }
+      };
+      compare(FSequenceBuilder(complex)
+                  .build_flooding_reduction_kernel_parallel(workers));
+      for (bool detailed : {false, true}) {
+        morseframes::MorseSequenceBuildMetrics metrics;
+        compare(FSequenceBuilder(complex, &metrics, detailed)
+                    .build_flooding_reduction_kernel_parallel(workers));
+        assert(metrics.reduction_kernel_parallel_batches <=
+               metrics.reduction_kernel_rounds);
+        assert(metrics.reduction_kernel_facet_parallel_tasks <=
+               workers * metrics.reduction_kernel_parallel_batches);
+        assert(metrics.reduction_kernel_max_parallel_facets <= workers);
+        // All disjoint facets collapse in the first round; remaining isolated
+        // roots are cheap. Small graph-only fixtures are also below threshold.
+        const auto tasks = std::min(workers, closure_work / 1024);
+        assert(metrics.reduction_kernel_facet_parallel_tasks ==
+               (detailed && tasks > 1 ? tasks : 0));
+      }
+    }
+  }
+}
+
+void test_reduction_kernel_facet_work_scheduling() {
+  // Check exact threshold boundaries, partial worker budgets, and shrinking
+  // rounds without introducing a second policy in the metrics-free path.
+  for (std::size_t work : {1024, 2047, 2048, 2049, 3072, 8192}) {
+    FilteredSimplicialComplex original;
+    const std::size_t edges = (work - 7) / 3;
+    const std::size_t extras = (work - 7) % 3;
+    const std::vector<double> values(edges + extras + 3, 0.0);
+    add_weighted_closure(original, {0, 1, 2}, values);
+    for (std::size_t i = 0; i < edges; ++i) {
+      add_weighted_closure(
+          original, {0, static_cast<morseframes::VertexId>(i + 3)}, values);
+    }
+    for (std::size_t i = 0; i < extras; ++i) {
+      original.add_simplex({static_cast<morseframes::VertexId>(edges + 3 + i)}, 0.0);
+    }
+    original.finalize();
+    assert(original.size() > 128);
+    for (bool cached : {false, true}) {
+      auto complex = original;
+      if (cached) complex.prepare_same_level_closure_cache();
+      morseframes::MorseSequenceBuildMetrics sequential_metrics;
+      const auto expected = FSequenceBuilder(complex, &sequential_metrics)
+                                .build_flooding_reduction_kernel();
+      const auto compare = [&](const auto& actual) {
+        morseframes::validate_morse_sequence(complex, actual);
+        assert(expected.steps().size() == actual.steps().size());
+        for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+          const auto& a = expected.steps()[i];
+          const auto& b = actual.steps()[i];
+          assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+                 a.level == b.level);
+        }
+      };
+      for (std::size_t workers : {1, 2, 4, 8}) {
+        compare(FSequenceBuilder(complex)
+                    .build_flooding_reduction_kernel_parallel(workers));
+        for (bool detailed : {false, true}) {
+          morseframes::MorseSequenceBuildMetrics metrics;
+          compare(FSequenceBuilder(complex, &metrics, detailed)
+                      .build_flooding_reduction_kernel_parallel(workers));
+          const auto tasks = std::min(workers, work / 1024);
+          assert(metrics.reduction_kernel_facet_parallel_tasks ==
+                 (detailed && tasks > 1 ? tasks : 0));
+          assert(metrics.reduction_kernel_parallel_batches ==
+                 (detailed && tasks > 1 ? 1 : 0));
+          if (detailed) {
+            assert(metrics.reduction_kernel_incidence_cell_visits ==
+                   sequential_metrics.reduction_kernel_incidence_cell_visits);
+            assert(metrics.reduction_kernel_facet_cell_visits ==
+                   sequential_metrics.reduction_kernel_facet_cell_visits);
+            assert(metrics.reduction_kernel_local_candidate_visits ==
+                   sequential_metrics.reduction_kernel_local_candidate_visits);
+          }
+        }
+      }
+    }
+  }
+
+  // Two large closures can justify parallelism where hundreds of small ones
+  // do not. Include dimensions above three and overflow cell/event storage.
+  for (std::size_t extras : {0, 2}) {
+    FilteredSimplicialComplex complex;
+    const std::vector<double> values(20 + extras, 0.0);
+    add_weighted_closure(complex, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, values);
+    add_weighted_closure(complex, {10, 11, 12, 13, 14, 15, 16, 17, 18, 19}, values);
+    for (std::size_t i = 0; i < extras; ++i) {
+      complex.add_simplex({static_cast<morseframes::VertexId>(20 + i)}, 0.0);
+    }
+    complex.finalize();
+    const auto expected = FSequenceBuilder(complex).build_flooding_reduction_kernel();
+    for (bool detailed : {false, true}) {
+      morseframes::MorseSequenceBuildMetrics metrics;
+      const auto actual = FSequenceBuilder(complex, &metrics, detailed)
+                              .build_flooding_reduction_kernel_parallel(8);
+      morseframes::validate_morse_sequence(complex, actual);
+      assert(expected.steps().size() == actual.steps().size());
+      for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+        const auto& a = expected.steps()[i];
+        const auto& b = actual.steps()[i];
+        assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+               a.level == b.level);
+      }
+      // Initial work is 2 * 1023 plus the isolated vertices; later rounds
+      // contain only the two roots and the additional isolated vertices.
+      assert(metrics.reduction_kernel_facet_parallel_tasks ==
+             (detailed && extras == 2 ? 2 : 0));
+    }
+  }
+}
+
+void test_reduction_kernel_discovery_granularity() {
+  // Connected stars collapse to one vertex in a single reducing round. Thus
+  // only the first discovery can dispatch tasks; later rounds must use the
+  // remaining active count rather than the original bucket size.
+  for (std::size_t size : {129, 8191, 8192, 8193, 12288, 32769}) {
+    FilteredSimplicialComplex original;
+    // One filled triangle enables closure storage, keeping this scheduling
+    // test independent of the graph-only local cell's full-bucket scan.
+    const std::size_t edges = (size - 7) / 2;
+    const std::vector<double> values(edges + 4, 0.0);
+    add_weighted_closure(original, {0, 1, 2}, values);
+    for (morseframes::VertexId v = 3; v < edges + 3; ++v) {
+      add_weighted_closure(original, {0, v}, values);
+    }
+    if (size % 2 == 0) {
+      original.add_simplex({static_cast<morseframes::VertexId>(edges + 3)}, 0.0);
+    }
+    original.finalize();
+    assert(original.size() == size);
+    for (bool cached : {false, true}) {
+      auto complex = original;
+      if (cached) complex.prepare_same_level_closure_cache();
+      morseframes::MorseSequenceBuildMetrics sequential_metrics;
+      const auto expected = FSequenceBuilder(complex, &sequential_metrics)
+                                .build_flooding_reduction_kernel();
+      const auto compare = [&](const auto& actual) {
+        morseframes::validate_morse_sequence(complex, actual);
+        assert(expected.steps().size() == actual.steps().size());
+        for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+          const auto& a = expected.steps()[i];
+          const auto& b = actual.steps()[i];
+          assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+                 a.level == b.level);
+        }
+      };
+      for (std::size_t workers : {1, 2, 4, 8}) {
+        morseframes::MorseSequenceBuildMetrics metrics;
+        compare(FSequenceBuilder(complex, &metrics)
+                    .build_flooding_reduction_kernel_parallel(workers));
+        const auto tasks = std::min(workers, size / 4096);
+        assert(metrics.reduction_kernel_facet_discovery_parallel_tasks ==
+               (tasks > 1 ? tasks : 0));
+        assert(metrics.reduction_kernel_facet_discovery_coboundary_visits ==
+               sequential_metrics.reduction_kernel_facet_discovery_coboundary_visits);
+        assert(metrics.reduction_kernel_incidence_cell_visits ==
+               sequential_metrics.reduction_kernel_incidence_cell_visits);
+        assert(metrics.reduction_kernel_rounds > 1);
+      }
+      compare(FSequenceBuilder(complex).build_flooding_reduction_kernel_parallel(8));
+    }
+  }
+}
+
+void test_reduction_kernel_discovery_failure_drains_tasks() {
+  struct FailingDiscoveryView : FilteredSimplicialComplex {
+    mutable std::atomic<std::size_t> failures{0};
+    const std::vector<morseframes::SimplexId>& coboundary(
+        morseframes::SimplexId) const {
+      // A graph has no cached closure build, so the first coboundary access is
+      // in discovery. Each static chunk throws, including after a peer fails.
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      ++failures;
+      throw std::runtime_error("discovery failure");
+    }
+  };
+  FailingDiscoveryView complex;
+  const std::vector<double> values(16385, 0.0);
+  for (morseframes::VertexId v = 1; v < values.size(); ++v) {
+    add_weighted_closure(complex, {0, v}, values);
+  }
+  complex.finalize();
+  assert(complex.size() == 32769);
+  for (std::size_t workers : {2, 4, 8}) {
+    for (bool detailed : {false, true}) {
+      complex.failures = 0;
+      auto executor = std::make_shared<morseframes::BoundedTaskExecutor>(workers);
+      morseframes::ReductionKernelExecutionOptions options;
+      options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+      options.collect_metrics = detailed;
+      morseframes::ReductionKernelWorkspace<FailingDiscoveryView> workspace(
+          complex, options, executor);
+      bool propagated = false;
+      try {
+        (void)workspace.compute_level_isolated(0);
+      } catch (const std::runtime_error& error) {
+        propagated = std::string(error.what()) == "discovery failure";
+      }
+      assert(propagated);
+      assert(complex.failures == workers); // Before implicit teardown joins.
+      auto following = executor->submit([]() { return 17; });
+      assert(executor->get(following) == 17);
+    }
+  }
+}
+
+void test_reduction_kernel_facet_failure_drains_tasks() {
+  struct FailingFacetView : FilteredSimplicialComplex {
+    mutable std::atomic<std::size_t> failures{0};
+    const std::vector<morseframes::VertexId>& vertices(
+        morseframes::SimplexId) const {
+      // In a sparse graph, only the local facet kernel needs vertices().
+      // Every submitted task fails on its first chunk, even after a peer fails.
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      ++failures;
+      throw std::runtime_error("facet failure");
+    }
+  };
+  FailingFacetView complex;
+  const std::vector<double> values(81, 0.0);
+  for (morseframes::VertexId v = 1; v < values.size(); ++v) {
+    add_weighted_closure(complex, {0, v}, values);
+  }
+  complex.finalize();
+  assert(complex.size() > 128);
+  for (std::size_t workers : {2, 4, 8}) {
+    for (bool detailed : {false, true}) {
+      complex.failures = 0;
+      auto executor = std::make_shared<morseframes::BoundedTaskExecutor>(workers);
+      morseframes::ReductionKernelExecutionOptions options;
+      options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+      options.collect_metrics = detailed;
+      morseframes::ReductionKernelWorkspace<FailingFacetView> workspace(
+          complex, options, executor);
+      bool propagated = false;
+      try {
+        (void)workspace.compute_level_isolated(0);
+      } catch (const std::runtime_error& error) {
+        propagated = std::string(error.what()) == "facet failure";
+      }
+      assert(propagated);
+      // Check BEFORE workspace/executor teardown can implicitly join workers.
+      assert(complex.failures == workers);
+      auto following = executor->submit([]() { return 17; });
+      assert(executor->get(following) == 17);
+    }
+  }
+}
+
+void test_reduction_kernel_parallel_closures() {
+  assert(!morseframes::ReductionKernelExecutionOptions{}.parallel_closure_preparation);
+  assert(morseframes::ReductionKernelExecutionOptions{}.parallel_closure_min_level_size == 32768);
+  for (std::size_t groups : {1, 3}) {
+    FilteredSimplicialComplex complex;
+    std::vector<double> values(10000, 0.0);
+    for (std::size_t group = 0; group < groups; ++group) {
+      const auto base = static_cast<morseframes::VertexId>(group * 1000);
+      const std::size_t count = groups == 1 ? 384 : 96;
+      for (std::size_t i = 0; i < count; ++i) {
+        std::vector<morseframes::VertexId> facet;
+        for (std::size_t v = 0; v < 7; ++v) facet.push_back(base + v);
+        facet.push_back(base + 7 + static_cast<morseframes::VertexId>(i));
+        for (auto v : facet) values[v] = static_cast<double>(group);
+        add_weighted_closure(complex, facet, values);
+      }
+    }
+    if (groups > 1) {
+      // Later graph/packed levels reuse the level tasks' large scratch slots.
+      for (unsigned i = 0; i < 16; ++i) {
+        complex.add_simplex({8000 + 2*i}, 10 + i);
+        complex.add_simplex({8001 + 2*i}, 10 + i);
+        complex.add_simplex({8000 + 2*i, 8001 + 2*i}, 10 + i);
+      }
+    }
+    complex.finalize();
+    auto cached = complex;
+    cached.prepare_same_level_closure_cache();
+    const auto oracle = FSequenceBuilder(cached).build_flooding_reduction_kernel();
+    morseframes::MorseSequenceBuildMetrics serial;
+    const auto expected = FSequenceBuilder(complex, &serial).build_flooding_reduction_kernel();
+    const auto same = [&](const auto& actual) {
+      morseframes::validate_morse_sequence(complex, actual);
+      assert(actual.steps().size() == oracle.steps().size());
+      for (std::size_t i = 0; i < actual.steps().size(); ++i) {
+        const auto& a = actual.steps()[i]; const auto& b = oracle.steps()[i];
+        assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau && a.level == b.level);
+      }
+    };
+    same(expected);
+    const auto level_size = complex.simplices_of_level(0).size();
+    // Exercise the broad and selective gates, and both sides of the inclusive
+    // boundary. Several smaller concurrent levels must not be summed together.
+    for (std::size_t threshold : {std::size_t{0}, std::size_t{32768}, level_size, level_size + 1}) {
+      for (std::size_t workers : {1, 2, 4, 8}) {
+        for (bool enabled : {false, true}) {
+          for (bool detailed : {false, true}) {
+            morseframes::ReductionKernelExecutionOptions options;
+            options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+            options.max_workers = workers;
+            options.parallel_closure_preparation = enabled;
+            options.parallel_closure_min_level_size = threshold;
+            morseframes::MorseSequenceBuildMetrics m;
+            FSequenceBuilder builder(complex, &m, detailed);
+            same(builder.build_flooding_reduction_kernel_with_execution_options(
+                options, [](const auto&, const auto&) {}));
+            const bool dispatched = detailed && enabled && workers > 1 && level_size >= threshold;
+            assert((m.reduction_kernel_closure_parallel_batches > 0) == dispatched);
+            assert((m.reduction_kernel_closure_parallel_tasks > 0) == dispatched);
+            assert(m.reduction_kernel_closure_parallel_tasks <=
+                   workers * m.reduction_kernel_closure_parallel_batches);
+            assert(m.reduction_kernel_closure_initial_nanoseconds +
+                   m.reduction_kernel_closure_traversal_nanoseconds +
+                   m.reduction_kernel_closure_sort_nanoseconds +
+                   m.reduction_kernel_closure_materialize_nanoseconds +
+                   m.reduction_kernel_closure_parallel_nanoseconds <=
+                   m.reduction_kernel_closure_nanoseconds);
+            assert(m.reduction_kernel_closure_parallel_merge_nanoseconds <=
+                   m.reduction_kernel_closure_parallel_nanoseconds);
+            if (detailed) {
+              assert(m.reduction_kernel_closure_sparse_cells == serial.reduction_kernel_closure_sparse_cells);
+              assert(m.reduction_kernel_closure_sparse_entries == serial.reduction_kernel_closure_sparse_entries);
+              assert(m.reduction_kernel_closure_boundary_visits == serial.reduction_kernel_closure_boundary_visits);
+              assert(m.reduction_kernel_closure_duplicate_faces == serial.reduction_kernel_closure_duplicate_faces);
+            }
+            if (groups > 1) {
+              assert(m.reduction_kernel_parallel_batches == 0); // Facet execution is still serial per level.
+              assert(m.reduction_kernel_facet_discovery_parallel_tasks == 0);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+void test_reduction_kernel_level_profile() {
+  const auto check = [](FilteredSimplicialComplex complex) {
+    complex.finalize();
+    auto cached = complex;
+    cached.prepare_same_level_closure_cache();
+    const auto expected = FSequenceBuilder(cached).build_flooding_reduction_kernel();
+    for (bool use_cache : {false, true}) {
+      const auto& view = use_cache ? cached : complex;
+      for (std::size_t workers : {1, 2, 4, 8}) {
+        for (int mode : {0, 1, 2}) { // No global metrics, coarse, detailed.
+          morseframes::MorseSequenceBuildMetrics metrics;
+          morseframes::ReductionKernelSequenceBuilder builder(
+              view, mode ? &metrics : nullptr, mode == 2);
+          morseframes::ReductionKernelExecutionOptions options;
+          options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+          options.max_workers = workers;
+          morseframes::ReductionKernelLevelProfile trace;
+          trace.levels.resize(1234); // Reuse must discard stale entries.
+          trace.completed = true;
+          const auto actual = builder.build_flooding_reduction_kernel_with_level_profile(trace, options);
+          morseframes::validate_morse_sequence(view, actual);
+          assert(actual.steps().size() == expected.steps().size());
+          for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+            const auto& a = expected.steps()[i];
+            const auto& b = actual.steps()[i];
+            assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau && a.level == b.level);
+          }
+          assert(trace.completed && trace.detailed == (mode == 2));
+          assert(trace.levels.size() == view.num_levels());
+          assert(trace.executor_workers == workers);
+          assert(trace.level_tasks == std::min(workers, view.num_levels()));
+          std::size_t cells = 0, events = 0, reductions = 0, rounds = 0;
+          std::uint64_t closure_time = 0;
+          std::vector<std::vector<std::pair<std::uint64_t, std::uint64_t>>> timelines(workers);
+          for (std::size_t level = 0; level < trace.levels.size(); ++level) {
+            const auto& row = trace.levels[level];
+            assert(row.completed && row.level == level && row.task < trace.level_tasks);
+            assert(row.simplices == view.simplices_of_level(level).size());
+            assert(row.events > 0 && row.events <= row.simplices);
+            const auto end = row.start_nanoseconds + row.duration_nanoseconds;
+            assert(end <= trace.level_wall_nanoseconds);
+            timelines[row.task].emplace_back(row.start_nanoseconds, end);
+            cells += row.simplices; events += row.events;
+            const auto& m = row.metrics;
+            reductions += m.reductions; rounds += m.kernel_rounds;
+            closure_time += m.closure_nanoseconds;
+            if (mode == 2) {
+              assert(m.reductions + m.perforations == row.events);
+              assert(2 * m.reductions + m.perforations == row.simplices);
+              assert(m.closure_nanoseconds + m.facet_nanoseconds + m.essential_nanoseconds +
+                     m.facet_execution_nanoseconds + m.aggregation_nanoseconds + m.merge_nanoseconds
+                     <= row.duration_nanoseconds);
+              assert(m.closure_initial_nanoseconds + m.closure_traversal_nanoseconds +
+                     m.closure_sort_nanoseconds + m.closure_materialize_nanoseconds <= m.closure_nanoseconds);
+              assert(m.closure_packed_nanoseconds + m.closure_boundary_index_nanoseconds <= m.closure_initial_nanoseconds);
+              if (workers == 1 || view.num_levels() > 1) {
+                assert(m.core_nanoseconds + m.local_reduction_nanoseconds <= m.facet_execution_nanoseconds);
+              }
+            } else {
+              assert(m.reductions == 0 && m.kernel_rounds == 0 && m.closure_nanoseconds == 0);
+            }
+          }
+          for (auto& timeline : timelines) {
+            std::sort(timeline.begin(), timeline.end());
+            for (std::size_t i = 1; i < timeline.size(); ++i) assert(timeline[i-1].second <= timeline[i].first);
+          }
+          assert(cells == view.size() && events == actual.steps().size());
+          assert(reductions == metrics.reduction_kernel_reductions);
+          assert(rounds == metrics.reduction_kernel_rounds);
+          assert(closure_time == metrics.reduction_kernel_closure_nanoseconds);
+          if (mode) assert(trace.level_wall_nanoseconds <= metrics.reduction_kernel_level_wall_nanoseconds);
+          if (view.size()) {
+            bool propagated = false;
+            try {
+              builder.build_flooding_reduction_kernel_with_level_profile(
+                  options, trace, [](const auto&, const auto&) { throw std::runtime_error("callback"); });
+            } catch (const std::runtime_error&) { propagated = true; }
+            assert(propagated && !trace.completed);
+            for (const auto& row : trace.levels) assert(row.completed);
+          }
+        }
+      }
+    }
+  };
+  FilteredSimplicialComplex singleton;
+  singleton.add_simplex({0}, 0);
+  check(singleton);
+  for (std::size_t dimension : {1, 4, 7}) {
+    for (int weights : {0, 1, 2}) {
+      FilteredSimplicialComplex complex;
+      std::vector<double> values(dimension + 3);
+      for (std::size_t v = 0; v < values.size(); ++v) values[v] = weights == 0 ? 0 : (weights == 1 ? v % 3 : v);
+      for (std::size_t offset : {0, 1, 2}) {
+        std::vector<morseframes::VertexId> vertices;
+        for (std::size_t v = offset; v <= dimension + offset; ++v) vertices.push_back(v);
+        add_weighted_closure(complex, vertices, values);
+      }
+      check(complex);
+    }
+  }
+  struct FailingView : FilteredSimplicialComplex {
+    mutable std::atomic<std::size_t> failures{0};
+    const std::vector<morseframes::SimplexId>& coboundary(morseframes::SimplexId) const {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      ++failures;
+      throw std::runtime_error("level failure");
+    }
+  } complex;
+  for (morseframes::VertexId v = 0; v < 32; ++v) {
+    complex.add_simplex({2 * v}, v);
+    complex.add_simplex({2 * v + 1}, v);
+    complex.add_simplex({2 * v, 2 * v + 1}, v);
+  }
+  complex.finalize();
+  for (std::size_t workers : {1, 2, 4, 8}) {
+    morseframes::ReductionKernelExecutionOptions options;
+    options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+    options.max_workers = workers;
+    morseframes::ReductionKernelLevelProfile trace;
+    complex.failures = 0;
+    bool propagated = false;
+    try {
+      morseframes::ReductionKernelSequenceBuilder<FailingView>(complex)
+          .build_flooding_reduction_kernel_with_level_profile(trace, options);
+    } catch (const std::runtime_error& error) { propagated = std::string(error.what()) == "level failure"; }
+    assert(propagated && !trace.completed && complex.failures == workers);
+    // Ordinary builds must drain level tasks before captured arenas disappear,
+    // too; a nested closure phase must never outlive its level coordinator.
+    complex.failures = 0;
+    propagated = false;
+    try {
+      morseframes::ReductionKernelSequenceBuilder<FailingView>(complex)
+          .build_flooding_reduction_kernel_with_execution_options(
+              options, [](const auto&, const auto&) {});
+    } catch (const std::runtime_error& error) { propagated = std::string(error.what()) == "level failure"; }
+    assert(propagated && complex.failures == workers);
+  }
 }
 
 void test_instrumentation_metrics() {
@@ -1208,9 +2418,376 @@ void test_instrumentation_metrics() {
   assert_same_barcode(result.coreference_diagram, result.standard_diagram);
 }
 
+void test_complex_construction_contract() {
+  std::mt19937 rng(17);
+  for (unsigned dimension = 1; dimension <= 7; ++dimension) {
+    std::vector<std::vector<morseframes::VertexId>> faces;
+    for (unsigned mask = 1; mask < (1u << (dimension + 1)); ++mask) {
+      std::vector<morseframes::VertexId> face;
+      for (unsigned i = 0; i <= dimension; ++i)
+        if (mask & (1u << i)) face.push_back(i * 1000003u);
+      faces.push_back(face);
+    }
+    std::sort(faces.begin(), faces.end());
+    auto shuffled = faces;
+    std::shuffle(shuffled.begin(), shuffled.end(), rng);
+    FilteredSimplicialComplex a, b;
+    for (auto face : faces) a.add_simplex(face, double(face.size() - 1));
+    for (auto face : shuffled) {
+      const double value = double(face.size() - 1);
+      std::reverse(face.begin(), face.end());
+      b.add_simplex(face, value);
+      b.add_simplex(face, value + 0.5e-12); // Keep the original value within tolerance.
+    }
+    a.finalize();
+    morseframes::ComplexConstructionMetrics metrics;
+    metrics.boundaries_seconds = -1;
+    b.finalize_with_metrics(metrics);
+    assert(metrics.reset_seconds >= 0 && metrics.index_and_simplices_seconds >= 0);
+    assert(metrics.levels_seconds >= 0 && metrics.boundaries_seconds >= 0);
+    assert(metrics.coboundaries_seconds >= 0 && metrics.orders_and_buckets_seconds >= 0);
+    assert(a.size() == faces.size() && b.size() == a.size());
+    assert(a.filtration_order() == b.filtration_order());
+    assert(a.level_values() == b.level_values());
+    for (morseframes::SimplexId id = 0; id < a.size(); ++id) {
+      assert(a.vertices(id) == faces[id] && a.vertices(id) == b.vertices(id));
+      assert(a.filtration(id) == b.filtration(id));
+      assert(a.level(id) == b.level(id) && a.dimension(id) == b.dimension(id));
+      assert(a.boundary(id) == b.boundary(id) && a.coboundary(id) == b.coboundary(id));
+      assert(b.find_simplex(faces[id]) == id);
+      auto reversed = faces[id]; std::reverse(reversed.begin(), reversed.end());
+      assert(b.find_simplex(reversed) == id);
+      assert(a.simplices_of_level(a.level(id)) == b.simplices_of_level(b.level(id)));
+    }
+    auto copied = b;
+    auto moved = std::move(copied);
+    b.prepare_same_level_closure_cache();
+    b.add_simplex({4000000000u}, 10);
+    assert(!b.has_same_level_closure_cache());
+    b.finalize();
+    assert(b.size() == a.size() + 1);
+    assert(moved.size() == a.size());
+    auto check = [&moved, &faces] {
+      for (morseframes::SimplexId id = 0; id < faces.size(); ++id)
+        assert(moved.find_simplex(faces[id]) == id);
+    };
+    auto future = std::async(std::launch::async, check); check(); future.get();
+    moved.finalize();
+    check();
+    assert(moved.find_simplex({4000000000u}) == morseframes::kInvalidSimplex);
+    bool rejected = false;
+    try { moved.add_simplex({0}, 2); } catch (const std::invalid_argument&) { rejected = true; }
+    assert(rejected);
+  }
+  FilteredSimplicialComplex empty;
+  morseframes::ComplexConstructionMetrics metrics;
+  bool rejected = false;
+  try { empty.finalize_with_metrics(metrics); } catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected);
+}
+
+void test_compact_simplex_lookup() {
+  using Vertices = std::vector<morseframes::VertexId>;
+  const auto missing = morseframes::kInvalidSimplex;
+  const auto largest = std::numeric_limits<morseframes::VertexId>::max();
+  const Vertices vertices{0, 4, 17, 1000, 4000000000u, largest};
+  const std::vector<Vertices> cells{{0, 17, 4000000000u}, {17, 1000, largest},
+                                   {4}, {4000000000u, largest}};
+  std::map<Vertices, double> oracle;
+  FilteredSimplicialComplex complex;
+  assert(complex.find_simplex({}) == missing);
+  assert(complex.find_simplex({0}) == missing);
+  for (const auto& cell : cells) {
+    for (unsigned mask = 1; mask < (1u << cell.size()); ++mask) {
+      Vertices face;
+      for (unsigned i = 0; i < cell.size(); ++i) if (mask & (1u << i)) face.push_back(cell[i]);
+      std::sort(face.begin(), face.end());
+      oracle[face] = 0;
+      std::reverse(face.begin(), face.end());
+      complex.add_simplex(face, 0);
+    }
+  }
+  assert(complex.find_simplex({0}) == missing); // Pending insertion is not finalization.
+  const auto check = [&](const auto& view) {
+    for (unsigned mask = 0; mask < (1u << vertices.size()); ++mask) {
+      Vertices face;
+      for (unsigned i = 0; i < vertices.size(); ++i) if (mask & (1u << i)) face.push_back(vertices[i]);
+      const auto it = oracle.find(face);
+      const auto expected = it == oracle.end() ? missing
+          : static_cast<morseframes::SimplexId>(std::distance(oracle.begin(), it));
+      assert(view.find_simplex(face) == expected);
+      std::reverse(face.begin(), face.end());
+      assert(view.find_simplex(face) == expected);
+    }
+    for (auto vertex : {1u, 3u, 5u, 999u, 4000000001u})
+      assert(view.find_simplex({vertex}) == missing);
+    bool rejected = false;
+    try { (void)view.find_simplex({17, 17}); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    assert(rejected);
+  };
+  complex.finalize(); check(complex);
+  auto copied = complex;
+  auto moved = std::move(copied);
+  check(moved);
+  auto concurrent = std::async(std::launch::async, [&] { check(moved); });
+  check(moved); concurrent.get();
+  complex.add_simplex({2}, 0);
+  complex.add_simplex({2, 17}, 0);
+  assert(complex.find_simplex({2}) == missing);
+  oracle[{2}] = 0; oracle[{2, 17}] = 0;
+  complex.finalize(); check(complex); // New prefix inserted between existing ranges.
+  assert(complex.find_simplex({2}) != missing);
+  assert(complex.find_simplex({17, 2}) != missing);
+  complex.finalize(); check(complex);
+  // Missing faces must still be detected, including a missing singleton at
+  // the start of an otherwise present first-vertex range.
+  for (const auto& bad : {std::vector<Vertices>{{2, 9}, {9}},
+                          std::vector<Vertices>{{2}, {9}, {2, 9, 17}}}) {
+    FilteredSimplicialComplex invalid;
+    for (const auto& face : bad) invalid.add_simplex(face, 0);
+    bool rejected = false;
+    try { invalid.finalize(); } catch (const std::invalid_argument&) { rejected = true; }
+    assert(rejected);
+  }
+}
+
+void test_boundary_and_filtration_order() {
+  using Vertices = std::vector<morseframes::VertexId>;
+  using Id = morseframes::SimplexId;
+  const auto largest = std::numeric_limits<morseframes::VertexId>::max();
+  std::mt19937 rng(509);
+  for (unsigned dimension = 0; dimension <= 7; ++dimension) {
+    for (unsigned trial = 0; trial < 4; ++trial) {
+      Vertices vertices{0, 2, 19, 1000, 1000003, 2000007, 3000017,
+                        4000000000u, largest - 2, largest};
+      std::map<morseframes::VertexId, double> weights;
+      for (auto vertex : vertices) weights[vertex] = trial % 2 ? double(rng() % 4) : 0;
+      std::vector<Vertices> cells{
+          Vertices(vertices.begin(), vertices.begin() + dimension + 1),
+          Vertices(vertices.begin() + 1, vertices.begin() + dimension + 2),
+          {largest - 2, largest}, {vertices[dimension + 1]}, {largest}};
+      std::map<Vertices, double> faces;
+      for (const auto& cell : cells) {
+        for (unsigned mask = 1; mask < (1u << cell.size()); ++mask) {
+          Vertices face;
+          double value = 0;
+          for (unsigned i = 0; i < cell.size(); ++i) if (mask & (1u << i)) {
+            face.push_back(cell[i]); value = std::max(value, weights.at(cell[i]));
+          }
+          // Also exercise monotone filtrations which are not vertex lower stars.
+          if (trial >= 2) value += double(face.size() - 1);
+          faces[face] = value;
+        }
+      }
+      std::vector<Vertices> ordered, shuffled;
+      std::map<Vertices, Id> ids;
+      for (const auto& entry : faces) {
+        ids[entry.first] = static_cast<Id>(ordered.size());
+        ordered.push_back(entry.first);
+      }
+      shuffled = ordered;
+      std::shuffle(shuffled.begin(), shuffled.end(), rng);
+      FilteredSimplicialComplex complex;
+      for (auto face : shuffled) {
+        const auto value = faces.at(face);
+        std::reverse(face.begin(), face.end());
+        complex.add_simplex(face, value);
+      }
+      for (unsigned pass = 0; pass < 2; ++pass) {
+        if (pass) {
+          morseframes::ComplexConstructionMetrics metrics;
+          complex.finalize_with_metrics(metrics);
+        } else complex.finalize();
+        std::vector<std::vector<Id>> expected_coboundaries(ordered.size());
+        std::vector<Id> expected_order;
+        std::vector<double> levels;
+        for (Id id = 0; id < ordered.size(); ++id) {
+          assert(complex.vertices(id) == ordered[id]);
+          std::vector<Id> boundary;
+          if (ordered[id].size() > 1) {
+            for (std::size_t removed = 0; removed < ordered[id].size(); ++removed) {
+              auto face = ordered[id]; face.erase(face.begin() + removed);
+              boundary.push_back(ids.at(face));
+              expected_coboundaries[ids.at(face)].push_back(id);
+            }
+          }
+          assert(complex.boundary(id) == boundary); // Deletion order, not sorted IDs.
+          expected_order.push_back(id);
+          levels.push_back(faces.at(ordered[id]));
+        }
+        for (Id id = 0; id < ordered.size(); ++id)
+          assert(complex.coboundary(id) == expected_coboundaries[id]);
+        std::sort(levels.begin(), levels.end());
+        levels.erase(std::unique(levels.begin(), levels.end()), levels.end());
+        assert(complex.level_values() == levels);
+        // Independent legacy comparator: filtration, dimension, vertex vector.
+        std::sort(expected_order.begin(), expected_order.end(), [&](Id a, Id b) {
+          const auto av = faces.at(ordered[a]), bv = faces.at(ordered[b]);
+          if (av != bv) return av < bv;
+          if (ordered[a].size() != ordered[b].size()) return ordered[a].size() < ordered[b].size();
+          return ordered[a] < ordered[b];
+        });
+        assert(complex.filtration_order() == expected_order);
+        for (std::size_t level = 0; level < levels.size(); ++level) {
+          std::vector<Id> bucket;
+          for (Id id : expected_order)
+            if (faces.at(ordered[id]) == levels[level]) bucket.push_back(id);
+          assert(complex.simplices_of_level(level) == bucket);
+        }
+      }
+    }
+  }
+  // Detect absent and non-monotone facets in both the general lookup (removed
+  // first vertex) and the reused-range lookup (every other removed vertex).
+  const Vertices cell{2, 19, 4000000000u, largest};
+  for (unsigned removed = 0; removed < cell.size(); ++removed) {
+    auto bad_face = cell; bad_face.erase(bad_face.begin() + removed);
+    for (bool missing : {false, true}) {
+      FilteredSimplicialComplex invalid;
+      for (unsigned mask = 1; mask < (1u << cell.size()); ++mask) {
+        Vertices face;
+        for (unsigned i = 0; i < cell.size(); ++i) if (mask & (1u << i)) face.push_back(cell[i]);
+        if (missing && face == bad_face) continue;
+        invalid.add_simplex(face, face == bad_face ? 1 : 0);
+      }
+      bool rejected = false;
+      try { invalid.finalize(); } catch (const std::invalid_argument&) { rejected = true; }
+      assert(rejected);
+    }
+  }
+}
+
+void test_bulk_lower_star_construction() {
+  using Cells = std::vector<std::vector<morseframes::VertexId>>;
+  const auto legacy = [](auto& complex, const auto& values, const auto& cells) {
+    for (const auto& cell : cells) {
+      for (std::size_t mask = 1; mask < (std::size_t{1} << cell.size()); ++mask) {
+        std::vector<morseframes::VertexId> face;
+        double value = -std::numeric_limits<double>::infinity();
+        for (std::size_t i = 0; i < cell.size(); ++i) if (mask & (std::size_t{1} << i)) {
+          face.push_back(cell[i]);
+          value = std::max(value, values[cell[i]]);
+        }
+        complex.add_simplex(std::move(face), value);
+      }
+    }
+  };
+  const auto same = [](const auto& a, const auto& b) {
+    assert(a.size() == b.size());
+    assert(a.filtration_order() == b.filtration_order());
+    assert(a.level_values() == b.level_values());
+    for (std::size_t i = 0; i < a.num_levels(); ++i) {
+      assert(std::signbit(a.level_values()[i]) == std::signbit(b.level_values()[i]));
+      assert(a.simplices_of_level(i) == b.simplices_of_level(i));
+    }
+    for (morseframes::SimplexId id = 0; id < a.size(); ++id) {
+      assert(a.vertices(id) == b.vertices(id));
+      assert(a.filtration(id) == b.filtration(id));
+      assert(std::signbit(a.filtration(id)) == std::signbit(b.filtration(id)));
+      assert(a.level(id) == b.level(id) && a.dimension(id) == b.dimension(id));
+      assert(a.boundary(id) == b.boundary(id) && a.coboundary(id) == b.coboundary(id));
+      assert(a.find_simplex(a.vertices(id)) == b.find_simplex(a.vertices(id)));
+    }
+  };
+  std::mt19937 rng(290);
+  for (unsigned dimension = 0; dimension <= 7; ++dimension) {
+    for (unsigned trial = 0; trial < 8; ++trial) {
+      // Shared faces, repeated/reversed cells, a lower-dimensional maximal cell
+      // and an isolated vertex. Exercise the vector-backed path above 3D too.
+      Cells cells(2);
+      for (unsigned i = 0; i <= dimension; ++i) {
+        cells[0].push_back(i);
+        cells[1].push_back(i + 1);
+      }
+      cells.push_back({dimension + 2, dimension + 1});
+      cells.push_back({dimension + 3});
+      cells.push_back(cells[0]);
+      for (auto& cell : cells) std::shuffle(cell.begin(), cell.end(), rng);
+      std::shuffle(cells.begin(), cells.end(), rng);
+      std::vector<double> values(dimension + 4);
+      for (auto& value : values) value = trial % 2 ? double(rng() % 5) - 2 : -0.0;
+      values[0] = +0.0;
+      FilteredSimplicialComplex a, b, diagnostic;
+      // Preexisting entries interleave with every dimension's sorted batch.
+      a.add_simplex({dimension + 3}, values.back() + 0.5e-12);
+      b.add_simplex({dimension + 3}, values.back() + 0.5e-12);
+      diagnostic.add_simplex({dimension + 3}, values.back() + 0.5e-12);
+      legacy(a, values, cells);
+      morseframes::add_lower_star_cells(b, values, cells);
+      morseframes::LowerStarConstructionMetrics metrics;
+      metrics.generated_faces = 99999;
+      morseframes::add_lower_star_cells_with_metrics(diagnostic, values, cells, metrics);
+      std::size_t generated = 0;
+      for (const auto& cell : cells) generated += (std::size_t{1} << cell.size()) - 1;
+      assert(metrics.generated_faces == generated);
+      assert(metrics.validation_seconds >= 0 && metrics.enumeration_seconds >= 0);
+      assert(metrics.sort_and_dedup_seconds >= 0 && metrics.insertion_seconds >= 0);
+      a.finalize(); b.finalize(); diagnostic.finalize();
+      assert(metrics.unique_faces_submitted == b.size());
+      same(a, b); same(a, diagnostic);
+      const auto expected = FSequenceBuilder<FilteredSimplicialComplex>(a).build_f_max();
+      const auto actual = FSequenceBuilder<FilteredSimplicialComplex>(b).build_f_max();
+      assert(expected.steps().size() == actual.steps().size());
+      for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+        const auto& x = expected.steps()[i]; const auto& y = actual.steps()[i];
+        assert(x.type == y.type && x.sigma == y.sigma && x.tau == y.tau && x.level == y.level);
+      }
+      auto copied = b;
+      auto moved = std::move(copied);
+      same(a, moved);
+      b.prepare_same_level_closure_cache();
+      morseframes::add_lower_star_cells(b, values, cells);
+      assert(!b.has_same_level_closure_cache());
+      b.finalize(); same(a, b);
+      b.prepare_same_level_closure_cache();
+      morseframes::add_lower_star_cells_with_metrics(b, values, {}, metrics);
+      assert(metrics.generated_faces == 0 && metrics.unique_faces_submitted == 0);
+      assert(b.has_same_level_closure_cache());
+      b.finalize(); same(a, b);
+    }
+  }
+  // All validation precedes mutation, even if an earlier cell would be valid.
+  FilteredSimplicialComplex invalid;
+  invalid.add_simplex({0}, 0); invalid.finalize();
+  const auto original = invalid;
+  invalid.prepare_same_level_closure_cache();
+  for (const auto& cells : {Cells{{1}, {}}, Cells{{1}, {0, 0}}, Cells{{1}, {2}}}) {
+    bool rejected = false;
+    try { morseframes::add_lower_star_cells(invalid, {0, 1}, cells); }
+    catch (const std::exception&) { rejected = true; }
+    assert(rejected && invalid.has_same_level_closure_cache());
+    same(original, invalid);
+  }
+  bool rejected = false;
+  try { morseframes::add_lower_star_cells(invalid, {0, std::nan("")}, {{1}}); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected && invalid.has_same_level_closure_cache());
+  invalid.finalize(); same(original, invalid); // No hidden pending insertions.
+  rejected = false;
+  try { morseframes::add_lower_star_cells(invalid, {2}, {{0}}); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected);
+  invalid.finalize(); same(original, invalid);
+  const double infinity = std::numeric_limits<double>::infinity();
+  FilteredSimplicialComplex a, b;
+  legacy(a, std::vector<double>{-infinity, infinity}, Cells{{1, 0}, {0, 1}});
+  morseframes::add_lower_star_cells(b, {-infinity, infinity}, {{1, 0}, {0, 1}});
+  a.finalize(); b.finalize(); same(a, b);
+  assert(morseframes::detail::LowerStarComplexBuilder::combinations(10, 3) == 120);
+  rejected = false;
+  try { (void)morseframes::detail::LowerStarComplexBuilder::combinations(1000, 500); }
+  catch (const std::length_error&) { rejected = true; }
+  assert(rejected);
+}
+
 }  // namespace
 
 int main() {
+  test_compact_simplex_lookup();
+  test_boundary_and_filtration_order();
+  test_bulk_lower_star_construction();
+  test_complex_construction_contract();
   test_bounded_task_executor();
   test_boundary_and_coboundary();
   test_inverse_annotation_store();
@@ -1221,6 +2798,8 @@ int main() {
   test_simplex_tree_builder_explicit_insert_can_be_nonclosed();
   test_filtered_complex_from_simplex_tree_adapter();
   test_f_sequence_builder_accepts_simplex_tree_view();
+  test_process_lower_stars_triangle_boundary();
+  test_process_lower_stars_workspace_and_dimensions();
   test_one_vertex();
   test_reducer_skips_initially_zero_boundaries();
   test_two_vertices_joined_by_later_edge();
@@ -1237,6 +2816,18 @@ int main() {
   test_lower_star_two_triangle_strip();
   test_lower_star_three_dimensional_pair();
   test_flooding_reduction_kernel_on_shared_facets();
+  test_reduction_kernel_packed_core_matches_sparse_cache();
+  test_reduction_kernel_lazy_sparse_closures();
+  test_reduction_kernel_lightweight_initialization();
+  test_reduction_kernel_lightweight_persistence();
+  test_reduction_kernel_linear_sparse_incidence();
+  test_reduction_kernel_batched_facets();
+  test_reduction_kernel_facet_work_scheduling();
+  test_reduction_kernel_discovery_granularity();
+  test_reduction_kernel_discovery_failure_drains_tasks();
+  test_reduction_kernel_facet_failure_drains_tasks();
+  test_reduction_kernel_level_profile();
+  test_reduction_kernel_parallel_closures();
   test_instrumentation_metrics();
 
   std::cout << "All Morse persistence prototype tests passed.\n";

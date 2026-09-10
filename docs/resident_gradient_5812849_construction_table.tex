@@ -1,0 +1,18 @@
+\begin{tabular}{llrrrrr}
+\hline
+Input & $n$ & Workers & F-Max construction (ms) & RK construction (ms) & TTK construction (ms) & Shared loading (ms) \\
+\hline
+2D & 64 & 1 & 11.803 & 11.517 & 0.442 & 3.518 \\
+2D & 64 & 8 & 11.331 & 11.254 & 0.506 & 3.601 \\
+3D & 8 & 1 & 5.679 & 5.584 & 0.701 & 1.084 \\
+3D & 8 & 8 & 5.696 & 5.790 & 0.740 & 1.284 \\
+3D & 16 & 1 & 60.182 & 61.626 & 6.467 & 9.653 \\
+3D & 16 & 8 & 59.764 & 60.943 & 4.188 & 12.937 \\
+3D & 32 & 1 & 674.463 & 647.714 & 59.370 & 99.011 \\
+3D & 32 & 8 & 639.118 & 636.944 & 35.755 & 93.054 \\
+\hline
+\end{tabular}
+% Native construction only; excluded from the algorithm comparison.
+% MF: representation/filtration. TTK: object/representation/connectivity; ordering stays in algorithm time.
+% Shared loading: one parse per native invocation, medians across seeds, not per algorithm or cold-cache I/O.
+% Per-sample component sums are exact; separately aggregated medians need not add.

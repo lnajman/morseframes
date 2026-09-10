@@ -67,8 +67,27 @@ class BenchmarkToolTest(unittest.TestCase):
             self.assertGreaterEqual(row.reducer_xor_inserted_labels, 0)
             self.assertGreaterEqual(row.reducer_xor_removed_labels, 0)
             self.assertGreaterEqual(row.sequence_seconds, 0.0)
+            self.assertEqual(
+                sum(row.critical_simplices_by_dimension),
+                row.num_critical_simplices,
+            )
+            self.assertEqual(
+                2 * row.num_regular_pairs + row.num_critical_simplices,
+                row.num_simplices,
+            )
+            self.assertGreaterEqual(row.critical_ratio, 0.0)
+            self.assertGreaterEqual(row.eliminated_simplices, 0)
+            self.assertGreaterEqual(
+                row.sequence_seconds_per_eliminated_simplex,
+                0.0,
+            )
             self.assertGreaterEqual(row.reference_seconds, 0.0)
             self.assertGreaterEqual(row.morse_reduction_seconds, 0.0)
+            self.assertAlmostEqual(
+                row.persistence_seconds,
+                row.reference_seconds + row.morse_reduction_seconds,
+            )
+            self.assertEqual(row.total_seconds, row.morse_seconds)
             self.assertGreaterEqual(row.reducer_setup_seconds, 0.0)
             self.assertGreaterEqual(row.reducer_compute_seconds, 0.0)
             self.assertGreaterEqual(row.morse_seconds, 0.0)

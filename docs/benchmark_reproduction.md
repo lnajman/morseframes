@@ -8,6 +8,7 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
+The direct RK/F-Max/TTK tables have been refreshed on revision `591b658`.
 The work-aware facet-execution section records the latest ReductionKernel update.
 The closure-based incidence, controlled packed-coface A/B, direct TTK comparison,
 and earlier phase-profile sections retain historical snapshots; those timings
@@ -177,9 +178,10 @@ external benchmark remains a separate stage.
 ## Gradient Comparison with Construction Reported Separately
 
 This is the current primary comparison. Native construction is reported separately,
-not hidden or optimized in this update. The common input is still resident vertex
-values and maximal-cell connectivity, and every repetition uses fresh native
-objects. Only the benchmark and reporting change; the gradient algorithms do not.
+not hidden or optimized by the scheduling changes. The common input is still
+resident vertex values and maximal-cell connectivity, and every repetition uses
+fresh native objects. Current results use the validated work-aware RK revision
+`591b658`; the earlier `d466174` measurements are retained below as historical data.
 
 The partition is explicit:
 
@@ -227,10 +229,10 @@ OMP_WAIT_POLICY=PASSIVE LC_ALL=C python3 tools/benchmark_resident_gradients.py \
   --benchmark ../work/ttk-benchmark/build-f4ffd1a1049d0ccf6e8f3eb4f7c096a6cc251ba0/morseframes_resident_gradient_benchmark \
   --terrain-sizes 16 64 --volume-sizes 8 16 --seeds 0 2 --workers 1 2 4 8 \
   --repeats 12 --diagnostics 6 --warmups 2 \
-  --input-dir ../rk-ab-inputs --output ../rk-construction-split-main.json
+  --input-dir ../rk-ab-inputs --output ../rk-resident-591b658-main.json
 
 python3 tools/render_resident_gradients.py \
-  --input ../rk-construction-split-main.json \
+  --input ../rk-resident-591b658-main.json \
   --table-output docs/resident_gradient_algorithm_table.tex \
   --construction-output docs/resident_gradient_construction_table.tex \
   --phases-output docs/resident_gradient_unprofiled_phases_table.tex
@@ -242,11 +244,114 @@ repetition level. F-Max is sequential at every displayed worker setting; it is
 remeasured alongside RK and TTK. Raw input/binary/source hashes, revision, wait policy,
 orders, exact reference checks and critical counts remain recorded as described below.
 
-### Construction-separated results
+### Current construction-separated results (`591b658`)
+
+The refreshed main study covers eight inputs at 1/2/4/8 workers: 32 configurations,
+12 performance repetitions, six separate diagnostic repetitions, and two warmups
+per mode. The confirmation repeats terrain `64` and volume `16`, both seeds, at
+1/8 workers with 18 performance repetitions and otherwise identical settings.
+Both runs started from a clean `591b65870b4a314164778b89f990b19b2d2fe1d4` checkout,
+on the Apple M1 Max with the native ARM release build, pinned TTK revision
+`f4ffd1a1049d0ccf6e8f3eb4f7c096a6cc251ba0`, and `OMP_WAIT_POLICY=PASSIVE`.
+
+The checked CMake build uses Apple Clang 15, `-O3 -DNDEBUG -arch arm64`, C++17,
+and OpenMP for TTK. The measured executable SHA-256 is
+`cba26795d6347f2ecfffe450c5acd44407d20a2577079e9c935efe7cf88a8e26`;
+the header digest is
+`babf46699673de2aee8dee6c9091893f52c257f62b5a9efc995a09c2a47fd927`.
+Both raw JSON files retain matching binary, driver, input and header hashes.
+The following main-run **algorithm times** exclude native construction and are
+milliseconds, aggregated as medians over the two seed-specific medians:
+
+| Input | Workers | F-Max | RK | TTK |
+| --- | ---: | ---: | ---: | ---: |
+| 2D terrain, `n=64` | 1 | 1.451 | 1.134 | 1.034 |
+| 2D terrain, `n=64` | 8 | 1.465 | 0.894 | 0.693 |
+| 3D volume, `n=16` | 1 | 10.407 | 4.663 | 11.264 |
+| 3D volume, `n=16` | 8 | 10.894 | 2.105 | 3.472 |
+
+RK has lower paired-median algorithm time than TTK and F-Max in all 16 volume
+configurations. On terrains it is faster than TTK in one of 16 configurations,
+and faster than F-Max in nine of 16. Small terrains can lose to sequential
+F-Max because parallel setup costs are included. This is a workload-dependent
+comparison, not a universal ranking.
+
+```sh
+OMP_WAIT_POLICY=PASSIVE LC_ALL=C python3 tools/benchmark_resident_gradients.py \
+  --benchmark ../work/ttk-benchmark/build-f4ffd1a1049d0ccf6e8f3eb4f7c096a6cc251ba0/morseframes_resident_gradient_benchmark \
+  --terrain-sizes 64 --volume-sizes 16 --seeds 0 2 --workers 1 8 \
+  --repeats 18 --diagnostics 6 --warmups 2 \
+  --input-dir ../rk-ab-inputs --output ../rk-resident-591b658-confirmation.json
+```
+
+Confirmed eight-worker algorithm times are:
+
+| Input | Sequential F-Max (ms) | RK (ms) | TTK (ms) | Paired RK/TTK |
+| --- | ---: | ---: | ---: | ---: |
+| 2D terrain, `n=64` | 1.515 | 0.763 | 0.708 | 1.117 |
+| 3D volume, `n=16` | 10.756 | 2.136 | 3.182 | 0.687 |
+
+The confirmation has RK ahead of both competitors in all four volume
+configurations, and TTK ahead of RK in all four terrain configurations. RK is
+ahead of F-Max in all eight. On the eight-worker volume, paired RK/TTK ratios
+are 0.733 in the main run and 0.687 in confirmation; the corresponding terrain
+ratios are 1.220 and 1.117. Ratios are computed per repetition before aggregation
+and need not equal quotients of the displayed time medians.
+
+Other desktop applications remained active, while our local builds and tests
+did not overlap either study. All samples are retained, including timing outliers:
+for example, the main seed-0 eight-worker volume has TTK algorithm samples from
+2.206 to 37.872 ms. The repeated direction supports a preliminary comparison,
+not a quiet-machine performance guarantee or a precisely established universal
+speed ratio. These sessions are **not** an A/B comparison against `d466174`;
+differences from historical absolute timings must not be attributed solely to
+the RK optimization. The controlled plateau A/B study remains separate below.
+
+Selected main-run **construction and shared loading times** are reported separately:
+
+| Input | Workers | F-Max construction (ms) | RK construction (ms) | TTK construction (ms) | Shared loading (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2D terrain, `n=64` | 8 | 24.416 | 23.645 | 0.555 | 3.716 |
+| 3D volume, `n=16` | 8 | 133.701 | 141.281 | 4.966 | 11.257 |
+
+F-Max and RK use the same construction implementation; differences between their
+columns reflect separate measurements, not separate construction algorithms.
+TTK remains substantially faster when this native construction is included.
+Shared loading is one read/parse per invocation, summarized across seeds, not a
+per-algorithm cost or repeated cold-cache experiment. Construction plus algorithm
+equals the resident-to-gradient total **for every raw sample**, but separately
+aggregated medians and rounded table values need not add.
+
+All 40 configurations pass exact within-algorithm reference checks. Each
+algorithm's critical-count vector is invariant across worker counts; the three
+algorithms also agree on all tested inputs. Counts by dimension are:
+
+| Input | Seed | Critical vertices | Critical edges | Critical triangles | Critical tetrahedra |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2D terrain, `n=16` | 0 | 6 | 6 | 1 | -- |
+| 2D terrain, `n=16` | 2 | 8 | 9 | 2 | -- |
+| 2D terrain, `n=64` | 0 | 126 | 224 | 99 | -- |
+| 2D terrain, `n=64` | 2 | 176 | 334 | 159 | -- |
+| 3D volume, `n=8` | 0 | 12 | 21 | 13 | 3 |
+| 3D volume, `n=8` | 2 | 16 | 26 | 13 | 2 |
+| 3D volume, `n=16` | 0 | 21 | 38 | 29 | 11 |
+| 3D volume, `n=16` | 2 | 26 | 54 | 36 | 7 |
+
+Matching counts do not imply identical gradients across different algorithms.
+Input coverage, hashes, per-sample phase sums, stored medians, paired ratios and
+critical counts were checked against the raw evidence. Current tracked fragments
+are `resident_gradient_algorithm_table.tex`, `resident_gradient_construction_table.tex`
+and `resident_gradient_unprofiled_phases_table.tex`. They are regenerated from the
+main study; the latter reports every outer phase for the larger inputs at 1/8
+workers. Detailed RK/F-Max timings and full totals remain in both raw JSON files.
+TTK lower-star construction and matching remain combined inside its gradient
+phase. No persistence work is timed.
+
+### Construction-separated results (historical `d466174`)
 
 These measurements are the `d466174` snapshot, preceding the facet-discovery
-scheduling update below. Their timing definition remains the primary comparison,
-but they have not been rerun for that scheduling change.
+scheduling update below. Their timing definition remains the primary comparison;
+the refreshed `591b658` results above supersede them as the current measurements.
 
 The main run uses the same Apple M1 Max, native ARM release build, pinned TTK,
 eight inputs, 1/2/4/8 workers, 12 performance repetitions, six diagnostic
@@ -972,7 +1077,7 @@ both backends at 1/2/4 workers. Strict Sphinx and generated-summary checks pass.
 
 ### Controlled comparison
 
-Baseline: `012d804`. Candidate: the work-aware implementation, identified in the
+Baseline: `012d804`. Candidate: `591b658`, the work-aware implementation identified in the
 raw outputs by header SHA-256
 `babf46699673de2aee8dee6c9091893f52c257f62b5a9efc995a09c2a47fd927`.
 The native ARM Clang 15 flags are `-std=c++17 -O3 -DNDEBUG -pthread` on the
@@ -983,7 +1088,7 @@ are excluded equally. There is no persistence computation or new TTK/F-Max run.
 
 ```sh
 LC_ALL=C python3 tools/benchmark_reduction_kernel_ab.py \
-  --baseline 012d804 --candidate WORKTREE \
+  --baseline 012d804 --candidate 591b658 \
   --family terrain --filtration plateau --sizes 16 32 --seeds 0 \
   --workers 1 2 4 8 --blocks 8 --repeats 3 --warmups 2 \
   --input-dir ../rk-ab-inputs \

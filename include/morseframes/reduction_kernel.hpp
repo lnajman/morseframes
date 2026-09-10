@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -1292,16 +1293,18 @@ class ReductionKernelWorkspace {
     // Small and externally cached cells keep the allocation-free legacy scan.
     // Preparation (including any overflow allocation) is timed as local work.
     const bool filter_candidates = ordered_lookup;
-    InlineVector<std::size_t, kInlineCellCapacity> eligible_indices;
+    // Do not initialize the inline array on the unchanged small-cell path.
+    std::optional<InlineVector<std::size_t, kInlineCellCapacity>> eligible_indices;
     if (filter_candidates) {
+      eligible_indices.emplace();
       for (std::size_t index = 0; index < cell.size(); ++index) {
         if (facet_incidence_[cell[index]] <= 1) {
-          eligible_indices.push_back(index);
+          eligible_indices->push_back(index);
         }
       }
     }
     const std::size_t candidate_count =
-        filter_candidates ? eligible_indices.size() : cell.size();
+        filter_candidates ? eligible_indices->size() : cell.size();
     const auto find_coface_index = [&](SimplexId coface,
                                        std::size_t* comparisons = nullptr) {
       if (!ordered_lookup) {
@@ -1344,7 +1347,7 @@ class ReductionKernelWorkspace {
       // the merged event order are identical under both execution policies.
       for (std::size_t candidate = 0; candidate < candidate_count; ++candidate) {
         const std::size_t sigma_index =
-            filter_candidates ? eligible_indices[candidate] : candidate;
+            filter_candidates ? (*eligible_indices)[candidate] : candidate;
         if constexpr (CollectMetrics) {
           ++result.local_candidate_visits;
           ++result.local_sparse_candidate_visits;

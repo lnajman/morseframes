@@ -1,5 +1,9 @@
 # ProcessLowerStars workspaces and higher-dimensional gradients
 
+The subsequent [direct PLS/TTK study](pls_ttk_gradient_benchmark.md) measures
+the optimized implementation alongside TTK in a shared 2D/3D harness. The
+workspace optimization and higher-dimensional experiments below are unchanged.
+
 Revision `203fbb9` reduces the time of the native simplicial ProcessLowerStars
 (PLS) implementation without changing its ordered gradient. Across two
 controlled studies, all **48 paired configuration medians improve**; 47 of the

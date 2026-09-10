@@ -8,6 +8,9 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
+The [direct optimized-PLS/TTK study](pls_ttk_gradient_benchmark.md) adds PLS to
+the resident-array harness and measures all four methods together, with balanced
+execution order, a confirmation run and unchanged timing boundaries.
 The [simplicial gradient study](simplicial_gradient_benchmark.md) records the
 latest PLS workspace optimization and two controlled gradient-only comparisons
 of RK, PLS and F-Max through dimension seven, including critical counts and

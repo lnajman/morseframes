@@ -1146,7 +1146,17 @@ class FSequenceBuilder {
     CleanupCheckpoint keys_cleanup{sequence_metrics_,
         &MorseSequenceBuildMetrics::process_lower_stars_keys_cleanup_nanoseconds,
         cleanup_start};
-    std::vector<std::vector<std::size_t>> robins_key(n);
+    // Variable-length keys in one arena: retain the complete rank sequence in
+    // every dimension, without one allocation (and destruction) per simplex.
+    std::vector<std::size_t> key_offsets(n + 1, 0);
+    for (SimplexId simplex = 0; simplex < n; ++simplex) {
+      const std::size_t length = complex_.vertices(simplex).size();
+      if (length > std::numeric_limits<std::size_t>::max() - key_offsets[simplex]) {
+        throw std::length_error("ProcessLowerStars priority-key storage overflow.");
+      }
+      key_offsets[simplex + 1] = key_offsets[simplex] + length;
+    }
+    std::vector<std::size_t> key_ranks(key_offsets.back());
     profile_add(&MorseSequenceBuildMetrics::process_lower_stars_storage_init_nanoseconds,
                 storage_start);
     const auto owner_keys_start = profile_start();
@@ -1156,8 +1166,9 @@ class FSequenceBuilder {
         throw std::invalid_argument(
             "ProcessLowerStars does not support the empty simplex.");
       }
-      auto& key = robins_key[simplex];
-      key.reserve(vertices.size());
+      auto key_begin = key_ranks.begin() + key_offsets[simplex];
+      auto key_end = key_ranks.begin() + key_offsets[simplex + 1];
+      auto next_rank = key_begin;
       SimplexId simplex_owner = kInvalidSimplex;
       std::size_t owner_rank = 0;
       for (VertexId vertex : vertices) {
@@ -1166,13 +1177,13 @@ class FSequenceBuilder {
           throw std::invalid_argument(
               "ProcessLowerStars found a cell with an unknown vertex.");
         }
-        key.push_back(rank_it->second);
+        *next_rank++ = rank_it->second;
         if (simplex_owner == kInvalidSimplex || rank_it->second > owner_rank) {
           simplex_owner = vertex_order[rank_it->second];
           owner_rank = rank_it->second;
         }
       }
-      std::sort(key.begin(), key.end(), std::greater<std::size_t>());
+      std::sort(key_begin, key_end, std::greater<std::size_t>());
       if (complex_.level(simplex) != complex_.level(simplex_owner)) {
         throw std::invalid_argument(
             "ProcessLowerStars requires the max-vertex lower-star extension.");
@@ -1223,14 +1234,17 @@ class FSequenceBuilder {
                 partition_start);
 
     struct RobinsMinPriority {
-      const std::vector<std::vector<std::size_t>>* keys = nullptr;
+      const std::vector<std::size_t>* offsets = nullptr;
+      const std::vector<std::size_t>* ranks = nullptr;
 
       bool operator()(SimplexId lhs, SimplexId rhs) const {
-        const auto& lhs_key = (*keys)[lhs];
-        const auto& rhs_key = (*keys)[rhs];
-        if (lhs_key != rhs_key) {
+        const auto lhs_begin = ranks->begin() + (*offsets)[lhs];
+        const auto lhs_end = ranks->begin() + (*offsets)[lhs + 1];
+        const auto rhs_begin = ranks->begin() + (*offsets)[rhs];
+        const auto rhs_end = ranks->begin() + (*offsets)[rhs + 1];
+        if (!std::equal(lhs_begin, lhs_end, rhs_begin, rhs_end)) {
           return std::lexicographical_compare(
-              rhs_key.begin(), rhs_key.end(), lhs_key.begin(), lhs_key.end());
+              rhs_begin, rhs_end, lhs_begin, lhs_end);
         }
         return rhs < lhs;
       }
@@ -1264,7 +1278,7 @@ class FSequenceBuilder {
       local_boundary_count.assign(lower_star.size(), 0);
       local_boundary_xor.assign(lower_star.size(), 0);
 
-      RobinsMinPriority priority{&robins_key};
+      RobinsMinPriority priority{&key_offsets, &key_ranks};
       auto& pair_candidates = workspace.pair_candidates;
       auto& zero_candidates = workspace.zero_candidates;
       pair_candidates.clear();

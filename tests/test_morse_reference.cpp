@@ -1065,7 +1065,7 @@ void test_process_lower_stars_workspace_and_dimensions() {
   const auto compare_step = [](const auto& a, const auto& b) {
     assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau && a.level == b.level);
   };
-  for (unsigned dimension = 0; dimension <= 7; ++dimension) {
+  for (unsigned dimension = 0; dimension <= 9; ++dimension) {
     for (unsigned seed : {0u, 2u, 7u}) {
       // Sparse vertex identifiers and filtration ranks unrelated to their order.
       const unsigned vertices = dimension + 4;

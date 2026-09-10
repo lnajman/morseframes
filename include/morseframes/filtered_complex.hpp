@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <map>
@@ -28,6 +29,16 @@ struct Simplex {
   std::vector<SimplexId> coboundary;
 };
 
+// Separate diagnostic runs only: ordinary finalize() has no internal clocks.
+struct ComplexConstructionMetrics {
+  double reset_seconds = 0;
+  double index_and_simplices_seconds = 0;
+  double levels_seconds = 0;
+  double boundaries_seconds = 0;
+  double coboundaries_seconds = 0;
+  double orders_and_buckets_seconds = 0;
+};
+
 class FilteredSimplicialComplex {
  public:
   void add_simplex(std::vector<VertexId> vertices, double filtration) {
@@ -43,7 +54,26 @@ class FilteredSimplicialComplex {
     clear_same_level_closure_cache();
   }
 
-  void finalize() {
+  void finalize() { finalize_impl<false>(nullptr); }
+
+  void finalize_with_metrics(ComplexConstructionMetrics& metrics) {
+    metrics = {};
+    finalize_impl<true>(&metrics);
+  }
+
+ private:
+  template <bool Diagnostic>
+  void finalize_impl(ComplexConstructionMetrics* metrics) {
+    using Clock = std::chrono::steady_clock;
+    Clock::time_point last;
+    if constexpr (Diagnostic) last = Clock::now();
+    auto record = [&](double ComplexConstructionMetrics::* field) {
+      if constexpr (Diagnostic) {
+        const auto now = Clock::now();
+        metrics->*field = std::chrono::duration<double>(now - last).count();
+        last = now;
+      }
+    };
     if (pending_.empty()) {
       throw std::invalid_argument("Cannot finalize an empty complex.");
     }
@@ -54,6 +84,7 @@ class FilteredSimplicialComplex {
     level_buckets_.clear();
     filtration_order_.clear();
     clear_same_level_closure_cache();
+    record(&ComplexConstructionMetrics::reset_seconds);
 
     for (const auto& [vertices, filtration] : pending_) {
       (void)filtration;
@@ -65,13 +96,19 @@ class FilteredSimplicialComplex {
       simplices_.back().filtration = pending_.at(vertices);
     }
 
+    record(&ComplexConstructionMetrics::index_and_simplices_seconds);
     build_levels();
+    record(&ComplexConstructionMetrics::levels_seconds);
     build_boundaries_and_check_filtration();
+    record(&ComplexConstructionMetrics::boundaries_seconds);
     build_coboundaries();
+    record(&ComplexConstructionMetrics::coboundaries_seconds);
     build_orders_and_buckets();
+    record(&ComplexConstructionMetrics::orders_and_buckets_seconds);
     finalized_ = true;
   }
 
+ public:
   std::size_t size() const { return simplices_.size(); }
 
   const Simplex& simplex(SimplexId simplex) const {

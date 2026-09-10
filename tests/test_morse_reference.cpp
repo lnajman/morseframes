@@ -1950,9 +1950,78 @@ void test_instrumentation_metrics() {
   assert_same_barcode(result.coreference_diagram, result.standard_diagram);
 }
 
+void test_complex_construction_contract() {
+  std::mt19937 rng(17);
+  for (unsigned dimension = 1; dimension <= 7; ++dimension) {
+    std::vector<std::vector<morseframes::VertexId>> faces;
+    for (unsigned mask = 1; mask < (1u << (dimension + 1)); ++mask) {
+      std::vector<morseframes::VertexId> face;
+      for (unsigned i = 0; i <= dimension; ++i)
+        if (mask & (1u << i)) face.push_back(i * 1000003u);
+      faces.push_back(face);
+    }
+    std::sort(faces.begin(), faces.end());
+    auto shuffled = faces;
+    std::shuffle(shuffled.begin(), shuffled.end(), rng);
+    FilteredSimplicialComplex a, b;
+    for (auto face : faces) a.add_simplex(face, double(face.size() - 1));
+    for (auto face : shuffled) {
+      const double value = double(face.size() - 1);
+      std::reverse(face.begin(), face.end());
+      b.add_simplex(face, value);
+      b.add_simplex(face, value + 0.5e-12); // Keep the original value within tolerance.
+    }
+    a.finalize();
+    morseframes::ComplexConstructionMetrics metrics;
+    metrics.boundaries_seconds = -1;
+    b.finalize_with_metrics(metrics);
+    assert(metrics.reset_seconds >= 0 && metrics.index_and_simplices_seconds >= 0);
+    assert(metrics.levels_seconds >= 0 && metrics.boundaries_seconds >= 0);
+    assert(metrics.coboundaries_seconds >= 0 && metrics.orders_and_buckets_seconds >= 0);
+    assert(a.size() == faces.size() && b.size() == a.size());
+    assert(a.filtration_order() == b.filtration_order());
+    assert(a.level_values() == b.level_values());
+    for (morseframes::SimplexId id = 0; id < a.size(); ++id) {
+      assert(a.vertices(id) == faces[id] && a.vertices(id) == b.vertices(id));
+      assert(a.filtration(id) == b.filtration(id));
+      assert(a.level(id) == b.level(id) && a.dimension(id) == b.dimension(id));
+      assert(a.boundary(id) == b.boundary(id) && a.coboundary(id) == b.coboundary(id));
+      assert(b.find_simplex(faces[id]) == id);
+      auto reversed = faces[id]; std::reverse(reversed.begin(), reversed.end());
+      assert(b.find_simplex(reversed) == id);
+      assert(a.simplices_of_level(a.level(id)) == b.simplices_of_level(b.level(id)));
+    }
+    auto copied = b;
+    auto moved = std::move(copied);
+    b.prepare_same_level_closure_cache();
+    b.add_simplex({4000000000u}, 10);
+    assert(!b.has_same_level_closure_cache());
+    b.finalize();
+    assert(b.size() == a.size() + 1);
+    assert(moved.size() == a.size());
+    auto check = [&moved, &faces] {
+      for (morseframes::SimplexId id = 0; id < faces.size(); ++id)
+        assert(moved.find_simplex(faces[id]) == id);
+    };
+    auto future = std::async(std::launch::async, check); check(); future.get();
+    moved.finalize();
+    check();
+    assert(moved.find_simplex({4000000000u}) == morseframes::kInvalidSimplex);
+    bool rejected = false;
+    try { moved.add_simplex({0}, 2); } catch (const std::invalid_argument&) { rejected = true; }
+    assert(rejected);
+  }
+  FilteredSimplicialComplex empty;
+  morseframes::ComplexConstructionMetrics metrics;
+  bool rejected = false;
+  try { empty.finalize_with_metrics(metrics); } catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected);
+}
+
 }  // namespace
 
 int main() {
+  test_complex_construction_contract();
   test_bounded_task_executor();
   test_boundary_and_coboundary();
   test_inverse_annotation_store();

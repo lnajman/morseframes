@@ -59,6 +59,10 @@ def validate(row):
                 or row['closure_index_growths'] > row['closure_sparse_entries']
                 or row['closure_entry_growths'] > row['closure_sparse_entries']):
             raise ValueError('Inconsistent RK closure phases or counters')
+        same_level_visits = (row['closure_sparse_entries'] - row['closure_sparse_cells']
+                             + row['closure_duplicate_faces'])
+        if row['closure_boundary_visits'] < same_level_visits:
+            raise ValueError('Missing RK closure traversal visits')
     if any(k in row for k in BOUNDARY_INDEX_FIELDS):
         if not all(k in row for k in BOUNDARY_INDEX_FIELDS + CLOSURE_FIELDS):
             raise ValueError('Incomplete RK boundary-index profile')
@@ -66,6 +70,8 @@ def validate(row):
                 > row['closure_initial_seconds'] + 1e-10
                 or row['closure_boundary_index_entries'] > row['closure_boundary_index_visits']):
             raise ValueError('Inconsistent RK boundary-index preparation')
+        if row['closure_boundary_index_visits'] and row['closure_boundary_visits'] != same_level_visits:
+            raise ValueError('Indexed RK traversal must visit only same-level boundaries')
     # Detailed kernel fields sum over levels/tasks, not global elapsed time.
     # Core/local are children of facet execution and must not be added to it.
     return max(0., remainder)

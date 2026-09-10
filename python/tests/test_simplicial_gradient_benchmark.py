@@ -27,15 +27,17 @@ class SimplicialGradientBenchmarkTests(unittest.TestCase):
                    closure_sparse_entries=10, closure_boundary_visits=20,
                    closure_duplicate_faces=5, closure_index_growths=1, closure_entry_growths=1)
         self.assertAlmostEqual(rk_profile.validate(row), .1)
-        indexed = dict(row, closure_boundary_index_seconds=.01,
+        indexed = dict(row, closure_boundary_visits=13, closure_boundary_index_seconds=.01,
                        closure_boundary_index_visits=10, closure_boundary_index_entries=5)
         self.assertAlmostEqual(rk_profile.validate(indexed), .1)
         for bad in [dict(indexed, closure_boundary_index_seconds=.03),
                     dict(indexed, closure_boundary_index_entries=11),
+                    dict(indexed, closure_boundary_visits=14),
                     {k:v for k,v in indexed.items() if k != 'closure_boundary_index_visits'}]:
             with self.assertRaises(ValueError):
                 rk_profile.validate(bad)
         for bad in [dict(row, closure_packed_seconds=.11), dict(row, closure_sort_seconds=.2),
+                    dict(row, closure_boundary_visits=12),
                     dict(row, closure_sparse_cells=11), dict(row, closure_duplicate_faces=21),
                     dict(row, closure_index_growths=11), dict(row, closure_entry_growths=11),
                     {k:v for k,v in row.items() if k != 'closure_traversal_seconds'}]:
@@ -124,6 +126,10 @@ class SimplicialGradientBenchmarkTests(unittest.TestCase):
                     self.assertGreater(row['local_removed_candidate_visits'], 0)
                     self.assertGreater(row['closure_sparse_cells'], 0)
                     self.assertGreater(row['closure_duplicate_faces'], 0)
+                    self.assertGreater(row['closure_boundary_index_entries'], 0)
+                    self.assertEqual(row['closure_boundary_visits'],
+                                     row['closure_sparse_entries'] - row['closure_sparse_cells']
+                                     + row['closure_duplicate_faces'])
                     identities.append(tuple(row[k] for k in rk_profile.SEARCH_FIELDS + rk_profile.CLOSURE_COUNTS[:4]))
                 self.assertEqual(*identities)
             finally:
@@ -216,6 +222,7 @@ class SimplicialGradientBenchmarkTests(unittest.TestCase):
                             self.assertEqual(row["rounds"], 0)
                             self.assertEqual(row["closure_seconds"], 0)
                             self.assertTrue(all(row[k] == 0 for k in rk_profile.CLOSURE_FIELDS))
+                            self.assertTrue(all(row[k] == 0 for k in rk_profile.BOUNDARY_INDEX_FIELDS))
             finally:
                 worker.close()
             self.assertEqual(worker.process.returncode, 0)

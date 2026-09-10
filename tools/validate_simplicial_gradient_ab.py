@@ -13,6 +13,7 @@ import tempfile
 import benchmark_simplicial_gradients as benchmark
 from pls_phase_profile import validate as validate_pls
 from profile_reduction_kernel_simplicial import validate as validate_rk
+from profile_reduction_kernel_simplicial import SEARCH_FIELDS
 
 
 def digest(path):
@@ -128,6 +129,16 @@ def audit(path, allow_protected_scan_elision=False):
             for rows in case['memory'][version].values():
                 assert len(rows) == settings['memory_repeats']
         assert len(counts) <= 1, 'RK work changed despite expected exact sequence parity'
+        if settings['rk_profiles'] and all('closure_boundary_index_visits' in
+                case['rk_profiles'][v]['rk_detailed'][0] for v in benchmark.VERSIONS):
+            reference = case['rk_profiles']['baseline']['rk_detailed'][0]
+            for version in benchmark.VERSIONS:
+                for row in case['rk_profiles'][version]['rk_detailed']:
+                    # Boundary indexing may skip cross-level records, but
+                    # cannot change any local reduction or same-level closure.
+                    assert row['closure_boundary_visits'] <= reference['closure_boundary_visits']
+                    for key in SEARCH_FIELDS:
+                        assert row[key] == reference[key], key
         if allow_protected_scan_elision:
             reference = case['rk_profiles']['baseline']['rk_detailed'][0]
             for version in benchmark.VERSIONS:

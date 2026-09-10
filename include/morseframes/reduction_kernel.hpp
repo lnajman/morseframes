@@ -306,6 +306,10 @@ class ReductionKernelWorkspace {
     LevelCells level_cells;
     std::vector<std::uint8_t> included;
     std::vector<std::size_t> cell_indices;
+    // Rebuilt only for large uncached levels; owned by one level worker.
+    // Other paths ignore these buffers, including after scratch reuse.
+    std::vector<std::size_t> boundary_offsets;
+    std::vector<std::size_t> boundary_indices;
     std::vector<std::uint64_t> closure_masks;
     std::vector<std::uint64_t> coface_masks;
   };
@@ -882,6 +886,37 @@ class ReductionKernelWorkspace {
     // empty range marks an unprepared cell (every actual cell contains itself).
     cells.ranges.assign(bucket.size(), {0, 0});
     std::fill(scratch.included.begin(), scratch.included.end(), 0);
+    const auto index_start = profile_start<CollectMetrics>();
+    auto& offsets = scratch.boundary_offsets;
+    auto& indices = scratch.boundary_indices;
+    offsets.resize(bucket.size() + 1);
+    indices.clear();
+    if (indices.capacity() < bucket.size()) {
+      indices.reserve(bucket.size());
+    }
+    for (std::size_t simplex_index = 0; simplex_index < bucket.size(); ++simplex_index) {
+      offsets[simplex_index] = indices.size();
+      const SimplexId simplex = bucket[simplex_index];
+      const auto level = complex_.level(simplex);
+      for (SimplexId face : complex_.boundary(simplex)) {
+        if constexpr (CollectMetrics) {
+          ++metrics.closure_boundary_index_visits;
+        }
+        if (complex_.level(face) != level) {
+          continue;
+        }
+        const auto face_index = bucket_index_[face];
+        if (face_index >= simplex_index) {
+          throw std::logic_error("Reduction-kernel level bucket is not face-first.");
+        }
+        indices.push_back(face_index);
+      }
+    }
+    offsets[bucket.size()] = indices.size();
+    if constexpr (CollectMetrics) {
+      metrics.closure_boundary_index_entries += indices.size();
+    }
+    profile_add<CollectMetrics>(metrics.closure_boundary_index_nanoseconds, index_start);
   }
 
   template <bool CollectMetrics>
@@ -912,18 +947,14 @@ class ReductionKernelWorkspace {
       // remains the same immutable closure as in the eager implementation.
       for (std::size_t next = 0; next < cell_indices.size(); ++next) {
         const auto simplex_index = cell_indices[next];
-        for (SimplexId face : complex_.boundary(bucket[simplex_index])) {
+        // Same stable boundary order, already filtered and converted to local
+        // ranks once per level. Keep inactive faces in this immutable index.
+        for (std::size_t edge = scratch.boundary_offsets[simplex_index];
+             edge < scratch.boundary_offsets[simplex_index + 1]; ++edge) {
           if constexpr (CollectMetrics) {
             ++metrics.closure_boundary_visits;
           }
-          if (complex_.level(face) != complex_.level(facet)) {
-            continue;
-          }
-          const std::size_t face_index = bucket_index_[face];
-          if (face_index >= simplex_index) {
-            throw std::logic_error(
-                "Reduction-kernel level bucket is not face-first.");
-          }
+          const auto face_index = scratch.boundary_indices[edge];
           if (!included[face_index]) {
             included[face_index] = 1;
             if constexpr (CollectMetrics) {

@@ -1747,13 +1747,15 @@ void test_reduction_kernel_lazy_sparse_closures() {
       const auto expected = FSequenceBuilder(cached, &linear_metrics)
                                 .build_flooding_reduction_kernel();
       assert(linear_metrics.reduction_kernel_closure_sparse_cells == 0);
+      assert(linear_metrics.reduction_kernel_closure_boundary_index_visits == 0);
       for (std::size_t workers : {1, 2, 4, 8}) {
         for (bool detailed : {false, true}) {
           morseframes::MorseSequenceBuildMetrics metrics;
           FSequenceBuilder builder(complex, &metrics, detailed);
           const auto actual = workers == 1 ? builder.build_flooding_reduction_kernel()
                                           : builder.build_flooding_reduction_kernel_parallel(workers);
-          assert(metrics.reduction_kernel_closure_packed_nanoseconds <=
+          assert(metrics.reduction_kernel_closure_packed_nanoseconds +
+                     metrics.reduction_kernel_closure_boundary_index_nanoseconds <=
                  metrics.reduction_kernel_closure_initial_nanoseconds);
           assert(metrics.reduction_kernel_closure_initial_nanoseconds +
                      metrics.reduction_kernel_closure_traversal_nanoseconds +
@@ -1761,11 +1763,17 @@ void test_reduction_kernel_lazy_sparse_closures() {
                      metrics.reduction_kernel_closure_materialize_nanoseconds <=
                  metrics.reduction_kernel_closure_nanoseconds);
           if (!detailed) {
+            assert(metrics.reduction_kernel_closure_boundary_index_visits == 0);
             assert(metrics.reduction_kernel_closure_initial_nanoseconds == 0);
             assert(metrics.reduction_kernel_closure_sparse_cells == 0);
             assert(metrics.reduction_kernel_local_membership_comparisons == 0);
             assert(metrics.reduction_kernel_local_sparse_scan_passes == 0);
           } else if (dimension == 9 && filtration == 0) {
+            assert(metrics.reduction_kernel_closure_boundary_index_entries > 0);
+            assert(metrics.reduction_kernel_closure_boundary_visits ==
+                   metrics.reduction_kernel_closure_sparse_entries -
+                       metrics.reduction_kernel_closure_sparse_cells +
+                       metrics.reduction_kernel_closure_duplicate_faces);
             // The external cache retains both linear membership and the full
             // candidate scan, independently of the workspace optimizations.
             // Protected cells must remain visible to coface queries. Only

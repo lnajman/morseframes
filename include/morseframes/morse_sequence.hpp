@@ -1089,7 +1089,7 @@ class FSequenceBuilder {
     BoundedTaskExecutor executor(max_workers);
     const std::size_t worker_count = executor.worker_count();
     std::vector<SimplexId> owner(n, kInvalidSimplex);
-    std::vector<std::vector<SimplexId>> owned(n);
+    std::vector<std::vector<SimplexId>> owned(vertex_order.size());
     std::vector<std::vector<std::size_t>> robins_key(n);
     auto build_owner_and_key = [&](SimplexId simplex) {
       const auto& vertices = complex_.vertices(simplex);
@@ -1103,14 +1103,13 @@ class FSequenceBuilder {
       std::size_t owner_rank = 0;
       for (VertexId vertex : vertices) {
         const auto rank_it = vertex_rank.find(vertex);
-        const auto simplex_it = vertex_simplex.find(vertex);
-        if (rank_it == vertex_rank.end() || simplex_it == vertex_simplex.end()) {
+        if (rank_it == vertex_rank.end()) {
           throw std::invalid_argument(
               "ProcessLowerStars found a cell with an unknown vertex.");
         }
         key.push_back(rank_it->second);
         if (simplex_owner == kInvalidSimplex || rank_it->second > owner_rank) {
-          simplex_owner = simplex_it->second;
+          simplex_owner = vertex_order[rank_it->second];
           owner_rank = rank_it->second;
         }
       }
@@ -1119,7 +1118,7 @@ class FSequenceBuilder {
         throw std::invalid_argument(
             "ProcessLowerStars requires the max-vertex lower-star extension.");
       }
-      owner[simplex] = simplex_owner;
+      owner[simplex] = static_cast<SimplexId>(owner_rank);
     };
 
     constexpr std::size_t kParallelSetupThreshold = 512;
@@ -1148,7 +1147,11 @@ class FSequenceBuilder {
         build_owner_and_key(simplex);
       }
     }
+    // Dense simplex IDs let every star share an immutable direct-index map.
+    // Its entries refer to positions in disjoint, worker-local state buffers.
+    std::vector<std::size_t> local_index(n);
     for (SimplexId simplex = 0; simplex < n; ++simplex) {
+      local_index[simplex] = owned[owner[simplex]].size();
       owned[owner[simplex]].push_back(simplex);
     }
 
@@ -1166,6 +1169,14 @@ class FSequenceBuilder {
       }
     };
 
+    struct LowerStarWorkspace {
+      std::vector<std::uint8_t> classified;
+      std::vector<std::uint32_t> boundary_count;
+      std::vector<SimplexId> boundary_xor;
+      std::vector<SimplexId> pair_candidates;
+      std::vector<SimplexId> zero_candidates;
+    };
+
     struct LowerStarEvent {
       MorseStepType type = MorseStepType::Critical;
       SimplexId sigma = kInvalidSimplex;
@@ -1173,44 +1184,52 @@ class FSequenceBuilder {
     };
     std::vector<std::vector<LowerStarEvent>> events_by_star(vertex_order.size());
 
-    auto process_lower_star = [&](std::size_t star_rank) {
-      const SimplexId star_vertex = vertex_order[star_rank];
-      const auto& lower_star = owned[star_vertex];
+    auto process_lower_star = [&](std::size_t star_rank,
+                                  LowerStarWorkspace& workspace) {
+      const auto& lower_star = owned[star_rank];
       auto& events = events_by_star[star_rank];
       events.reserve(lower_star.size());
 
-      std::unordered_map<SimplexId, std::size_t> local_index;
-      local_index.reserve(lower_star.size());
-      for (std::size_t index = 0; index < lower_star.size(); ++index) {
-        local_index.emplace(lower_star[index], index);
-      }
-      std::vector<std::uint8_t> classified(lower_star.size(), 0);
-      std::vector<std::uint32_t> local_boundary_count(lower_star.size(), 0);
-      std::vector<SimplexId> local_boundary_xor(lower_star.size(), 0);
+      auto& classified = workspace.classified;
+      auto& local_boundary_count = workspace.boundary_count;
+      auto& local_boundary_xor = workspace.boundary_xor;
+      classified.assign(lower_star.size(), 0);
+      local_boundary_count.assign(lower_star.size(), 0);
+      local_boundary_xor.assign(lower_star.size(), 0);
 
       RobinsMinPriority priority{&robins_key};
-      std::priority_queue<SimplexId, std::vector<SimplexId>, RobinsMinPriority>
-          pair_candidates(priority);
-      std::priority_queue<SimplexId, std::vector<SimplexId>, RobinsMinPriority>
-          zero_candidates(priority);
+      auto& pair_candidates = workspace.pair_candidates;
+      auto& zero_candidates = workspace.zero_candidates;
+      pair_candidates.clear();
+      zero_candidates.clear();
+      auto push = [&](auto& queue, SimplexId simplex) {
+        queue.push_back(simplex);
+        std::push_heap(queue.begin(), queue.end(), priority);
+      };
+      auto pop = [&](auto& queue) {
+        std::pop_heap(queue.begin(), queue.end(), priority);
+        const SimplexId simplex = queue.back();
+        queue.pop_back();
+        return simplex;
+      };
       std::size_t remaining = lower_star.size();
 
       auto enqueue = [&](SimplexId simplex) {
-        const std::size_t index = local_index.at(simplex);
+        const std::size_t index = local_index[simplex];
         if (classified[index]) {
           return;
         }
         if (local_boundary_count[index] == 1) {
-          pair_candidates.push(simplex);
+          push(pair_candidates, simplex);
         } else if (local_boundary_count[index] == 0) {
-          zero_candidates.push(simplex);
+          push(zero_candidates, simplex);
         }
       };
 
       for (SimplexId simplex : lower_star) {
-        const std::size_t index = local_index.at(simplex);
+        const std::size_t index = local_index[simplex];
         for (SimplexId face : complex_.boundary(simplex)) {
-          if (owner[face] == star_vertex) {
+          if (owner[face] == star_rank) {
             ++local_boundary_count[index];
             local_boundary_xor[index] ^= face;
           }
@@ -1219,7 +1238,7 @@ class FSequenceBuilder {
       }
 
       auto mark_classified = [&](SimplexId simplex) {
-        const std::size_t index = local_index.at(simplex);
+        const std::size_t index = local_index[simplex];
         if (classified[index]) {
           throw std::logic_error(
               "ProcessLowerStars classified a simplex twice.");
@@ -1227,10 +1246,10 @@ class FSequenceBuilder {
         classified[index] = 1;
         --remaining;
         for (SimplexId coface : complex_.coboundary(simplex)) {
-          if (owner[coface] != star_vertex) {
+          if (owner[coface] != star_rank) {
             continue;
           }
-          const std::size_t coface_index = local_index.at(coface);
+          const std::size_t coface_index = local_index[coface];
           if (classified[coface_index]) {
             continue;
           }
@@ -1247,16 +1266,14 @@ class FSequenceBuilder {
       while (remaining > 0) {
         bool paired = false;
         while (!pair_candidates.empty()) {
-          const SimplexId tau = pair_candidates.top();
-          pair_candidates.pop();
-          const std::size_t tau_index = local_index.at(tau);
+          const SimplexId tau = pop(pair_candidates);
+          const std::size_t tau_index = local_index[tau];
           if (classified[tau_index] || local_boundary_count[tau_index] != 1) {
             continue;
           }
           const SimplexId sigma = local_boundary_xor[tau_index];
-          const auto sigma_it = local_index.find(sigma);
-          if (sigma >= n || sigma_it == local_index.end() ||
-              classified[sigma_it->second]) {
+          if (sigma >= n || owner[sigma] != star_rank ||
+              classified[local_index[sigma]]) {
             continue;
           }
           events.push_back(
@@ -1272,9 +1289,8 @@ class FSequenceBuilder {
 
         SimplexId critical = kInvalidSimplex;
         while (!zero_candidates.empty()) {
-          const SimplexId candidate = zero_candidates.top();
-          zero_candidates.pop();
-          const std::size_t candidate_index = local_index.at(candidate);
+          const SimplexId candidate = pop(zero_candidates);
+          const std::size_t candidate_index = local_index[candidate];
           if (!classified[candidate_index] &&
               local_boundary_count[candidate_index] == 0) {
             critical = candidate;
@@ -1293,10 +1309,10 @@ class FSequenceBuilder {
 
     if (sequence_metrics_ != nullptr) {
       sequence_metrics_->process_lower_stars_count = vertex_order.size();
-      for (SimplexId star_vertex : vertex_order) {
+      for (const auto& lower_star : owned) {
         sequence_metrics_->process_lower_stars_max_star_size = std::max(
             sequence_metrics_->process_lower_stars_max_star_size,
-            owned[star_vertex].size());
+            lower_star.size());
       }
       sequence_metrics_->process_lower_stars_executor_workers = worker_count;
     }
@@ -1304,8 +1320,9 @@ class FSequenceBuilder {
                 setup_start);
     const auto local_start = profile_start();
     if (worker_count <= 1 || vertex_order.size() <= 1) {
+      LowerStarWorkspace workspace;
       for (std::size_t star_rank = 0; star_rank < vertex_order.size(); ++star_rank) {
-        process_lower_star(star_rank);
+        process_lower_star(star_rank, workspace);
       }
       if (sequence_metrics_ != nullptr) {
         sequence_metrics_->process_lower_stars_min_task_load = n;
@@ -1325,8 +1342,8 @@ class FSequenceBuilder {
       std::iota(star_ranks.begin(), star_ranks.end(), 0);
       std::sort(star_ranks.begin(), star_ranks.end(),
                 [&](std::size_t lhs, std::size_t rhs) {
-                  const std::size_t lhs_size = owned[vertex_order[lhs]].size();
-                  const std::size_t rhs_size = owned[vertex_order[rhs]].size();
+                  const std::size_t lhs_size = owned[lhs].size();
+                  const std::size_t rhs_size = owned[rhs].size();
                   return lhs_size != rhs_size ? lhs_size > rhs_size : lhs < rhs;
                 });
 
@@ -1338,7 +1355,7 @@ class FSequenceBuilder {
         const std::size_t task_index =
             static_cast<std::size_t>(lightest - task_loads.begin());
         task_stars[task_index].push_back(star_rank);
-        task_loads[task_index] += owned[vertex_order[star_rank]].size();
+        task_loads[task_index] += owned[star_rank].size();
       }
 
       std::vector<std::future<void>> futures;
@@ -1353,8 +1370,9 @@ class FSequenceBuilder {
                                            &task_nanoseconds]() {
           const auto task_start =
               measure_tasks ? SequenceClock::now() : SequenceClock::time_point{};
+          LowerStarWorkspace workspace;
           for (std::size_t star_rank : task) {
-            process_lower_star(star_rank);
+            process_lower_star(star_rank, workspace);
           }
           if (measure_tasks) {
             task_nanoseconds[task_index] =

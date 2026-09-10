@@ -990,6 +990,119 @@ void test_process_lower_stars_triangle_boundary() {
   assert(rejected_extension);
 }
 
+// Deliberately slow oracle: rescan the remaining local boundary on every step.
+// It shares neither the production counters/XORs nor its heaps/direct-index map.
+morseframes::MorseSequence scan_process_lower_stars(
+    const FilteredSimplicialComplex& complex) {
+  using morseframes::SimplexId;
+  std::map<morseframes::VertexId, std::size_t> ranks;
+  for (auto id : complex.filtration_order()) {
+    if (complex.dimension(id) == 0) {
+      const auto rank = ranks.size();
+      ranks.emplace(complex.vertices(id)[0], rank);
+    }
+  }
+  std::vector<std::vector<std::size_t>> keys(complex.size());
+  std::vector<std::vector<SimplexId>> stars(ranks.size());
+  for (SimplexId id = 0; id < complex.size(); ++id) {
+    for (auto vertex : complex.vertices(id)) keys[id].push_back(ranks.at(vertex));
+    std::sort(keys[id].begin(), keys[id].end(), std::greater<std::size_t>());
+    stars[keys[id][0]].push_back(id);
+  }
+  const auto before = [&](SimplexId a, SimplexId b) {
+    return keys[a] != keys[b] ? keys[a] < keys[b] : a < b;
+  };
+  morseframes::MorseSequence result(complex.size());
+  std::vector<bool> classified(complex.size(), false);
+  for (const auto& star : stars) {
+    auto ordered = star;
+    std::sort(ordered.begin(), ordered.end(), before);
+    std::size_t remaining = star.size();
+    while (remaining) {
+      SimplexId pair = morseframes::kInvalidSimplex, face = pair, critical = pair;
+      for (auto id : ordered) {
+        if (classified[id]) continue;
+        std::vector<SimplexId> boundary;
+        for (auto f : complex.boundary(id)) {
+          if (!classified[f] && keys[f][0] == keys[id][0]) boundary.push_back(f);
+        }
+        if (boundary.size() == 1) { pair = id; face = boundary[0]; break; }
+        if (boundary.empty() && critical == morseframes::kInvalidSimplex) critical = id;
+      }
+      if (pair != morseframes::kInvalidSimplex) {
+        result.add_regular_pair(face, pair, complex.level(pair));
+        classified[face] = classified[pair] = true;
+        remaining -= 2;
+      } else {
+        assert(critical != morseframes::kInvalidSimplex);
+        result.add_critical(critical, complex.level(critical));
+        classified[critical] = true;
+        --remaining;
+      }
+    }
+  }
+  return result;
+}
+
+void test_process_lower_stars_workspace_and_dimensions() {
+  const auto compare_step = [](const auto& a, const auto& b) {
+    assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau && a.level == b.level);
+  };
+  for (unsigned dimension = 0; dimension <= 7; ++dimension) {
+    for (unsigned seed : {0u, 2u, 7u}) {
+      // Sparse vertex identifiers and filtration ranks unrelated to their order.
+      const unsigned vertices = dimension + 4;
+      std::vector<double> values(vertices);
+      std::iota(values.begin(), values.end(), -3.0);
+      std::mt19937 rng(seed);
+      std::shuffle(values.begin(), values.end(), rng);
+      FilteredSimplicialComplex complex;
+      const auto add_cell = [&](const std::vector<unsigned>& cell) {
+        for (unsigned mask = 1; mask < (1u << cell.size()); ++mask) {
+          std::vector<morseframes::VertexId> face;
+          double value = -std::numeric_limits<double>::infinity();
+          for (unsigned i = 0; i < cell.size(); ++i) {
+            if (mask & (1u << i)) {
+              face.push_back(10 + 17 * cell[i]);
+              value = std::max(value, values[cell[i]]);
+            }
+          }
+          complex.add_simplex(face, value);
+        }
+      };
+      for (unsigned i = 0; i < vertices; ++i) add_cell({i});
+      std::vector<unsigned> cell(dimension + 1);
+      std::iota(cell.begin(), cell.end(), 0);
+      add_cell(cell);
+      for (auto& v : cell) ++v;
+      add_cell(cell);
+      if (dimension) add_cell({0, vertices - 1}); // Non-pure when dimension > 1.
+      complex.finalize();
+      const auto expected = scan_process_lower_stars(complex);
+      morseframes::validate_morse_sequence(complex, expected);
+      FSequenceBuilder builder(complex);
+      for (unsigned workers : {1u, 2u, 4u, 8u}) {
+        std::size_t callbacks = 0;
+        const auto callback = [&](const auto& prefix, const auto& step) {
+          compare_step(expected.steps()[callbacks], step);
+          ++callbacks;
+          assert(prefix.steps().size() == callbacks);
+        };
+        const auto actual = builder.build_process_lower_stars_parallel_with_step_callback(callback, workers);
+        assert(callbacks == expected.steps().size());
+        assert(actual.steps().size() == expected.steps().size());
+        morseframes::validate_morse_sequence(complex, actual);
+        const auto repeated = builder.build_process_lower_stars();
+        assert(repeated.steps().size() == expected.steps().size());
+        for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+          compare_step(expected.steps()[i], actual.steps()[i]);
+          compare_step(expected.steps()[i], repeated.steps()[i]);
+        }
+      }
+    }
+  }
+}
+
 void test_one_vertex() {
   FilteredSimplicialComplex complex;
   add_simplex(complex, {0}, 0.0);
@@ -2332,6 +2445,7 @@ int main() {
   test_filtered_complex_from_simplex_tree_adapter();
   test_f_sequence_builder_accepts_simplex_tree_view();
   test_process_lower_stars_triangle_boundary();
+  test_process_lower_stars_workspace_and_dimensions();
   test_one_vertex();
   test_reducer_skips_initially_zero_boundaries();
   test_two_vertices_joined_by_later_edge();

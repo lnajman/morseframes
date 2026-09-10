@@ -1,0 +1,104 @@
+"""Protocol, measurement-boundary and higher-dimensional generator checks."""
+import importlib.util
+import itertools
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+import benchmark_simplicial_gradients as benchmark
+
+
+class SimplicialGradientBenchmarkTests(unittest.TestCase):
+    def test_grid_shape_and_injective_values(self):
+        for dimension in range(1, 8):
+            text = benchmark.grid_input(dimension, 2, 0)
+            lines = text.splitlines()
+            _, d, vertices, cells = lines[0].split()
+            self.assertEqual(int(d), dimension)
+            self.assertEqual(int(vertices), 2 ** dimension)
+            self.assertEqual(int(cells), len(list(itertools.permutations(range(dimension)))))
+            values = list(map(int, lines[1].split()))
+            self.assertEqual(sorted(values), list(range(int(vertices))))
+            self.assertEqual(len(lines) - 2, int(cells))
+            self.assertEqual(len(set(lines[2:])), int(cells))
+            used = set()
+            for line in lines[2:]:
+                cell = list(map(int, line.split()))
+                self.assertEqual(len(set(cell)), dimension + 1)
+                used.update(cell)
+            self.assertEqual(used, set(range(int(vertices))))
+            self.assertEqual(text, benchmark.grid_input(dimension, 2, 0))
+        self.assertNotEqual(benchmark.grid_input(4, 2, 0), benchmark.grid_input(4, 2, 2))
+
+    def test_grid_budget(self):
+        for d, side in [(0, 2), (8, 2), (4, 1), (7, 10)]:
+            with self.assertRaises(ValueError):
+                benchmark.grid_input(d, side, 0)
+
+    def test_phase_validation(self):
+        run = {a: dict(builder_seconds=1., kernel_seconds=2., algorithm_seconds=3.)
+               for a in benchmark.ALGORITHMS}
+        benchmark.check_runs([run], 1)
+        run["f_max"]["algorithm_seconds"] = 4.
+        with self.assertRaises(AssertionError):
+            benchmark.check_runs([run], 1)
+        run["f_max"]["algorithm_seconds"] = float("nan")
+        with self.assertRaises(AssertionError):
+            benchmark.check_runs([run], 1)
+        with self.assertRaises(AssertionError):
+            benchmark.check_runs([], 1)
+
+    def test_summary_direction_and_raw_preservation(self):
+        runs = [{a: {p: float(i + 1) for p in benchmark.PHASES}
+                 for i, a in enumerate(benchmark.ALGORITHMS)}] * 3
+        samples = [{"baseline": runs, "candidate": runs}] * 4
+        original = json.dumps(samples)
+        summary = benchmark.summaries(samples)
+        self.assertEqual(summary["process_lower_stars"]["algorithm_seconds"]["median_paired_ratio"], 1.)
+        comparison = benchmark.comparisons(samples)
+        self.assertEqual(comparison["reduction_kernel/process_lower_stars"]["median_paired_ratio"], 1.5)
+        self.assertEqual(original, json.dumps(samples))
+
+    @unittest.skipUnless(os.environ.get("MORSEFRAMES_SIMPLICIAL_GRADIENT_BENCHMARK"),
+                         "native benchmark executable not supplied")
+    def test_native_worker_protocol(self):
+        binary = Path(os.environ["MORSEFRAMES_SIMPLICIAL_GRADIENT_BENCHMARK"]).resolve()
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            path = directory / "input.txt"
+            path.write_text(benchmark.grid_input(4, 2, 0))
+            worker = benchmark.Worker(binary, path, directory / "dump")
+            try:
+                identity = worker.metadata["identity"]
+                self.assertEqual(identity["dimension"], 4)
+                self.assertEqual(sum(identity["lower_star_sizes"]), identity["simplices"])
+                self.assertEqual(set(identity["algorithms"]), set(benchmark.ALGORITHMS))
+                for count in [1, 4]:
+                    runs = worker.run(count, 6)
+                    benchmark.check_runs(runs, 6)
+                    self.assertEqual(len({tuple(r) for r in runs}), 6)
+            finally:
+                worker.close()
+            self.assertEqual(worker.process.returncode, 0)
+            for algorithm in range(3):
+                memory = json.loads(subprocess.check_output(
+                    [str(binary), str(path), "--memory", str(algorithm), "2"], text=True))
+                self.assertGreaterEqual(memory["gradient_peak_bytes"], memory["complex_peak_bytes"])
+                self.assertGreater(memory["steps"], 0)
+            for bad in ["morseframes-ttk-v1 1 2 1\n0 0\n0 1\n",
+                        "morseframes-ttk-v1 1 2 1\n0 1\n0\n",
+                        "morseframes-ttk-v1 1 2 1\n0 1\n0 0\n"]:
+                path.write_text(bad)
+                process = subprocess.run([str(binary), str(path), str(directory / "bad")],
+                                         capture_output=True, text=True)
+                self.assertNotEqual(process.returncode, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

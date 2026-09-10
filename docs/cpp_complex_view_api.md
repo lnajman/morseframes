@@ -54,6 +54,36 @@ The lower-level MorseFrames headers remain available under `morseframes/...`:
 points, and `morseframes/simplex_tree_morse.hpp` contains the direct
 Simplex-tree adapter used by the public wrapper.
 
+## Owning-complex construction diagnostics
+
+`FilteredSimplicialComplex::finalize()` preserves lexicographic simplex IDs,
+filtration ordering, boundary order and coboundary order. Its ordered lookup is
+built with end hints from the already-sorted pending simplices. Finalization also
+reserves simplex/boundary storage, reuses a temporary face buffer and reads each
+pending filtration value directly. These shared changes apply to every strategy
+using this owning complex; direct external complex views are unaffected.
+
+For a separate diagnostic run:
+
+```cpp
+morseframes::ComplexConstructionMetrics metrics;
+complex.finalize_with_metrics(metrics);
+```
+
+The fields (seconds) are `reset_seconds`, `index_and_simplices_seconds`,
+`levels_seconds`, `boundaries_seconds`, `coboundaries_seconds` and
+`orders_and_buckets_seconds`. Boundary construction includes face-closure and
+filtration-monotonicity checks. Metrics are reset for each call. Input insertion
+is not included: measure it separately. Ordinary `finalize()` compiles the same
+implementation without internal clocks. Do not mix diagnostic samples with
+uninstrumented performance measurements.
+
+`tools/benchmark_complex_construction.py` compares identical resident input
+arrays against two header snapshots, checks exact reference complexes and
+gradients, and measures construction, gradient execution and fresh-process peak
+memory separately. Its per-insertion diagnostic clocks perturb the adapter;
+the enumeration residual explicitly includes clock overhead.
+
 ## Lightweight ReductionKernel initialization
 
 For RK-only sequence construction, include

@@ -86,14 +86,16 @@ class FilteredSimplicialComplex {
     clear_same_level_closure_cache();
     record(&ComplexConstructionMetrics::reset_seconds);
 
+    // pending_ is already lexicographically sorted: preserve IDs and insert at
+    // the known end of the ordered lookup rather than searching it again.
+    simplices_.reserve(pending_.size());
     for (const auto& [vertices, filtration] : pending_) {
-      (void)filtration;
       const SimplexId id = checked_id(simplices_.size());
-      simplex_to_id_.emplace(vertices, id);
+      simplex_to_id_.emplace_hint(simplex_to_id_.end(), vertices, id);
       simplices_.push_back(Simplex{});
       simplices_.back().vertices = vertices;
       simplices_.back().dimension = checked_dimension(vertices.size() - 1);
-      simplices_.back().filtration = pending_.at(vertices);
+      simplices_.back().filtration = filtration;
     }
 
     record(&ComplexConstructionMetrics::index_and_simplices_seconds);
@@ -330,6 +332,7 @@ class FilteredSimplicialComplex {
   }
 
   void build_boundaries_and_check_filtration() {
+    std::vector<VertexId> face_vertices;
     for (SimplexId simplex_id = 0; simplex_id < simplices_.size(); ++simplex_id) {
       auto& simplex = simplices_[simplex_id];
       simplex.boundary.clear();
@@ -338,8 +341,9 @@ class FilteredSimplicialComplex {
         continue;
       }
 
+      simplex.boundary.reserve(simplex.vertices.size());
       for (std::size_t removed = 0; removed < simplex.vertices.size(); ++removed) {
-        std::vector<VertexId> face_vertices;
+        face_vertices.clear();
         face_vertices.reserve(simplex.vertices.size() - 1);
         for (std::size_t i = 0; i < simplex.vertices.size(); ++i) {
           if (i != removed) {

@@ -98,6 +98,8 @@ def main():
         cpu_count=os.cpu_count(), source_revision=command_output("git", "rev-parse", "HEAD"),
         source_status=command_output("git", "status", "--porcelain"),
         driver_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        runner_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        worktree_header_patch=command_output("git", "diff", "HEAD", "--", "include"),
         arguments={k: ([str(x) for x in v] if k == "inputs" else str(v) if isinstance(v, Path) else v)
                    for k, v in vars(args).items()},
         timing_scope="Resident arrays to finalized complex; gradient timers separately include fresh builders. "
@@ -144,6 +146,12 @@ def main():
                 ):
                     raise AssertionError("Exact complex/gradient comparison failed")
                 case.update(workers["baseline"].metadata)
+                for entries in case["memory"].values():
+                    for entry in entries:
+                        if entry["simplices"] != case["simplices"] or not (
+                            0 <= entry["input_peak_bytes"] <= entry["construction_peak_bytes"]
+                        ):
+                            raise AssertionError("Invalid isolated memory sample")
                 case["exact_complex_and_reference_gradients_match"] = True
                 for count in (args.workers if index % 2 == 0 else list(reversed(args.workers))):
                     for worker in workers.values():
@@ -169,6 +177,13 @@ def main():
                         diagnostic = worker.read()
                         if diagnostic["complex_fingerprint"] != case["complex_fingerprint"]:
                             raise AssertionError("Diagnostic complex differs")
+                        if any(not math.isfinite(v) or v < 0 for k, v in diagnostic.items()
+                               if k.endswith("seconds")):
+                            raise AssertionError("Invalid diagnostic duration")
+                        if diagnostic["simplices"] != case["simplices"] or diagnostic[
+                            "insertion_attempts"
+                        ] != case["insertion_attempts"]:
+                            raise AssertionError("Diagnostic counters differ")
                         case["diagnostics"][name].append(diagnostic)
             result["cases"].append(case)
             args.output.write_text(json.dumps(result, indent=2) + "\n")

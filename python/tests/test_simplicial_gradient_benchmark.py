@@ -43,6 +43,48 @@ class SimplicialGradientBenchmarkTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             profile.validate(values, 1., 1., .2, 2.)
 
+    def test_rk_search_counters(self):
+        row = dict(builder_seconds=.1, kernel_seconds=1., algorithm_seconds=1.1,
+                   setup_seconds=.1, level_wall_seconds=.6, replay_seconds=.2,
+                   local_membership_tests=10, local_candidate_visits=100,
+                   local_membership_comparisons=40, local_large_membership_tests=5,
+                   local_large_membership_comparisons=25, local_sparse_scan_passes=4,
+                   local_sparse_candidate_visits=80, local_removed_candidate_visits=20,
+                   local_protected_candidate_visits=30)
+        self.assertAlmostEqual(rk_profile.validate(row), .1)
+        for bad in [dict(row, local_large_membership_tests=11),
+                    dict(row, local_membership_comparisons=9),
+                    dict(row, local_large_membership_comparisons=41),
+                    dict(row, local_large_membership_comparisons=4),
+                    dict(row, local_sparse_candidate_visits=101),
+                    dict(row, local_removed_candidate_visits=51),
+                    {k:v for k,v in row.items() if k != 'local_sparse_scan_passes'}]:
+            with self.assertRaises(ValueError):
+                rk_profile.validate(bad)
+
+    @unittest.skipUnless(os.environ.get("MORSEFRAMES_SIMPLICIAL_GRADIENT_BENCHMARK"),
+                         "native benchmark executable not supplied")
+    def test_native_rk_search_profile(self):
+        binary = Path(os.environ["MORSEFRAMES_SIMPLICIAL_GRADIENT_BENCHMARK"]).resolve()
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            path = directory / "input.txt"
+            path.write_text(benchmark.grid_input(6, 2, 2))
+            worker = benchmark.Worker(binary, path, directory / "dump")
+            try:
+                identities = []
+                for count in [1, 4]:
+                    worker.process.stdin.write(f"rk_detailed {count}\n")
+                    worker.process.stdin.flush()
+                    row = worker.read()
+                    rk_profile.validate(row)
+                    self.assertGreater(row['local_large_membership_tests'], 0)
+                    self.assertGreater(row['local_removed_candidate_visits'], 0)
+                    identities.append(tuple(row[k] for k in rk_profile.SEARCH_FIELDS))
+                self.assertEqual(*identities)
+            finally:
+                worker.close()
+
     def test_grid_shape_and_injective_values(self):
         for dimension in range(1, 8):
             text = benchmark.grid_input(dimension, 2, 0)

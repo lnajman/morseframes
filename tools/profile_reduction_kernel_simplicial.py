@@ -11,6 +11,13 @@ import tempfile
 
 from benchmark_reduction_kernel_ab import Worker, ROOT, command_output, header_digest
 
+SEARCH_FIELDS = (
+    'local_membership_comparisons', 'local_large_membership_tests',
+    'local_large_membership_comparisons', 'local_sparse_scan_passes',
+    'local_sparse_candidate_visits', 'local_removed_candidate_visits',
+    'local_protected_candidate_visits',
+)
+
 
 def validate(row):
     if any(not math.isfinite(v) or v < 0 for v in row.values()):
@@ -20,6 +27,17 @@ def validate(row):
     remainder = row['kernel_seconds'] - sum(row[k] for k in ['setup_seconds','level_wall_seconds','replay_seconds'])
     if remainder < -1e-10:
         raise ValueError("Coarse RK phases exceed kernel time")
+    if any(k in row for k in SEARCH_FIELDS):
+        if not all(k in row for k in SEARCH_FIELDS):
+            raise ValueError('Incomplete RK local-search counters')
+        if (row['local_large_membership_tests'] > row['local_membership_tests']
+                or row['local_large_membership_comparisons'] > row['local_membership_comparisons']
+                or row['local_membership_comparisons'] < row['local_membership_tests']
+                or row['local_large_membership_comparisons'] < row['local_large_membership_tests']
+                or row['local_sparse_candidate_visits'] > row['local_candidate_visits']
+                or row['local_removed_candidate_visits'] + row['local_protected_candidate_visits']
+                   > row['local_sparse_candidate_visits']):
+            raise ValueError('Inconsistent RK local-search counters')
     # Detailed kernel fields sum over levels/tasks, not global elapsed time.
     # Core/local are children of facet execution and must not be added to it.
     return max(0., remainder)

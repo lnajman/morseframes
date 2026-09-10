@@ -77,6 +77,13 @@ struct ReductionKernelMetrics {
   std::size_t local_coboundary_visits = 0;
   std::size_t local_coboundary_mask_tests = 0;
   std::size_t local_membership_tests = 0;
+  std::size_t local_membership_comparisons = 0;
+  std::size_t local_large_membership_tests = 0;
+  std::size_t local_large_membership_comparisons = 0;
+  std::size_t local_sparse_scan_passes = 0;
+  std::size_t local_sparse_candidate_visits = 0;
+  std::size_t local_removed_candidate_visits = 0;
+  std::size_t local_protected_candidate_visits = 0;
   std::size_t inline_cell_overflows = 0;
   std::size_t inline_event_overflows = 0;
 };
@@ -156,8 +163,12 @@ class ReductionKernelWorkspace {
                              : inline_entries_[index];
     }
 
-    std::size_t index_of(const T& value) const {
+    template <bool CountComparisons = false>
+    std::size_t index_of(const T& value, std::size_t* comparisons = nullptr) const {
       for (std::size_t index = 0; index < size_; ++index) {
+        if constexpr (CountComparisons) {
+          ++*comparisons;
+        }
         if ((*this)[index] == value) {
           return index;
         }
@@ -190,6 +201,13 @@ class ReductionKernelWorkspace {
     std::size_t local_coboundary_visits = 0;
     std::size_t local_coboundary_mask_tests = 0;
     std::size_t local_membership_tests = 0;
+    std::size_t local_membership_comparisons = 0;
+    std::size_t local_large_membership_tests = 0;
+    std::size_t local_large_membership_comparisons = 0;
+    std::size_t local_sparse_scan_passes = 0;
+    std::size_t local_sparse_candidate_visits = 0;
+    std::size_t local_removed_candidate_visits = 0;
+    std::size_t local_protected_candidate_visits = 0;
     std::size_t inline_cell_overflows = 0;
     std::size_t inline_event_overflows = 0;
   };
@@ -582,6 +600,13 @@ class ReductionKernelWorkspace {
                 facet_result.local_coboundary_mask_tests;
             metrics.local_membership_tests +=
                 facet_result.local_membership_tests;
+            metrics.local_membership_comparisons += facet_result.local_membership_comparisons;
+            metrics.local_large_membership_tests += facet_result.local_large_membership_tests;
+            metrics.local_large_membership_comparisons += facet_result.local_large_membership_comparisons;
+            metrics.local_sparse_scan_passes += facet_result.local_sparse_scan_passes;
+            metrics.local_sparse_candidate_visits += facet_result.local_sparse_candidate_visits;
+            metrics.local_removed_candidate_visits += facet_result.local_removed_candidate_visits;
+            metrics.local_protected_candidate_visits += facet_result.local_protected_candidate_visits;
             metrics.inline_cell_overflows +=
                 facet_result.inline_cell_overflows;
             metrics.inline_event_overflows +=
@@ -692,6 +717,13 @@ class ReductionKernelWorkspace {
     destination.local_coboundary_visits += source.local_coboundary_visits;
     destination.local_coboundary_mask_tests += source.local_coboundary_mask_tests;
     destination.local_membership_tests += source.local_membership_tests;
+    destination.local_membership_comparisons += source.local_membership_comparisons;
+    destination.local_large_membership_tests += source.local_large_membership_tests;
+    destination.local_large_membership_comparisons += source.local_large_membership_comparisons;
+    destination.local_sparse_scan_passes += source.local_sparse_scan_passes;
+    destination.local_sparse_candidate_visits += source.local_sparse_candidate_visits;
+    destination.local_removed_candidate_visits += source.local_removed_candidate_visits;
+    destination.local_protected_candidate_visits += source.local_protected_candidate_visits;
     destination.inline_cell_overflows += source.inline_cell_overflows;
     destination.inline_event_overflows += source.inline_event_overflows;
   }
@@ -1251,6 +1283,9 @@ class ReductionKernelWorkspace {
       }
     };
     while (true) {
+      if constexpr (CollectMetrics) {
+        ++result.local_sparse_scan_passes;
+      }
       SimplexId reduction_sigma = kInvalidSimplex;
       SimplexId reduction_tau = kInvalidSimplex;
       std::size_t reduction_sigma_index = cell.size();
@@ -1262,10 +1297,18 @@ class ReductionKernelWorkspace {
            ++sigma_index) {
         if constexpr (CollectMetrics) {
           ++result.local_candidate_visits;
+          ++result.local_sparse_candidate_visits;
         }
         const SimplexId sigma = cell[sigma_index];
         if (is_locally_removed(sigma_index) ||
             facet_incidence_[sigma] > 1) {
+          if constexpr (CollectMetrics) {
+            if (is_locally_removed(sigma_index)) {
+              ++result.local_removed_candidate_visits;
+            } else {
+              ++result.local_protected_candidate_visits;
+            }
+          }
           continue;
         }
         SimplexId unique_coface = kInvalidSimplex;
@@ -1282,7 +1325,18 @@ class ReductionKernelWorkspace {
               if constexpr (CollectMetrics) {
                 ++result.local_membership_tests;
               }
-              const std::size_t coface_index = cell.index_of(coface);
+              std::size_t coface_index;
+              if constexpr (CollectMetrics) {
+                std::size_t comparisons = 0;
+                coface_index = cell.template index_of<true>(coface, &comparisons);
+                result.local_membership_comparisons += comparisons;
+                if (cell.size() > kInlineCellCapacity) {
+                  ++result.local_large_membership_tests;
+                  result.local_large_membership_comparisons += comparisons;
+                }
+              } else {
+                coface_index = cell.index_of(coface);
+              }
               if (coface_index == cell.size()) {
                 return true;
               }

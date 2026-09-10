@@ -238,6 +238,13 @@ int main(int argc, char** argv) {
         RK_COUNT(rounds); RK_COUNT(facet_kernels); RK_COUNT(executor_workers);
         RK_COUNT(facet_cell_visits); RK_COUNT(local_candidate_visits);
         RK_COUNT(local_coboundary_visits); RK_COUNT(local_membership_tests);
+        RK_COUNT(local_membership_comparisons);
+        RK_COUNT(local_large_membership_tests);
+        RK_COUNT(local_large_membership_comparisons);
+        RK_COUNT(local_sparse_scan_passes);
+        RK_COUNT(local_sparse_candidate_visits);
+        RK_COUNT(local_removed_candidate_visits);
+        RK_COUNT(local_protected_candidate_visits);
         RK_COUNT(inline_cell_overflows); RK_COUNT(inline_event_overflows);
 #undef RK_TIME
 #undef RK_COUNT

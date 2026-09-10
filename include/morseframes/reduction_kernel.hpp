@@ -55,6 +55,9 @@ struct ReductionKernelMetrics {
   // sparse preparation work, with dispatch/clock overhead left in closure.
   std::uint64_t closure_initial_nanoseconds = 0;
   std::uint64_t closure_packed_nanoseconds = 0;
+  std::uint64_t closure_boundary_index_nanoseconds = 0;
+  std::size_t closure_boundary_index_visits = 0;
+  std::size_t closure_boundary_index_entries = 0;
   std::uint64_t closure_traversal_nanoseconds = 0;
   std::uint64_t closure_sort_nanoseconds = 0;
   std::uint64_t closure_materialize_nanoseconds = 0;
@@ -704,6 +707,9 @@ class ReductionKernelWorkspace {
     destination.closure_nanoseconds += source.closure_nanoseconds;
     destination.closure_initial_nanoseconds += source.closure_initial_nanoseconds;
     destination.closure_packed_nanoseconds += source.closure_packed_nanoseconds;
+    destination.closure_boundary_index_nanoseconds += source.closure_boundary_index_nanoseconds;
+    destination.closure_boundary_index_visits += source.closure_boundary_index_visits;
+    destination.closure_boundary_index_entries += source.closure_boundary_index_entries;
     destination.closure_traversal_nanoseconds += source.closure_traversal_nanoseconds;
     destination.closure_sort_nanoseconds += source.closure_sort_nanoseconds;
     destination.closure_materialize_nanoseconds += source.closure_materialize_nanoseconds;

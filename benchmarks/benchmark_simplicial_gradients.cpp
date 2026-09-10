@@ -90,6 +90,21 @@ void closure_profile(const Metrics& m) {
 #undef RK_CLOSURE_COUNT
   }
 }
+template <typename Metrics, typename = void>
+struct HasBoundaryIndexProfile : std::false_type {};
+template <typename Metrics>
+struct HasBoundaryIndexProfile<Metrics, std::void_t<
+    decltype(std::declval<Metrics>().reduction_kernel_closure_boundary_index_nanoseconds),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_boundary_index_visits),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_boundary_index_entries)>> : std::true_type {};
+template <typename Metrics>
+void boundary_index_profile(const Metrics& m) {
+  if constexpr (HasBoundaryIndexProfile<Metrics>::value) {
+    std::cout << ",\"closure_boundary_index_seconds\":" << 1e-9 * m.reduction_kernel_closure_boundary_index_nanoseconds
+              << ",\"closure_boundary_index_visits\":" << m.reduction_kernel_closure_boundary_index_visits
+              << ",\"closure_boundary_index_entries\":" << m.reduction_kernel_closure_boundary_index_entries;
+  }
+}
 std::uint64_t peak_bytes() {
   rusage usage{};
   if (getrusage(RUSAGE_SELF, &usage)) throw std::runtime_error("getrusage failed");
@@ -304,6 +319,7 @@ int main(int argc, char** argv) {
         RK_COUNT(local_coboundary_visits); RK_COUNT(local_membership_tests);
         search_profile(m);
         closure_profile(m);
+        boundary_index_profile(m);
         RK_COUNT(inline_cell_overflows); RK_COUNT(inline_event_overflows);
 #undef RK_TIME
 #undef RK_COUNT

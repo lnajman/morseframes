@@ -65,6 +65,9 @@ struct MorseSequenceBuildMetrics {
   std::uint64_t reduction_kernel_closure_nanoseconds = 0;
   std::uint64_t reduction_kernel_closure_initial_nanoseconds = 0;
   std::uint64_t reduction_kernel_closure_packed_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_boundary_index_nanoseconds = 0;
+  std::size_t reduction_kernel_closure_boundary_index_visits = 0;
+  std::size_t reduction_kernel_closure_boundary_index_entries = 0;
   std::uint64_t reduction_kernel_closure_traversal_nanoseconds = 0;
   std::uint64_t reduction_kernel_closure_sort_nanoseconds = 0;
   std::uint64_t reduction_kernel_closure_materialize_nanoseconds = 0;
@@ -1968,6 +1971,9 @@ class FSequenceBuilder {
           kernel_metrics.closure_nanoseconds;
       sequence_metrics_->reduction_kernel_closure_initial_nanoseconds = kernel_metrics.closure_initial_nanoseconds;
       sequence_metrics_->reduction_kernel_closure_packed_nanoseconds = kernel_metrics.closure_packed_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_boundary_index_nanoseconds = kernel_metrics.closure_boundary_index_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_boundary_index_visits = kernel_metrics.closure_boundary_index_visits;
+      sequence_metrics_->reduction_kernel_closure_boundary_index_entries = kernel_metrics.closure_boundary_index_entries;
       sequence_metrics_->reduction_kernel_closure_traversal_nanoseconds = kernel_metrics.closure_traversal_nanoseconds;
       sequence_metrics_->reduction_kernel_closure_sort_nanoseconds = kernel_metrics.closure_sort_nanoseconds;
       sequence_metrics_->reduction_kernel_closure_materialize_nanoseconds = kernel_metrics.closure_materialize_nanoseconds;

@@ -27,6 +27,14 @@ class SimplicialGradientBenchmarkTests(unittest.TestCase):
                    closure_sparse_entries=10, closure_boundary_visits=20,
                    closure_duplicate_faces=5, closure_index_growths=1, closure_entry_growths=1)
         self.assertAlmostEqual(rk_profile.validate(row), .1)
+        indexed = dict(row, closure_boundary_index_seconds=.01,
+                       closure_boundary_index_visits=10, closure_boundary_index_entries=5)
+        self.assertAlmostEqual(rk_profile.validate(indexed), .1)
+        for bad in [dict(indexed, closure_boundary_index_seconds=.03),
+                    dict(indexed, closure_boundary_index_entries=11),
+                    {k:v for k,v in indexed.items() if k != 'closure_boundary_index_visits'}]:
+            with self.assertRaises(ValueError):
+                rk_profile.validate(bad)
         for bad in [dict(row, closure_packed_seconds=.11), dict(row, closure_sort_seconds=.2),
                     dict(row, closure_sparse_cells=11), dict(row, closure_duplicate_faces=21),
                     dict(row, closure_index_growths=11), dict(row, closure_entry_growths=11),

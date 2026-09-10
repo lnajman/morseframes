@@ -104,6 +104,91 @@ class ResidentGradientBenchmarkTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "completed"):
             render.render_tables(data)
 
+    def split_raw(self):
+        raw = self.raw()
+        raw.update(schema="resident-gradient-v2", input_loading_seconds=0.1)
+        for algorithm in bench.ALGORITHMS:
+            construction = [10.0, 100.0, 1.0]
+            algorithm_times = ([1.0, 10.0, 100.0] if algorithm == "f_max" else
+                               [2.0, 2.0, 100.0] if algorithm == "reduction_kernel" else
+                               [2.0, 2.0, 51.0])
+            rows = []
+            for c, a in zip(construction, algorithm_times):
+                row = {k: c / len(bench.CONSTRUCTION_PHASES[algorithm])
+                       for k in bench.CONSTRUCTION_PHASES[algorithm]}
+                row.update({k: a / len(bench.ALGORITHM_PHASES[algorithm])
+                            for k in bench.ALGORITHM_PHASES[algorithm]})
+                rows.append(row)
+            raw["algorithms"][algorithm]["performance_phases_seconds"] = rows
+            raw["algorithms"][algorithm]["performance_seconds"] = [sum(r.values()) for r in rows]
+        return raw
+
+    def test_split_comparison_uses_raw_samples_not_diagnostic_or_median_subtraction(self):
+        raw = self.split_raw()
+        original = copy.deepcopy(raw)
+        s = bench.summarize(raw, 3, 1)
+        self.assertEqual(s["f_max"]["algorithm_seconds"]["median"], 10)
+        self.assertEqual(s["f_max"]["total_seconds"]["median"], 101)
+        self.assertEqual(s["f_max"]["construction_seconds"]["median"], 10)
+        self.assertNotEqual(101 - 10, s["f_max"]["algorithm_seconds"]["median"])
+        self.assertEqual(s["algorithm_paired_ratios"]["reduction_kernel/ttk"]["median"], 1)
+        self.assertEqual(bench.ALGORITHM_PHASES["ttk"], {"vertex_order", "gradient"})
+        self.assertEqual(bench.ALGORITHM_PHASES["reduction_kernel"], {"builder_setup", "gradient"})
+        for a in bench.ALGORITHMS:
+            components = bench.performance_components(raw, a)
+            for i, total in enumerate(raw["algorithms"][a]["performance_seconds"]):
+                self.assertAlmostEqual(components["construction_seconds"][i] +
+                                       components["algorithm_seconds"][i], total)
+        self.assertEqual(raw, original)
+
+    def test_split_rejects_missing_invalid_or_double_counted_performance_phases(self):
+        for mutate in (
+            lambda r: r.pop("input_loading_seconds"),
+            lambda r: r.update(input_loading_seconds=math.nan),
+            lambda r: r["algorithms"]["ttk"].pop("performance_phases_seconds"),
+            lambda r: r["algorithms"]["f_max"]["performance_phases_seconds"].pop(),
+            lambda r: r["algorithms"]["ttk"]["performance_phases_seconds"][0].update(vertex_order=99.0),
+            lambda r: r["algorithms"]["ttk"]["performance_phases_seconds"][0].update(gradient=math.inf),
+        ):
+            raw = self.split_raw()
+            mutate(raw)
+            with self.assertRaises(ValueError):
+                bench.summarize(raw, 3, 1)
+        with self.assertRaisesRegex(ValueError, "v2"):
+            bench.performance_components(self.raw(), "ttk")
+
+    def test_split_renderer_defaults_to_algorithm_and_separates_loading_construction(self):
+        data = dict(schema="resident-gradient-study-v2", completed_utc="test",
+                    construction_phases={a: sorted(bench.CONSTRUCTION_PHASES[a]) for a in bench.ALGORITHMS},
+                    algorithm_phases={a: sorted(bench.ALGORITHM_PHASES[a]) for a in bench.ALGORITHMS},
+                    arguments=dict(repeats=3, diagnostics=1, workers=[1],
+                                   terrain_sizes=[3], volume_sizes=[], seeds=[0]),
+                    cases=[dict(family="terrain", size=3, seed=0,
+                                measurements=[dict(workers=1, raw=self.split_raw(), summary={})])])
+        algorithms, phases = render.render_tables(data)
+        self.assertIn("10000.000 & 2000.000 & 2000.000 & 1.000", algorithms)
+        self.assertIn("Total (boundary clocks)", phases)
+        self.assertNotIn("Total (diagnostic)", phases)
+        total, _ = render.render_tables(data, "total")
+        self.assertIn("101000.000", total)
+        construction = render.render_construction(data)
+        self.assertIn("Shared loading", construction)
+        self.assertIn("100.000", construction)
+        data["cases"][0]["measurements"][0]["raw"]["schema"] = "resident-gradient-v1"
+        with self.assertRaisesRegex(ValueError, "Mixed"):
+            render.render_tables(data)
+
+    def test_v1_evidence_cannot_supply_new_comparison(self):
+        data = dict(schema="resident-gradient-study-v1", completed_utc="test",
+                    arguments=dict(repeats=3, diagnostics=1, workers=[1],
+                                   terrain_sizes=[3], volume_sizes=[], seeds=[0]),
+                    cases=[dict(family="terrain", size=3, seed=0,
+                                measurements=[dict(workers=1, raw=self.raw(), summary={})])])
+        with self.assertRaisesRegex(ValueError, "v2"):
+            render.render_tables(data, "algorithm")
+        with self.assertRaisesRegex(ValueError, "v2"):
+            render.render_construction(data)
+
 
 @unittest.skipUnless(os.environ.get("MORSEFRAMES_RESIDENT_BENCHMARK"),
                      "requires the separately built TTK resident benchmark")
@@ -123,6 +208,12 @@ class ResidentGradientNativeTest(unittest.TestCase):
                     raw = bench.run_native(executable, path, workers, 1, 1, 0)
                     summary = bench.summarize(raw, 1, 1)
                     self.assertTrue(raw["exact_reference_checks"])
+                    self.assertEqual(raw["schema"], "resident-gradient-v2")
+                    self.assertGreater(raw["input_loading_seconds"], 0)
+                    for algorithm in bench.ALGORITHMS:
+                        c = bench.performance_components(raw, algorithm)
+                        self.assertAlmostEqual(c["construction_seconds"][0] + c["algorithm_seconds"][0],
+                                               raw["algorithms"][algorithm]["performance_seconds"][0])
                     self.assertGreater(summary["ttk"]["phases_seconds"]["vertex_order"]["median"], 0)
 
     def test_native_rejects_unsupported_or_invalid_inputs(self):

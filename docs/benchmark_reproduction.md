@@ -5,8 +5,9 @@ repository. It is meant for software reproducibility: manuscript text and
 discussion notes live outside the public repository, in the private manuscript
 workspace until a public preprint or published version exists.
 
-The resident-array comparison records total gradient computation including all
-native preparation, starting from a common in-memory mesh and vertex function.
+The current resident-array comparison reports loading and native construction
+separately and compares the remaining algorithm work. Complete resident-to-gradient
+totals are retained, starting from a common in-memory mesh and vertex function.
 The facet-task batching section records the latest ReductionKernel update.
 The closure-based incidence, controlled packed-coface A/B, direct TTK comparison,
 and earlier phase-profile sections retain historical snapshots; those timings
@@ -173,9 +174,134 @@ The exact paper-ready values are generated in
 scheduler study, not yet the comparison with Robins' implementation; that
 external benchmark remains a separate stage.
 
-## Resident-Array Gradient Comparison
+## Gradient Comparison with Construction Reported Separately
 
-This is the primary comparison for **one gradient from a common in-memory
+This is the current primary comparison. Native construction is reported separately,
+not hidden or optimized in this update. The common input is still resident vertex
+values and maximal-cell connectivity, and every repetition uses fresh native
+objects. Only the benchmark and reporting change; the gradient algorithms do not.
+
+The partition is explicit:
+
+| Algorithm | Construction, reported separately | Algorithm time, used for comparison |
+| --- | --- | --- |
+| F-Max | MorseFrames simplex enumeration, representation/filtration and finalization | Fresh builder setup and F-Max gradient construction |
+| RK | MorseFrames simplex enumeration, representation/filtration and finalization | Fresh builder setup, workspace/pool creation, level processing and replay |
+| TTK | Native object and cell representation setup, connectivity preconditioning | Vertex ordering and `buildGradient`, including lower-star construction and matching |
+
+MorseFrames assigns the max-vertex extension while constructing its filtered
+complex; this remains in its combined construction phase. TTK's function-dependent
+vertex ordering is **not** removed from algorithm time. Its lower stars are built
+inside `buildGradient` and remain counted there. Structural connectivity preparation
+is included in TTK construction, as it is in MorseFrames finalization. This is a
+comparison conditional on the listed constructed native representations, not a
+claim that the algorithms have identical input structures or output formats.
+
+Each non-profiled performance repetition now records outer phase boundaries.
+For each individual sample, **resident-to-gradient total = construction + algorithm**.
+TTK's ordering occurs before connectivity preparation in its existing call order,
+so its algorithm time sums the ordering and gradient intervals from the same run.
+All phases are retained; none are estimated by subtracting separately aggregated
+medians. The benchmark uses only four (MorseFrames) or six (TTK) outer clock reads,
+without internal gradient profiling. Fine diagnostic samples remain separate and
+never enter the comparison. Per-phase performance values and a narrower gradient-only
+value remain available alongside the construction-separated primary metric.
+
+File loading/parsing/validation is recorded once per native process and shown
+separately as shared input loading, not charged independently to each algorithm.
+It includes the adapter's coordinate-array initialization and is not a cold-cache
+disk benchmark. Input generation remains outside all recorded intervals. As before,
+reference checks, post-readiness destruction and persistence are excluded.
+
+The new native/study schemas are `resident-gradient-v2` and
+`resident-gradient-study-v2`. Readers retain historical v1 total/diagnostic support,
+but reject v1 evidence for construction-separated comparisons. The default v2
+table compares algorithm time; `--comparison total` explicitly selects full totals.
+All components, ratios and speedups come from raw non-profiled performance samples.
+
+```sh
+LC_ALL=C tools/build_ttk_gradient_benchmark.sh \
+  ../work/ttk-benchmark morseframes_resident_gradient_benchmark
+
+OMP_WAIT_POLICY=PASSIVE LC_ALL=C python3 tools/benchmark_resident_gradients.py \
+  --benchmark ../work/ttk-benchmark/build-f4ffd1a1049d0ccf6e8f3eb4f7c096a6cc251ba0/morseframes_resident_gradient_benchmark \
+  --terrain-sizes 16 64 --volume-sizes 8 16 --seeds 0 2 --workers 1 2 4 8 \
+  --repeats 12 --diagnostics 6 --warmups 2 \
+  --input-dir ../rk-ab-inputs --output ../rk-construction-split-main.json
+
+python3 tools/render_resident_gradients.py \
+  --input ../rk-construction-split-main.json \
+  --table-output docs/resident_gradient_algorithm_table.tex \
+  --construction-output docs/resident_gradient_construction_table.tex \
+  --phases-output docs/resident_gradient_unprofiled_phases_table.tex
+```
+
+The total and construction medians in separate tables need not add to the algorithm
+median: the additive identity is checked before aggregation, at the individual
+repetition level. F-Max is sequential at every displayed worker setting; it is
+remeasured alongside RK and TTK. Raw input/binary/source hashes, revision, wait policy,
+orders, exact reference checks and critical counts remain recorded as described below.
+
+### Construction-separated results
+
+The main run uses the same Apple M1 Max, native ARM release build, pinned TTK,
+eight inputs, 1/2/4/8 workers, 12 performance repetitions, six diagnostic
+repetitions and two warmups per mode under `OMP_WAIT_POLICY=PASSIVE`. Every
+one of the 32 configurations passes exact within-algorithm reference checks;
+critical counts agree across algorithms. The following **algorithm times**
+exclude the separately reported construction costs. Values are milliseconds,
+medians over the two seed-specific medians:
+
+| Input | Workers | F-Max | RK | TTK |
+| --- | ---: | ---: | ---: | ---: |
+| 2D terrain, `n=64` | 1 | 1.611 | 1.242 | 1.183 |
+| 2D terrain, `n=64` | 8 | 1.579 | 0.961 | 0.878 |
+| 3D volume, `n=16` | 1 | 12.580 | 6.016 | 13.379 |
+| 3D volume, `n=16` | 8 | 12.609 | 2.572 | 3.983 |
+
+RK has a lower paired-median algorithm time than TTK in all 16 volume
+configurations and five of 16 terrain configurations. It is also faster than
+F-Max in all 16 volume configurations and ten of 16 terrain configurations;
+small parallel terrains can lose to sequential F-Max. This is not a universal
+RK ranking or an optimization gain: the algorithm code is unchanged, and the
+reported interval now excludes native construction.
+
+Selected **native construction times**, from the same performance repetitions,
+are reported separately:
+
+| Input | Workers | F-Max construction | RK construction | TTK construction | Shared loading |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2D terrain, `n=64` | 8 | 28.930 | 28.366 | 0.624 | 3.929 |
+| 3D volume, `n=16` | 8 | 151.317 | 150.301 | 5.356 | 11.672 |
+
+Construction values are medians over seed-specific repetition medians.
+Shared loading values are medians over one read/parse per seed/worker process;
+they do not describe repeated or cold-cache loading. F-Max and RK use the same
+construction implementation, measured independently in their balanced run order.
+Differences between those construction columns are timing variation, not different
+construction algorithms. Full performance totals and all critical-count vectors
+remain in `../rk-construction-split-main.json`.
+
+A fresh confirmation in `../rk-construction-split-confirmation.json` repeats
+terrain `64` and volume `16`, both seeds, and workers `1 8`, using 18 performance
+repetitions, six diagnostic repetitions and two warmups. All eight configurations
+again pass exact reference and critical-count checks. RK is faster than TTK in all
+four volume configurations; TTK is faster in all four terrain configurations.
+At eight workers, the confirmed algorithm medians are F-Max/RK/TTK
+`1.778/1.127/0.871` ms for terrain and `13.333/2.981/3.931` ms for volume.
+The paired RK/TTK ratio on the larger eight-worker volume is `0.663` in the main
+run and `0.734` in confirmation. These preliminary results support the observed
+direction, not a universal speed ratio; detailed internal profiles and historical
+end-to-end totals are not mixed into this comparison.
+
+## Resident-Array Totals (Historical v1 Comparison)
+
+The measurements and commands in this historical section correspond to the
+driver at `b637fb4`. The current driver emits v2 evidence; use the new section
+above and fresh output paths for new measurements. Existing v1 JSON and tables
+remain unchanged and readable.
+
+This earlier comparison prioritized **one complete gradient from a common in-memory
 complex and function**. The starting representation consists of vertex values,
 vertex coordinates, and maximal-cell vertex arrays. No vertex ranks,
 lower-star lists, full simplex enumeration, incidence arrays, library-specific

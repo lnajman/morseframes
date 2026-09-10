@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Compare fresh RK, F-Max and TTK gradients from common resident mesh arrays.
 
-Native preparation is inside timing. Input generation, I/O, reference checks,
-and destruction after gradient readiness are outside. Phase diagnostics use
-separate runs; their samples never enter the headline performance ratios.
+Report native construction separately and compare the remaining algorithm
+work. Fresh resident-to-gradient totals remain available. File parsing is
+measured once per native invocation, outside all per-algorithm times. Internal
+phase diagnostics use separate runs and never enter performance ratios.
 """
 from __future__ import annotations
 
@@ -32,6 +33,12 @@ OUTER_PHASES = {
     "ttk": {"native_object_init", "vertex_order", "representation_setup",
             "connectivity_precondition", "gradient"},
 }
+CONSTRUCTION_PHASES = {
+    "f_max": {"representation_and_filtration"},
+    "reduction_kernel": {"representation_and_filtration"},
+    "ttk": {"native_object_init", "representation_setup", "connectivity_precondition"},
+}
+ALGORITHM_PHASES = {a: OUTER_PHASES[a] - CONSTRUCTION_PHASES[a] for a in ALGORITHMS}
 DETAIL_PHASES = {
     "f_max": {"workspace_init", "candidate_seeding", "candidate_selection",
               "emission_and_updates", "callbacks"},
@@ -51,9 +58,39 @@ def distribution(values, *, positive=False):
                 min=min(values), max=max(values))
 
 
+def validate_outer(outer, total, algorithm):
+    if set(outer) != OUTER_PHASES[algorithm]:
+        raise ValueError("Missing or unexpected phase measurements")
+    distribution(list(outer.values()))
+    if not math.isclose(sum(outer.values()), total, rel_tol=1e-9, abs_tol=1e-12):
+        raise ValueError("Outer phases do not account for the total")
+    if outer["gradient"] <= 0:
+        raise ValueError("Gradient duration must be positive")
+
+
+def performance_components(result, algorithm):
+    """Partition each non-profiled sample, never subtract aggregate medians."""
+    if result.get("schema") != "resident-gradient-v2":
+        raise ValueError("Construction-separated comparisons require v2 performance phases")
+    raw = result["algorithms"][algorithm]
+    totals, rows = raw["performance_seconds"], raw.get("performance_phases_seconds", [])
+    if len(rows) != len(totals):
+        raise ValueError("Incomplete performance phases")
+    components = {k: [] for k in ("construction_seconds", "algorithm_seconds", "gradient_seconds")}
+    for total, outer in zip(totals, rows, strict=True):
+        validate_outer(outer, total, algorithm)
+        components["construction_seconds"].append(sum(outer[k] for k in CONSTRUCTION_PHASES[algorithm]))
+        components["algorithm_seconds"].append(sum(outer[k] for k in ALGORITHM_PHASES[algorithm]))
+        components["gradient_seconds"].append(outer["gradient"])
+    return components
+
+
 def summarize(result, repeats, diagnostics):
-    if result.get("schema") != "resident-gradient-v1":
+    split = result.get("schema") == "resident-gradient-v2"
+    if result.get("schema") not in ("resident-gradient-v1", "resident-gradient-v2"):
         raise ValueError("Wrong timing schema: rebuild the resident-gradient executable")
+    if split:
+        distribution([result.get("input_loading_seconds", -1)], positive=True)
     if result.get("ttk_revision") != TTK_REVISION:
         raise ValueError("Native benchmark was not built against the pinned TTK revision")
     if result.get("exact_reference_checks") is not True:
@@ -78,19 +115,21 @@ def summarize(result, repeats, diagnostics):
         if len(performance) != repeats or len(rows) != diagnostics:
             raise ValueError("Incomplete timing repetitions")
         entry = {"total_seconds": distribution(performance, positive=True)}
+        if split:
+            entry.update({k: distribution(v, positive=True)
+                          for k, v in performance_components(result, algorithm).items()})
+            entry["performance_phases_seconds"] = {
+                k: distribution([r[k] for r in raw["performance_phases_seconds"]])
+                for k in OUTER_PHASES[algorithm]}
         totals, phases, details, shares = [], {}, {}, {}
         for row in rows:
             total = row["total_seconds"]
             distribution([total], positive=True)
             outer = row["phases_seconds"]
             inner = row["gradient_details_seconds"]
-            if set(outer) != OUTER_PHASES[algorithm] or set(inner) != DETAIL_PHASES[algorithm]:
+            if set(inner) != DETAIL_PHASES[algorithm]:
                 raise ValueError("Missing or unexpected phase measurements")
-            distribution(list(outer.values()))
-            if not math.isclose(sum(outer.values()), total, rel_tol=1e-9, abs_tol=1e-12):
-                raise ValueError("Outer phases do not account for the diagnostic total")
-            if outer["gradient"] <= 0:
-                raise ValueError("Gradient duration must be positive")
+            validate_outer(outer, total, algorithm)
             if inner:
                 distribution(list(inner.values()))
                 remaining = outer["gradient"] - sum(inner.values())
@@ -115,12 +154,19 @@ def summarize(result, repeats, diagnostics):
     # Different algorithms may legitimately create different critical counts.
     # Exact consistency with each algorithm's own reference is mandatory.
     summary["paired_ratios"] = {}
+    if split:
+        summary["algorithm_paired_ratios"] = {}
     for numerator, denominator in (("reduction_kernel", "ttk"),
                                    ("reduction_kernel", "f_max"), ("ttk", "f_max")):
         a = result["algorithms"][numerator]["performance_seconds"]
         b = result["algorithms"][denominator]["performance_seconds"]
         summary["paired_ratios"][f"{numerator}/{denominator}"] = distribution(
             [x / y for x, y in zip(a, b, strict=True)], positive=True)
+        if split:
+            a = performance_components(result, numerator)["algorithm_seconds"]
+            b = performance_components(result, denominator)["algorithm_seconds"]
+            summary["algorithm_paired_ratios"][f"{numerator}/{denominator}"] = distribution(
+                [x / y for x, y in zip(a, b, strict=True)], positive=True)
     return summary
 
 
@@ -177,7 +223,7 @@ def main():
     args.input_dir.mkdir(parents=True, exist_ok=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     data = {
-        "schema": "resident-gradient-study-v1",
+        "schema": "resident-gradient-study-v2",
         "started_utc": datetime.now(timezone.utc).isoformat(),
         "platform": platform.platform(),
         "binary_format": command("file", str(args.benchmark.resolve())),
@@ -191,6 +237,11 @@ def main():
         "omp_wait_policy": os.environ.get("OMP_WAIT_POLICY", "runtime-default"),
         "arguments": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()},
         "timing_scope": "Common resident vertex values and maximal-cell arrays to a ready native gradient; all native preparation included",
+        "primary_comparison": "algorithm_seconds, excluding separately reported native construction; includes MorseFrames builder setup and TTK vertex ordering/lower stars",
+        "construction_phases": {a: sorted(CONSTRUCTION_PHASES[a]) for a in ALGORITHMS},
+        "algorithm_phases": {a: sorted(ALGORITHM_PHASES[a]) for a in ALGORITHMS},
+        "performance_clock_note": "Outer phase-boundary clocks only; no internal profiling; components partition every total",
+        "loading_note": "input_loading_seconds is one shared file read/parse/validation per native invocation, not a per-algorithm cost or cold-cache disk benchmark",
         "excluded": ["input generation and file I/O", "reference validation", "post-readiness teardown", "persistence"],
         "diagnostic_note": "Separate runs; nested gradient details are not additive to outer phases; medians need not add; TTK lower stars and matching are combined",
         "algorithm_order_cycle": [[ALGORITHMS[i] for i in order] for order in ORDERS],
@@ -220,6 +271,8 @@ def main():
             print(f"Resident {family} n={size} seed={seed} workers={workers}", flush=True)
             raw = run_native(args.benchmark, path, workers, args.repeats,
                              args.diagnostics, args.warmups)
+            if raw.get("schema") != "resident-gradient-v2":
+                raise ValueError("Rebuild the native driver to collect performance phase splits")
             expected_dim = 2 if family == "terrain" else 3
             if (raw["workers"] != workers or raw["dimension"] != expected_dim or
                     raw["vertices"] != size ** expected_dim):
@@ -239,6 +292,9 @@ def main():
                 measurement["summary"][algorithm]["speedup_vs_one"] = (
                     baseline["summary"][algorithm]["total_seconds"]["median"] /
                     measurement["summary"][algorithm]["total_seconds"]["median"])
+                measurement["summary"][algorithm]["algorithm_speedup_vs_one"] = (
+                    baseline["summary"][algorithm]["algorithm_seconds"]["median"] /
+                    measurement["summary"][algorithm]["algorithm_seconds"]["median"])
         data["cases"].append(case)
         args.output.write_text(json.dumps(data, indent=2, allow_nan=False) + "\n")
     data["completed_utc"] = datetime.now(timezone.utc).isoformat()

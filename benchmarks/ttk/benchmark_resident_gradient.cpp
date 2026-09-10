@@ -1,6 +1,6 @@
 // Fresh gradients from identical resident arrays, without prepared native data.
-// Performance calls have only the two outer clock reads. Separate diagnostic
-// calls retain phase timings; all validation and output happen after timing.
+// Performance calls read clocks only at outer phase boundaries, with no local
+// profiling. Separate diagnostic calls add internal gradient metrics.
 #include <DiscreteGradient.h>
 #include <OrderDisambiguation.h>
 #include <Triangulation.h>
@@ -28,7 +28,7 @@ using Complex = morseframes::FilteredSimplicialComplex;
 using Builder = morseframes::FSequenceBuilder<Complex>;
 using Sequence = morseframes::MorseSequence;
 using Phases = std::map<std::string, double>;
-constexpr const char* kSchema = "resident-gradient-v1";
+constexpr const char* kSchema = "resident-gradient-v2";
 constexpr std::array<const char*, 3> kAlgorithms{{"f_max", "reduction_kernel", "ttk"}};
 constexpr std::array<std::array<int, 3>, 6> kOrders{{
     {{0, 1, 2}}, {{2, 1, 0}}, {{1, 2, 0}},
@@ -99,12 +99,6 @@ struct Timing {
   Phases gradient_details;
 };
 
-template <bool Diagnostic>
-Clock::time_point mark() {
-  if constexpr (Diagnostic) return Clock::now();
-  return {};
-}
-
 struct MorseRun {
   Complex complex;
   morseframes::MorseSequenceBuildMetrics metrics;
@@ -135,12 +129,12 @@ std::unique_ptr<MorseRun> run_morse(const Input& input, int algorithm, int worke
   const auto start = Clock::now();
   auto run = std::make_unique<MorseRun>();
   populate_complex(input, run->complex);
-  const auto representation_stop = mark<Diagnostic>();
+  const auto representation_stop = Clock::now();
   // Coarse RK profiling leaves local kernels uninstrumented. F-Max's existing
   // diagnostics are finer-grained and are used only in separate phase runs.
   run->builder = std::make_unique<Builder>(
       run->complex, Diagnostic ? &run->metrics : nullptr, false);
-  const auto builder_stop = mark<Diagnostic>();
+  const auto builder_stop = Clock::now();
   if (algorithm == 0) {
     run->sequence.emplace(run->builder->build_f_max());
   } else if (workers == 1) {
@@ -151,11 +145,11 @@ std::unique_ptr<MorseRun> run_morse(const Input& input, int algorithm, int worke
   }
   const auto stop = Clock::now(); // Gradient is now available; keep it alive.
   run->timing.total = seconds(start, stop);
+  run->timing.phases = {
+      {"representation_and_filtration", seconds(start, representation_stop)},
+      {"builder_setup", seconds(representation_stop, builder_stop)},
+      {"gradient", seconds(builder_stop, stop)}};
   if constexpr (Diagnostic) {
-    run->timing.phases = {
-        {"representation_and_filtration", seconds(start, representation_stop)},
-        {"builder_setup", seconds(representation_stop, builder_stop)},
-        {"gradient", seconds(builder_stop, stop)}};
     const auto& m = run->metrics;
     if (algorithm == 0) {
       run->timing.gradient_details = {
@@ -186,13 +180,13 @@ template <bool Diagnostic>
 std::unique_ptr<TtkRun> run_ttk(const Input& input, int workers) {
   const auto start = Clock::now();
   auto run = std::make_unique<TtkRun>();
-  const auto init_stop = mark<Diagnostic>();
+  const auto init_stop = Clock::now();
   // No precomputed ordering is supplied by the input parser. Ties use vertex
   // IDs consistently, without changing the original scalar values.
   run->offsets.resize(input.values.size());
   ttk::preconditionOrderArray(input.values.size(), input.values.data(),
                               run->offsets.data(), workers);
-  const auto order_stop = mark<Diagnostic>();
+  const auto order_stop = Clock::now();
   run->cells.reserve(input.cells.size() * (input.dimension + 2));
   for (const auto& cell : input.cells) {
     run->cells.push_back(cell.size());
@@ -211,24 +205,22 @@ std::unique_ptr<TtkRun> run_ttk(const Input& input, int workers) {
   gradient.setBackend(ttk::dcg::DiscreteGradient::BACKEND::CLASSIC_BACKEND);
   gradient.setInputScalarField(input.values.data(), 1);
   gradient.setInputOffsets(run->offsets.data());
-  const auto setup_stop = mark<Diagnostic>();
+  const auto setup_stop = Clock::now();
   gradient.preconditionTriangulation(&triangulation);
-  const auto precondition_stop = mark<Diagnostic>();
+  const auto precondition_stop = Clock::now();
   if (gradient.buildGradient<double>(triangulation, true) != 0) {
     throw std::runtime_error("TTK gradient construction failed.");
   }
   const auto stop = Clock::now();
   run->timing.total = seconds(start, stop);
-  if constexpr (Diagnostic) {
-    run->timing.phases = {
-        {"native_object_init", seconds(start, init_stop)},
-        {"vertex_order", seconds(init_stop, order_stop)},
-        {"representation_setup", seconds(order_stop, setup_stop)},
-        {"connectivity_precondition", seconds(setup_stop, precondition_stop)},
-        {"gradient", seconds(precondition_stop, stop)}};
-    // Lower stars are built inside this call, not an excluded preparation.
-    // Unmodified TTK does not expose separate lower-star/matching timers.
-  }
+  run->timing.phases = {
+      {"native_object_init", seconds(start, init_stop)},
+      {"vertex_order", seconds(init_stop, order_stop)},
+      {"representation_setup", seconds(order_stop, setup_stop)},
+      {"connectivity_precondition", seconds(setup_stop, precondition_stop)},
+      {"gradient", seconds(precondition_stop, stop)}};
+  // Lower stars are built inside this call, not an excluded preparation.
+  // Unmodified TTK does not expose separate lower-star/matching timers.
   return run;
 }
 
@@ -323,7 +315,9 @@ void write_timing(const Timing& timing) {
 int main(int argc, char** argv) {
   try {
     const auto options = parse_options(argc, argv);
+    const auto loading_start = Clock::now();
     const auto input = read_input(options.input);
+    const auto loading_stop = Clock::now();
     // References and all comparisons are outside every recorded interval.
     auto f_reference = run_morse<false>(input, 0, 1);
     auto rk_reference = run_morse<false>(input, 1, 1);
@@ -384,6 +378,7 @@ int main(int argc, char** argv) {
               << ",\"vertices\":" << input.values.size()
               << ",\"simplices\":" << simplex_count
               << ",\"workers\":" << options.workers
+              << ",\"input_loading_seconds\":" << seconds(loading_start, loading_stop)
               << ",\"exact_reference_checks\":true,\"critical_counts_match\":"
               << (counts[0] == counts[1] && counts[1] == counts[2] ? "true" : "false")
               << ",\"algorithms\":{";
@@ -398,6 +393,11 @@ int main(int argc, char** argv) {
       for (std::size_t i = 0; i < performance[algorithm].size(); ++i) {
         if (i != 0) std::cout << ',';
         std::cout << performance[algorithm][i].total;
+      }
+      std::cout << "],\"performance_phases_seconds\":[";
+      for (std::size_t i = 0; i < performance[algorithm].size(); ++i) {
+        if (i != 0) std::cout << ',';
+        write_phases(performance[algorithm][i].phases);
       }
       std::cout << "],\"diagnostics\":[";
       for (std::size_t i = 0; i < diagnostics[algorithm].size(); ++i) {

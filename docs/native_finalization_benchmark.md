@@ -1,5 +1,9 @@
 # Compact lookup during finalization
 
+This is the `5812849` snapshot. The subsequent
+[boundary and ordering reuse study](native_order_reuse_benchmark.md) reports
+the next shared-constructor optimization and a refreshed gradient comparison.
+
 Revision `5812849` removes the duplicate finalized simplex tree index. In the
 main study, per-size construction summaries take about **10–22% less time**;
 largest-volume peak RSS falls from **253.195 to 195.891 MiB**. The memory

@@ -73,6 +73,13 @@ still uses the ordered map, and newly inserted simplices become findable only
 after finalization, as before. Boundary lookup uses the same compact index and
 still checks missing faces and filtration monotonicity.
 
+Boundary construction walks the first-vertex ranges in simplex-ID order. Faces
+which retain their parent's first vertex reuse the known range; only deleting
+the first vertex requires a fresh prefix-index search. Filtration ordering uses
+the simplex ID for the final lexicographic tie-break after level and dimension,
+because IDs already encode vertex-vector order. These changes add no stored
+index or mutable cache and preserve boundary deletion order and level buckets.
+
 For a separate diagnostic run:
 
 ```cpp

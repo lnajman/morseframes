@@ -1,5 +1,9 @@
 # Native construction: profiling and first optimization
 
+This is the `d7cddc7` snapshot. The subsequent
+[bulk face-construction study](native_bulk_construction_benchmark.md) records
+the next optimization and its gradient-timing caveats.
+
 The shared owning-complex constructor takes about **20% less time on the tested grids**
 after revision `d7cddc7`. This is a construction improvement, not a new RK
 algorithm. Gradient outputs are preserved, but gradient timings are not uniformly

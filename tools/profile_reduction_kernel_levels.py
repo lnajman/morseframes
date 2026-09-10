@@ -21,6 +21,7 @@ import tempfile
 
 from benchmark_reduction_kernel_ab import ROOT, Worker, command_output, header_digest, snapshot_headers, summarize
 from profile_reduction_kernel_simplicial import validate as validate_global
+from profile_reduction_kernel_simplicial import PARALLEL_CLOSURE_FIELDS, validate_parallel_closure
 
 MODES = ('rk_plain', 'rk_coarse', 'rk_detailed', 'rk_levels_coarse', 'rk_levels_detailed')
 TIMES = ('closure', 'facet', 'essential', 'facet_execution', 'aggregation', 'merge',
@@ -90,6 +91,7 @@ def validate(row, mode, identity, values, workers):
         if start + duration > trace['level_wall_seconds'] + TOL:
             raise ValueError('Level exceeds phase wall time')
         timelines[item['task']].append((start, start + duration))
+        validate_parallel_closure(item, workers)
         if detailed:
             if (item['reductions'] + item['perforations'] != item['events']
                     or 2 * item['reductions'] + item['perforations'] != item['simplices']
@@ -112,7 +114,10 @@ def validate(row, mode, identity, values, workers):
         raise ValueError('Missing simplices')
     if sum(r['events'] for r in trace['levels']) != identity['algorithms']['reduction_kernel']['steps']:
         raise ValueError('Missing events')
-    for key in tuple(k + '_seconds' for k in TIMES) + COUNTS:
+    parallel_fields = tuple(k for k in PARALLEL_CLOSURE_FIELDS if k in flat)
+    if parallel_fields and any(not all(k in item for k in parallel_fields) for item in trace['levels']):
+        raise ValueError('Missing per-level parallel closure profile')
+    for key in tuple(k + '_seconds' for k in TIMES) + COUNTS + parallel_fields:
         global_key = 'rounds' if key == 'kernel_rounds' else key
         if global_key in flat and not math.isclose(sum(r[key] for r in trace['levels']), flat[global_key], rel_tol=1e-10, abs_tol=TOL):
             raise ValueError('Per-level/global mismatch: ' + key)

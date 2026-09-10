@@ -15,6 +15,19 @@ from benchmark_simplicial_gradients import grid_input
 
 
 class LevelProfileTests(unittest.TestCase):
+    def test_parallel_closure_elapsed_and_cumulative(self):
+        from profile_reduction_kernel_simplicial import validate_parallel_closure, PARALLEL_CLOSURE_FIELDS
+        row = {k: 0 for k in PARALLEL_CLOSURE_FIELDS}
+        row.update({'closure_' + k + '_seconds': 0 for k in ('initial','traversal','sort','materialize')})
+        row.update(closure_seconds=1., closure_parallel_seconds=.8,
+                   closure_parallel_merge_seconds=.1, closure_parallel_traversal_seconds=2.,
+                   closure_parallel_batches=1, closure_parallel_tasks=4)
+        validate_parallel_closure(row, 4) # Cumulative worker time may exceed elapsed time.
+        for changes in (dict(closure_parallel_seconds=2), dict(closure_parallel_tasks=5),
+                        dict(closure_parallel_batches=0), dict(closure_parallel_merge_seconds=.9)):
+            with self.assertRaises(ValueError):
+                validate_parallel_closure(dict(row, **changes), 4)
+
     def test_schedule(self):
         for reverse in (False, True):
             orders = levels.mode_orders(reverse)

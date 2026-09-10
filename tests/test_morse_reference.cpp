@@ -2159,6 +2159,84 @@ void test_reduction_kernel_facet_failure_drains_tasks() {
   }
 }
 
+void test_reduction_kernel_parallel_closures() {
+  for (std::size_t groups : {1, 3}) {
+    FilteredSimplicialComplex complex;
+    std::vector<double> values(10000, 0.0);
+    for (std::size_t group = 0; group < groups; ++group) {
+      const auto base = static_cast<morseframes::VertexId>(group * 1000);
+      const std::size_t count = groups == 1 ? 384 : 96;
+      for (std::size_t i = 0; i < count; ++i) {
+        std::vector<morseframes::VertexId> facet;
+        for (std::size_t v = 0; v < 7; ++v) facet.push_back(base + v);
+        facet.push_back(base + 7 + static_cast<morseframes::VertexId>(i));
+        for (auto v : facet) values[v] = static_cast<double>(group);
+        add_weighted_closure(complex, facet, values);
+      }
+    }
+    if (groups > 1) {
+      // Later graph/packed levels reuse the level tasks' large scratch slots.
+      for (unsigned i = 0; i < 16; ++i) {
+        complex.add_simplex({8000 + 2*i}, 10 + i);
+        complex.add_simplex({8001 + 2*i}, 10 + i);
+        complex.add_simplex({8000 + 2*i, 8001 + 2*i}, 10 + i);
+      }
+    }
+    complex.finalize();
+    auto cached = complex;
+    cached.prepare_same_level_closure_cache();
+    const auto oracle = FSequenceBuilder(cached).build_flooding_reduction_kernel();
+    morseframes::MorseSequenceBuildMetrics serial;
+    const auto expected = FSequenceBuilder(complex, &serial).build_flooding_reduction_kernel();
+    const auto same = [&](const auto& actual) {
+      morseframes::validate_morse_sequence(complex, actual);
+      assert(actual.steps().size() == oracle.steps().size());
+      for (std::size_t i = 0; i < actual.steps().size(); ++i) {
+        const auto& a = actual.steps()[i]; const auto& b = oracle.steps()[i];
+        assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau && a.level == b.level);
+      }
+    };
+    same(expected);
+    for (std::size_t workers : {1, 2, 4, 8}) {
+      for (bool enabled : {false, true}) {
+        for (bool detailed : {false, true}) {
+          morseframes::ReductionKernelExecutionOptions options;
+          options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+          options.max_workers = workers;
+          options.parallel_closure_preparation = enabled;
+          morseframes::MorseSequenceBuildMetrics m;
+          FSequenceBuilder builder(complex, &m, detailed);
+          same(builder.build_flooding_reduction_kernel_with_execution_options(
+              options, [](const auto&, const auto&) {}));
+          const bool dispatched = detailed && enabled && workers > 1;
+          assert((m.reduction_kernel_closure_parallel_batches > 0) == dispatched);
+          assert((m.reduction_kernel_closure_parallel_tasks > 0) == dispatched);
+          assert(m.reduction_kernel_closure_parallel_tasks <=
+                 workers * m.reduction_kernel_closure_parallel_batches);
+          assert(m.reduction_kernel_closure_initial_nanoseconds +
+                 m.reduction_kernel_closure_traversal_nanoseconds +
+                 m.reduction_kernel_closure_sort_nanoseconds +
+                 m.reduction_kernel_closure_materialize_nanoseconds +
+                 m.reduction_kernel_closure_parallel_nanoseconds <=
+                 m.reduction_kernel_closure_nanoseconds);
+          assert(m.reduction_kernel_closure_parallel_merge_nanoseconds <=
+                 m.reduction_kernel_closure_parallel_nanoseconds);
+          if (detailed) {
+            assert(m.reduction_kernel_closure_sparse_cells == serial.reduction_kernel_closure_sparse_cells);
+            assert(m.reduction_kernel_closure_sparse_entries == serial.reduction_kernel_closure_sparse_entries);
+            assert(m.reduction_kernel_closure_boundary_visits == serial.reduction_kernel_closure_boundary_visits);
+            assert(m.reduction_kernel_closure_duplicate_faces == serial.reduction_kernel_closure_duplicate_faces);
+          }
+          if (groups > 1) {
+            assert(m.reduction_kernel_parallel_batches == 0); // Facet execution is still serial per level.
+            assert(m.reduction_kernel_facet_discovery_parallel_tasks == 0);
+          }
+        }
+      }
+    }
+  }
+}
+
 void test_reduction_kernel_level_profile() {
   const auto check = [](FilteredSimplicialComplex complex) {
     complex.finalize();
@@ -2285,6 +2363,16 @@ void test_reduction_kernel_level_profile() {
           .build_flooding_reduction_kernel_with_level_profile(trace, options);
     } catch (const std::runtime_error& error) { propagated = std::string(error.what()) == "level failure"; }
     assert(propagated && !trace.completed && complex.failures == workers);
+    // Ordinary builds must drain level tasks before captured arenas disappear,
+    // too; a nested closure phase must never outlive its level coordinator.
+    complex.failures = 0;
+    propagated = false;
+    try {
+      morseframes::ReductionKernelSequenceBuilder<FailingView>(complex)
+          .build_flooding_reduction_kernel_with_execution_options(
+              options, [](const auto&, const auto&) {});
+    } catch (const std::runtime_error& error) { propagated = std::string(error.what()) == "level failure"; }
+    assert(propagated && complex.failures == workers);
   }
 }
 
@@ -2731,6 +2819,7 @@ int main() {
   test_reduction_kernel_discovery_failure_drains_tasks();
   test_reduction_kernel_facet_failure_drains_tasks();
   test_reduction_kernel_level_profile();
+  test_reduction_kernel_parallel_closures();
   test_instrumentation_metrics();
 
   std::cout << "All Morse persistence prototype tests passed.\n";

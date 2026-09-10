@@ -26,6 +26,27 @@ CLOSURE_COUNTS = ('closure_sparse_cells', 'closure_sparse_entries',
 CLOSURE_FIELDS = CLOSURE_TIMES + CLOSURE_COUNTS
 BOUNDARY_INDEX_FIELDS = ('closure_boundary_index_seconds', 'closure_boundary_index_visits',
                         'closure_boundary_index_entries')
+PARALLEL_CLOSURE_FIELDS = tuple('closure_parallel' + suffix for suffix in
+    ('_seconds', '_traversal_seconds', '_sort_seconds', '_materialize_seconds',
+     '_merge_seconds', '_batches', '_tasks'))
+
+
+def validate_parallel_closure(row, workers):
+    if not any(k in row for k in PARALLEL_CLOSURE_FIELDS):
+        return  # Historical profiles remain valid with the historical fields.
+    if not all(k in row for k in PARALLEL_CLOSURE_FIELDS):
+        raise ValueError('Incomplete parallel closure profile')
+    batches, tasks = row['closure_parallel_batches'], row['closure_parallel_tasks']
+    if (type(batches) is not int or type(tasks) is not int
+            or not 2 * batches <= tasks <= workers * batches):
+        raise ValueError('Invalid parallel closure task budget')
+    serial_children = sum(row['closure_' + k + '_seconds']
+                          for k in ('initial', 'traversal', 'sort', 'materialize'))
+    if (serial_children + row['closure_parallel_seconds'] > row['closure_seconds'] + 1e-10
+            or row['closure_parallel_merge_seconds'] > row['closure_parallel_seconds'] + 1e-10):
+        raise ValueError('Parallel closure elapsed phases exceed parent')
+    if batches == 0 and any(row[k] for k in PARALLEL_CLOSURE_FIELDS):
+        raise ValueError('Parallel closure work without a batch')
 
 
 def validate(row):
@@ -74,6 +95,7 @@ def validate(row):
             raise ValueError('Indexed RK traversal must visit only same-level boundaries')
     # Detailed kernel fields sum over levels/tasks, not global elapsed time.
     # Core/local are children of facet execution and must not be added to it.
+    validate_parallel_closure(row, row.get('executor_workers', 1))
     return max(0., remainder)
 
 

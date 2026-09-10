@@ -168,7 +168,8 @@ struct Run {
   double builder_seconds = 0, kernel_seconds = 0, algorithm_seconds = 0;
 };
 std::unique_ptr<Run> run(const Complex& complex, int algorithm, std::size_t workers,
-                         bool diagnostic = false, bool detailed = false) {
+                         bool diagnostic = false, bool detailed = false,
+                         bool parallel_closure = true) {
   const auto start = Clock::now();
   auto result = std::make_unique<Run>();
 #ifdef MORSEFRAMES_BENCHMARK_ORDINARY_ONLY
@@ -186,9 +187,22 @@ std::unique_ptr<Run> run(const Complex& complex, int algorithm, std::size_t work
   if (algorithm == 0) result->sequence.emplace(result->f->build_f_max());
   else if (algorithm == 1) result->sequence.emplace(workers == 1
       ? result->f->build_process_lower_stars() : result->f->build_process_lower_stars_parallel(workers));
-  else result->sequence.emplace(workers == 1
+  else {
+#ifdef MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION
+    morseframes::ReductionKernelExecutionOptions options;
+    options.policy = workers == 1 ? morseframes::ReductionKernelExecutionPolicy::Sequential
+                                  : morseframes::ReductionKernelExecutionPolicy::Parallel;
+    options.max_workers = workers;
+    options.parallel_closure_preparation = parallel_closure;
+    result->sequence.emplace(result->rk->build_flooding_reduction_kernel_with_execution_options(
+        options, [](const auto&, const auto&) {}));
+#else
+    (void)parallel_closure;
+    result->sequence.emplace(workers == 1
       ? result->rk->build_flooding_reduction_kernel()
       : result->rk->build_flooding_reduction_kernel_parallel(workers));
+#endif
+  }
   const auto stop = Clock::now();
   result->builder_seconds = seconds(start, ready);
   result->kernel_seconds = seconds(ready, stop);
@@ -255,6 +269,12 @@ void level_profile_json(const morseframes::ReductionKernelLevelProfile& trace) {
     LEVEL_TIME(core); LEVEL_TIME(local_reduction);
     LEVEL_TIME(closure_initial); LEVEL_TIME(closure_packed); LEVEL_TIME(closure_boundary_index);
     LEVEL_TIME(closure_traversal); LEVEL_TIME(closure_sort); LEVEL_TIME(closure_materialize);
+#ifdef MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION
+    LEVEL_TIME(closure_parallel); LEVEL_TIME(closure_parallel_traversal);
+    LEVEL_TIME(closure_parallel_sort); LEVEL_TIME(closure_parallel_materialize);
+    LEVEL_TIME(closure_parallel_merge);
+    LEVEL_COUNT(closure_parallel_batches); LEVEL_COUNT(closure_parallel_tasks);
+#endif
     LEVEL_COUNT(kernel_rounds); LEVEL_COUNT(facet_kernels);
     LEVEL_COUNT(reductions); LEVEL_COUNT(perforations); LEVEL_COUNT(parallel_batches);
     LEVEL_COUNT(closure_sparse_cells); LEVEL_COUNT(closure_sparse_entries);
@@ -347,7 +367,10 @@ int main(int argc, char** argv) {
     std::size_t round = 0;
     while (std::cin >> command && command != "quit") {
       std::size_t workers = 0, repeats = 0;
-      if (command == "run") {
+      if (command == "run" || command == "run_closure_serial") {
+#ifndef MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION
+        if (command != "run") throw std::runtime_error("These headers do not support the closure control");
+#endif
         std::cin >> workers >> repeats;
         if (!std::cin || !workers || !repeats) throw std::runtime_error("Invalid run command");
         std::cout << '[';
@@ -355,7 +378,7 @@ int main(int argc, char** argv) {
           if (i) std::cout << ',';
           std::cout << '{'; bool first = true;
           for (int a : orders[round % orders.size()]) {
-            const auto r = run(complex, a, workers);
+            const auto r = run(complex, a, workers, false, false, command == "run");
             if (fingerprint(*r->sequence) != references[a]) throw std::runtime_error("Gradient differs from sequential reference");
             if (!first) std::cout << ','; first = false;
             std::cout << '"' << names[a] << "\":"; timing(*r);
@@ -405,6 +428,12 @@ int main(int argc, char** argv) {
         search_profile(m);
         closure_profile(m);
         boundary_index_profile(m);
+#ifdef MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION
+        RK_TIME(closure_parallel); RK_TIME(closure_parallel_traversal);
+        RK_TIME(closure_parallel_sort); RK_TIME(closure_parallel_materialize);
+        RK_TIME(closure_parallel_merge);
+        RK_COUNT(closure_parallel_batches); RK_COUNT(closure_parallel_tasks);
+#endif
         RK_COUNT(inline_cell_overflows); RK_COUNT(inline_event_overflows);
 #undef RK_TIME
 #undef RK_COUNT

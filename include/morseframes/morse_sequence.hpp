@@ -96,6 +96,13 @@ struct MorseSequenceBuildMetrics {
   std::uint64_t reduction_kernel_closure_traversal_nanoseconds = 0;
   std::uint64_t reduction_kernel_closure_sort_nanoseconds = 0;
   std::uint64_t reduction_kernel_closure_materialize_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_parallel_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_parallel_traversal_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_parallel_sort_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_parallel_materialize_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_parallel_merge_nanoseconds = 0;
+  std::size_t reduction_kernel_closure_parallel_batches = 0;
+  std::size_t reduction_kernel_closure_parallel_tasks = 0;
   std::size_t reduction_kernel_closure_sparse_cells = 0;
   std::size_t reduction_kernel_closure_sparse_entries = 0;
   std::size_t reduction_kernel_closure_boundary_visits = 0;
@@ -1875,8 +1882,9 @@ class FSequenceBuilder {
       // Levels own disjoint workspace entries. Long-lived tasks dynamically
       // claim levels so the executor sees only one task per worker and balance
       // follows actual kernel cost rather than a simplex-count proxy. Nested
-      // facet tasks are disabled on this path; a single large plateau still
-      // uses the intra-level parallel algorithm.
+      // facet-operation tasks are disabled on this path. Independent closure
+      // tasks may share the bounded executor when their work gate is met;
+      // a single large plateau still uses the full intra-level algorithm.
       const std::size_t task_count = std::min(level_workers, num_levels);
       // Keep enough dynamically claimed chunks for load balancing while
       // amortizing the atomic counter on complexes with many small levels.
@@ -1976,23 +1984,26 @@ class FSequenceBuilder {
             throw;
           }
         } else {
-          futures.push_back(executor->submit([task_body]() {
-            task_body(nullptr, SequenceClock::time_point{});
-          }));
+          try {
+            futures.push_back(executor->submit([task_body]() {
+              task_body(nullptr, SequenceClock::time_point{});
+            }));
+          } catch (...) {
+            for (auto& future : futures) {
+              try { executor->get(future); } catch (...) {}
+            }
+            throw;
+          }
         }
       }
-      if constexpr (TraceLevels) {
-        // Do not let a failed build return a trace still being written by
-        // another task. Drain every submitted task before propagating errors.
-        std::exception_ptr failure;
-        for (auto& future : futures) {
-          try { executor->get(future); }
-          catch (...) { if (!failure) failure = std::current_exception(); }
-        }
-        if (failure) std::rethrow_exception(failure);
-      } else {
-        for (auto& future : futures) executor->get(future);
+      // Captured event/scratch storage must outlive every level task, including
+      // nested closure work, on both traced and ordinary exception paths.
+      std::exception_ptr failure;
+      for (auto& future : futures) {
+        try { executor->get(future); }
+        catch (...) { if (!failure) failure = std::current_exception(); }
       }
+      if (failure) std::rethrow_exception(failure);
       if (measure_workers) {
         sequence_metrics_->reduction_kernel_level_chunk_size =
             level_chunk_size;
@@ -2095,6 +2106,13 @@ class FSequenceBuilder {
       sequence_metrics_->reduction_kernel_closure_traversal_nanoseconds = kernel_metrics.closure_traversal_nanoseconds;
       sequence_metrics_->reduction_kernel_closure_sort_nanoseconds = kernel_metrics.closure_sort_nanoseconds;
       sequence_metrics_->reduction_kernel_closure_materialize_nanoseconds = kernel_metrics.closure_materialize_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_parallel_nanoseconds = kernel_metrics.closure_parallel_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_parallel_traversal_nanoseconds = kernel_metrics.closure_parallel_traversal_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_parallel_sort_nanoseconds = kernel_metrics.closure_parallel_sort_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_parallel_materialize_nanoseconds = kernel_metrics.closure_parallel_materialize_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_parallel_merge_nanoseconds = kernel_metrics.closure_parallel_merge_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_parallel_batches = kernel_metrics.closure_parallel_batches;
+      sequence_metrics_->reduction_kernel_closure_parallel_tasks = kernel_metrics.closure_parallel_tasks;
       sequence_metrics_->reduction_kernel_closure_sparse_cells = kernel_metrics.closure_sparse_cells;
       sequence_metrics_->reduction_kernel_closure_sparse_entries = kernel_metrics.closure_sparse_entries;
       sequence_metrics_->reduction_kernel_closure_boundary_visits = kernel_metrics.closure_boundary_visits;

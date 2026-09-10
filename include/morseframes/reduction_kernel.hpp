@@ -19,6 +19,8 @@
 #include "morseframes/complex_view.hpp"
 #include "morseframes/task_executor.hpp"
 
+#define MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION 1
+
 namespace morseframes {
 
 struct ReductionKernelEvent {
@@ -41,6 +43,9 @@ struct ReductionKernelExecutionOptions {
       ReductionKernelExecutionPolicy::Sequential;
   std::size_t max_workers = 0;
   bool collect_metrics = false;
+  // Independent read-only closure preparation may share the executor with
+  // concurrent level tasks. Disable separately for controlled experiments.
+  bool parallel_closure_preparation = true;
 };
 
 struct ReductionKernelMetrics {
@@ -61,6 +66,15 @@ struct ReductionKernelMetrics {
   std::uint64_t closure_traversal_nanoseconds = 0;
   std::uint64_t closure_sort_nanoseconds = 0;
   std::uint64_t closure_materialize_nanoseconds = 0;
+  // Parallel wall time includes dispatch, wait and the deterministic merge.
+  // Worker subphases are cumulative and must not be added to elapsed time.
+  std::uint64_t closure_parallel_nanoseconds = 0;
+  std::uint64_t closure_parallel_traversal_nanoseconds = 0;
+  std::uint64_t closure_parallel_sort_nanoseconds = 0;
+  std::uint64_t closure_parallel_materialize_nanoseconds = 0;
+  std::uint64_t closure_parallel_merge_nanoseconds = 0;
+  std::size_t closure_parallel_batches = 0;
+  std::size_t closure_parallel_tasks = 0;
   std::size_t closure_sparse_cells = 0;
   std::size_t closure_sparse_entries = 0;
   std::size_t closure_boundary_visits = 0;
@@ -150,6 +164,9 @@ class ReductionKernelWorkspace {
   // live packed cells, or full-list candidates in the graph fallback. Avoid
   // dispatch/wait for small rounds and scale the task budget as rounds shrink.
   static constexpr std::size_t kMinFacetExecutionTaskWork = 1024;
+  // A saturated upper-bound estimate of new facet-closure entries, not a
+  // timing prediction. Small packed levels never reach this path.
+  static constexpr std::size_t kMinClosureTaskWork = 8192;
   using PackedMask =
       std::array<std::uint64_t, (kPackedClosureBucketCapacity + 63) / 64>;
 
@@ -254,6 +271,14 @@ class ReductionKernelWorkspace {
         nullptr;
   };
 
+  struct ClosureTaskScratch {
+    std::vector<std::uint8_t> included;
+    std::vector<std::size_t> cell_indices;
+    std::vector<SimplexId> entries;
+    std::vector<std::size_t> prepared;
+    ReductionKernelMetrics metrics;
+  };
+
   struct LevelScratch {
     void prepare(std::size_t bucket_size, bool collect_metrics) {
       facet_flags.resize(bucket_size);
@@ -310,6 +335,9 @@ class ReductionKernelWorkspace {
     // Other paths ignore these buffers, including after scratch reuse.
     std::vector<std::size_t> boundary_offsets;
     std::vector<std::size_t> boundary_indices;
+    // Task-indexed, not thread-local: cooperative waits may execute another
+    // level task on the same OS thread while this level's buffers are live.
+    std::vector<ClosureTaskScratch> closure_tasks;
     std::vector<std::uint64_t> closure_masks;
     std::vector<std::uint64_t> coface_masks;
   };
@@ -423,19 +451,21 @@ class ReductionKernelWorkspace {
 
   // Each level owns disjoint entries of active_ and round_removed_. This
   // isolated form therefore supports Algorithm 2 level tasks without sharing
-  // event buffers or counters between workers.
+  // event buffers or counters between workers. The boolean controls discovery
+  // and local facet execution; independent closure work is controlled by the
+  // execution options and can also run alongside other levels.
   ReductionKernelLevelResult compute_level_isolated(
-      LevelId level, bool allow_intra_level_parallelism = true) {
+      LevelId level, bool allow_parallel_facet_operations = true) {
     LevelScratch scratch;
     ReductionKernelLevelResult result;
     result.metrics = dispatch_level_with_scratch(
-        level, allow_intra_level_parallelism, scratch, result.events);
+        level, allow_parallel_facet_operations, scratch, result.events);
     return result;
   }
 
   ReductionKernelLevelResult compute_level_isolated_reusing_scratch(
       LevelId level, std::size_t scratch_index,
-      bool allow_intra_level_parallelism = true) {
+      bool allow_parallel_facet_operations = true) {
     // A caller may process levels concurrently only when each long-lived task
     // owns a distinct scratch index.
     if (scratch_index >= level_scratch_.size()) {
@@ -444,7 +474,7 @@ class ReductionKernelWorkspace {
     }
     ReductionKernelLevelResult result;
     result.metrics = dispatch_level_with_scratch(
-        level, allow_intra_level_parallelism, level_scratch_[scratch_index],
+        level, allow_parallel_facet_operations, level_scratch_[scratch_index],
         result.events);
     return result;
   }
@@ -453,7 +483,7 @@ class ReductionKernelWorkspace {
       LevelId level, std::size_t scratch_index,
       ReductionKernelEvent* event_storage, std::size_t event_capacity,
       std::size_t& event_count,
-      bool allow_intra_level_parallelism = true) {
+      bool allow_parallel_facet_operations = true) {
     // The caller owns this level's disjoint event slice and the scratch index
     // assigned to its long-lived task.
     if (scratch_index >= level_scratch_.size()) {
@@ -462,7 +492,7 @@ class ReductionKernelWorkspace {
     }
     FixedEventBuffer events(event_storage, event_capacity);
     auto metrics = dispatch_level_with_scratch(
-        level, allow_intra_level_parallelism, level_scratch_[scratch_index],
+        level, allow_parallel_facet_operations, level_scratch_[scratch_index],
         events);
     event_count = events.size();
     return metrics;
@@ -472,7 +502,7 @@ class ReductionKernelWorkspace {
       LevelId level, std::size_t scratch_index,
       ReductionKernelEvent* event_storage, std::size_t event_capacity,
       std::size_t& event_count,
-      bool allow_intra_level_parallelism = true) {
+      bool allow_parallel_facet_operations = true) {
     // This entry point keeps the ordinary construction path free of a
     // returned metrics object and instantiates only the metrics-free kernel.
     if (scratch_index >= level_scratch_.size()) {
@@ -482,7 +512,7 @@ class ReductionKernelWorkspace {
     FixedEventBuffer events(event_storage, event_capacity);
     ReductionKernelMetrics ignored;
     compute_level_isolated_with_scratch<false>(
-        level, allow_intra_level_parallelism, level_scratch_[scratch_index],
+        level, allow_parallel_facet_operations, level_scratch_[scratch_index],
         events, ignored);
     event_count = events.size();
   }
@@ -490,22 +520,22 @@ class ReductionKernelWorkspace {
  private:
   template <typename EventBuffer>
   ReductionKernelMetrics dispatch_level_with_scratch(
-      LevelId level, bool allow_intra_level_parallelism,
+      LevelId level, bool allow_parallel_facet_operations,
       LevelScratch& scratch, EventBuffer& events) {
     ReductionKernelMetrics metrics;
     if (options_.collect_metrics) {
       compute_level_isolated_with_scratch<true>(
-          level, allow_intra_level_parallelism, scratch, events, metrics);
+          level, allow_parallel_facet_operations, scratch, events, metrics);
     } else {
       compute_level_isolated_with_scratch<false>(
-          level, allow_intra_level_parallelism, scratch, events, metrics);
+          level, allow_parallel_facet_operations, scratch, events, metrics);
     }
     return metrics;
   }
 
   template <bool CollectMetrics, typename EventBuffer>
   void compute_level_isolated_with_scratch(
-      LevelId level, bool allow_intra_level_parallelism,
+      LevelId level, bool allow_parallel_facet_operations,
       LevelScratch& scratch, EventBuffer& events,
       ReductionKernelMetrics& metrics) {
     const auto& bucket = complex_.simplices_of_level(level);
@@ -550,7 +580,7 @@ class ReductionKernelWorkspace {
         const auto facet_start = profile_start<CollectMetrics>();
         const auto& facets = active_facets<CollectMetrics>(
             level, bucket, remaining, scratch, metrics,
-            allow_intra_level_parallelism);
+            allow_parallel_facet_operations);
         profile_add<CollectMetrics>(metrics.facet_nanoseconds, facet_start);
         // Complete all cell writes before incidence and local facet tasks read
         // them. Concurrent levels use disjoint scratch and bucket indices.
@@ -587,7 +617,7 @@ class ReductionKernelWorkspace {
         const auto execution_start = profile_start<CollectMetrics>();
         const std::size_t facet_tasks = facet_task_count(
             facets, scratch.active_simplices, level_cells,
-            allow_intra_level_parallelism);
+            allow_parallel_facet_operations);
         if constexpr (!CollectMetrics) {
           if (facet_tasks <= 1) {
             for (SimplexId facet : facets) {
@@ -676,7 +706,7 @@ class ReductionKernelWorkspace {
       const auto facet_start = profile_start<CollectMetrics>();
       const auto& facets = active_facets<CollectMetrics>(
           level, bucket, remaining, scratch, metrics,
-          allow_intra_level_parallelism);
+          allow_parallel_facet_operations);
       profile_add<CollectMetrics>(metrics.facet_nanoseconds, facet_start);
       if (facets.empty()) {
         throw std::logic_error(
@@ -717,6 +747,13 @@ class ReductionKernelWorkspace {
     destination.closure_traversal_nanoseconds += source.closure_traversal_nanoseconds;
     destination.closure_sort_nanoseconds += source.closure_sort_nanoseconds;
     destination.closure_materialize_nanoseconds += source.closure_materialize_nanoseconds;
+    destination.closure_parallel_nanoseconds += source.closure_parallel_nanoseconds;
+    destination.closure_parallel_traversal_nanoseconds += source.closure_parallel_traversal_nanoseconds;
+    destination.closure_parallel_sort_nanoseconds += source.closure_parallel_sort_nanoseconds;
+    destination.closure_parallel_materialize_nanoseconds += source.closure_parallel_materialize_nanoseconds;
+    destination.closure_parallel_merge_nanoseconds += source.closure_parallel_merge_nanoseconds;
+    destination.closure_parallel_batches += source.closure_parallel_batches;
+    destination.closure_parallel_tasks += source.closure_parallel_tasks;
     destination.closure_sparse_cells += source.closure_sparse_cells;
     destination.closure_sparse_entries += source.closure_sparse_entries;
     destination.closure_boundary_visits += source.closure_boundary_visits;
@@ -920,6 +957,118 @@ class ReductionKernelWorkspace {
   }
 
   template <bool CollectMetrics>
+  bool prepare_facet_cells_parallel(
+      const std::vector<SimplexId>& facets,
+      const std::vector<SimplexId>& bucket,
+      LevelScratch& scratch, LevelCells& cells, ReductionKernelMetrics& metrics) const {
+    if (options_.policy != ReductionKernelExecutionPolicy::Parallel ||
+        !options_.parallel_closure_preparation || executor_ == nullptr ||
+        executor_->worker_count() <= 1) {
+      return false;
+    }
+    const std::size_t max_tasks = std::min(executor_->worker_count(), facets.size());
+    if (max_tasks <= 1) return false;
+    std::size_t work = 0;
+    for (SimplexId facet : facets) {
+      const auto range = cells.ranges[bucket_index_[facet]];
+      if (range.first != range.second) continue;
+      // A simplex has at most 2^(dimension+1)-1 nonempty faces; saturate
+      // before shifting, including for higher-dimensional generic views.
+      const auto dimension = complex_.dimension(facet);
+      const std::size_t cost = dimension >= 12 ? kMinClosureTaskWork
+          : (std::size_t{1} << (dimension + 1)) - 1;
+      work += std::min(cost, std::numeric_limits<std::size_t>::max() - work);
+      if (work / kMinClosureTaskWork >= max_tasks) break;
+    }
+    const std::size_t task_count = std::min(max_tasks, work / kMinClosureTaskWork);
+    if (task_count <= 1) return false;
+    const auto parallel_start = profile_start<CollectMetrics>();
+    scratch.closure_tasks.resize(task_count);
+    // Contiguous facet slices preserve the exact serial append order without
+    // atomics in traversal or a per-facet allocation. All shared ranges have
+    // one writer, and no local kernel reads them until the whole batch joins.
+    parallel_for_indices(task_count, task_count, [&](std::size_t task) {
+      auto& local = scratch.closure_tasks[task];
+      local.included.assign(bucket.size(), 0);
+      local.cell_indices.clear();
+      local.entries.clear();
+      local.prepared.clear();
+      if constexpr (CollectMetrics) local.metrics = ReductionKernelMetrics{};
+      const std::size_t chunk = facets.size() / task_count;
+      const std::size_t extra = facets.size() % task_count;
+      const std::size_t first_facet = task * chunk + std::min(task, extra);
+      const std::size_t last_facet = first_facet + chunk + (task < extra);
+      auto& m = local.metrics;
+      for (std::size_t i = first_facet; i < last_facet; ++i) {
+        const auto facet_index = bucket_index_[facets[i]];
+        auto& range = cells.ranges[facet_index];
+        if (range.first != range.second) continue;
+        const auto traversal_start = profile_start<CollectMetrics>();
+        auto& indices = local.cell_indices;
+        indices.clear(); indices.push_back(facet_index);
+        local.included[facet_index] = 1;
+        for (std::size_t next = 0; next < indices.size(); ++next) {
+          const auto simplex_index = indices[next];
+          for (std::size_t edge = scratch.boundary_offsets[simplex_index];
+               edge < scratch.boundary_offsets[simplex_index + 1]; ++edge) {
+            if constexpr (CollectMetrics) ++m.closure_boundary_visits;
+            const auto face = scratch.boundary_indices[edge];
+            if (!local.included[face]) {
+              local.included[face] = 1;
+              if constexpr (CollectMetrics)
+                m.closure_index_growths += indices.size() == indices.capacity();
+              indices.push_back(face);
+            } else if constexpr (CollectMetrics) ++m.closure_duplicate_faces;
+          }
+        }
+        profile_add<CollectMetrics>(m.closure_parallel_traversal_nanoseconds, traversal_start);
+        const auto sort_start = profile_start<CollectMetrics>();
+        std::sort(indices.begin(), indices.end());
+        profile_add<CollectMetrics>(m.closure_parallel_sort_nanoseconds, sort_start);
+        const auto materialize_start = profile_start<CollectMetrics>();
+        const std::size_t first = local.entries.size();
+        for (auto index : indices) {
+          if constexpr (CollectMetrics)
+            m.closure_entry_growths += local.entries.size() == local.entries.capacity();
+          local.entries.push_back(bucket[index]);
+          local.included[index] = 0;
+        }
+        range = {first, local.entries.size()};
+        local.prepared.push_back(facet_index);
+        if constexpr (CollectMetrics) {
+          ++m.closure_sparse_cells;
+          m.closure_sparse_entries += indices.size();
+        }
+        profile_add<CollectMetrics>(m.closure_parallel_materialize_nanoseconds, materialize_start);
+      }
+    }); // parallel_for_indices drains every capture on failures too.
+    const auto merge_start = profile_start<CollectMetrics>();
+    std::size_t total = cells.entries.size();
+    for (const auto& local : scratch.closure_tasks) {
+      if (local.entries.size() > cells.entries.max_size() - total)
+        throw std::length_error("Reduction-kernel closure arena is too large.");
+      total += local.entries.size();
+    }
+    cells.entries.reserve(total);
+    for (const auto& local : scratch.closure_tasks) {
+      const std::size_t offset = cells.entries.size();
+      cells.entries.insert(cells.entries.end(), local.entries.begin(), local.entries.end());
+      for (auto index : local.prepared) {
+        cells.ranges[index].first += offset;
+        cells.ranges[index].second += offset;
+      }
+      if constexpr (CollectMetrics) accumulate_metrics(metrics, local.metrics);
+    }
+    profile_add<CollectMetrics>(metrics.closure_parallel_merge_nanoseconds, merge_start);
+    profile_add<CollectMetrics>(metrics.closure_parallel_nanoseconds, parallel_start);
+    if constexpr (CollectMetrics) {
+      ++metrics.closure_parallel_batches;
+      metrics.closure_parallel_tasks += task_count;
+    }
+    return true;
+  }
+
+  template <bool CollectMetrics>
   void prepare_facet_cells(
       const std::vector<SimplexId>& facets,
       const std::vector<SimplexId>& bucket,
@@ -928,6 +1077,8 @@ class ReductionKernelWorkspace {
         cells.cached_entries != nullptr) {
       return;
     }
+    if (prepare_facet_cells_parallel<CollectMetrics>(facets, bucket, scratch, cells, metrics))
+      return;
     auto& included = scratch.included;
     auto& cell_indices = scratch.cell_indices;
     for (SimplexId facet : facets) {

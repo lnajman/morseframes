@@ -45,6 +45,7 @@ The current public alpha can be installed from PyPI:
    benchmark_reproduction
    native_construction_benchmark
    native_bulk_construction_benchmark
+   native_finalization_benchmark
    reduction_kernel_correctness
    phase0_conventions
 

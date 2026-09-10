@@ -1,5 +1,9 @@
 # Bulk face construction
 
+This is the `10f641f` snapshot. The subsequent
+[compact finalization study](native_finalization_benchmark.md) records the next
+shared-index optimization and its timing caveats.
+
 Revision `10f641f` reduces total native construction time by roughly **15–25%**
 on the tested grids, relative to the preceding optimized constructor. It adds
 an opt-in shared C++ construction path, not a new gradient kernel. A small

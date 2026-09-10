@@ -8,8 +8,10 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
-The [bulk face-construction study](native_bulk_construction_benchmark.md) records
-the latest opt-in shared C++ construction path, its controlled comparison,
+The [compact finalization study](native_finalization_benchmark.md) records the
+latest shared-index change, its construction/memory comparison and timing caveats.
+The preceding [bulk face-construction study](native_bulk_construction_benchmark.md) records
+the opt-in shared C++ construction path, its controlled comparison,
 memory costs and gradient-timing caveats. The earlier
 [native construction study](native_construction_benchmark.md) records the
 shared-constructor optimization on revision `d7cddc7`, its separate timing

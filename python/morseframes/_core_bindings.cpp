@@ -369,6 +369,8 @@ nb::dict frame_metrics_to_python(const morseframes::MorseReferenceFrameMetrics& 
       metrics.sequence_reduction_kernel_perforations;
   result["sequence_reduction_kernel_parallel_batches"] =
       metrics.sequence_reduction_kernel_parallel_batches;
+  result["sequence_reduction_kernel_facet_parallel_tasks"] =
+      metrics.sequence_reduction_kernel_facet_parallel_tasks;
   result["sequence_reduction_kernel_max_parallel_facets"] =
       metrics.sequence_reduction_kernel_max_parallel_facets;
   result["sequence_reduction_kernel_parallel_level_batches"] =
@@ -491,6 +493,8 @@ nb::dict sequence_metrics_to_python(const morseframes::MorseSequenceBuildMetrics
   result["reduction_kernel_perforations"] = metrics.reduction_kernel_perforations;
   result["reduction_kernel_parallel_batches"] =
       metrics.reduction_kernel_parallel_batches;
+  result["reduction_kernel_facet_parallel_tasks"] =
+      metrics.reduction_kernel_facet_parallel_tasks;
   result["reduction_kernel_max_parallel_facets"] =
       metrics.reduction_kernel_max_parallel_facets;
   result["reduction_kernel_parallel_level_batches"] =

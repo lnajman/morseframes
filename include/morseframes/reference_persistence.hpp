@@ -124,6 +124,7 @@ struct MorseReferenceFrameMetrics {
   std::size_t sequence_reduction_kernel_reductions = 0;
   std::size_t sequence_reduction_kernel_perforations = 0;
   std::size_t sequence_reduction_kernel_parallel_batches = 0;
+  std::size_t sequence_reduction_kernel_facet_parallel_tasks = 0;
   std::size_t sequence_reduction_kernel_max_parallel_facets = 0;
   std::size_t sequence_reduction_kernel_parallel_level_batches = 0;
   std::size_t sequence_reduction_kernel_max_parallel_levels = 0;
@@ -1190,6 +1191,8 @@ class MorseReferenceFrameBuilder {
           sequence_build_metrics.reduction_kernel_perforations;
       frame_metrics.sequence_reduction_kernel_parallel_batches =
           sequence_build_metrics.reduction_kernel_parallel_batches;
+      frame_metrics.sequence_reduction_kernel_facet_parallel_tasks =
+          sequence_build_metrics.reduction_kernel_facet_parallel_tasks;
       frame_metrics.sequence_reduction_kernel_max_parallel_facets =
           sequence_build_metrics.reduction_kernel_max_parallel_facets;
       frame_metrics.sequence_reduction_kernel_parallel_level_batches =

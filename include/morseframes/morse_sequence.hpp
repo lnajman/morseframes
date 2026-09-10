@@ -87,6 +87,7 @@ struct MorseSequenceBuildMetrics {
   std::size_t reduction_kernel_reductions = 0;
   std::size_t reduction_kernel_perforations = 0;
   std::size_t reduction_kernel_parallel_batches = 0;
+  std::size_t reduction_kernel_facet_parallel_tasks = 0;
   std::size_t reduction_kernel_max_parallel_facets = 0;
   std::size_t reduction_kernel_parallel_level_batches = 0;
   std::size_t reduction_kernel_max_parallel_levels = 0;
@@ -1849,6 +1850,8 @@ class FSequenceBuilder {
           kernel_metrics.perforations;
       sequence_metrics_->reduction_kernel_parallel_batches =
           kernel_metrics.parallel_batches;
+      sequence_metrics_->reduction_kernel_facet_parallel_tasks =
+          kernel_metrics.facet_parallel_tasks;
       sequence_metrics_->reduction_kernel_max_parallel_facets =
           kernel_metrics.max_parallel_facets;
       sequence_metrics_->reduction_kernel_parallel_level_batches =

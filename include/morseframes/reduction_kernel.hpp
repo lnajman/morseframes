@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -57,7 +58,9 @@ struct ReductionKernelMetrics {
   std::size_t facet_kernels = 0;
   std::size_t reductions = 0;
   std::size_t perforations = 0;
+  // One batch per parallel facet round, with at most executor_workers tasks.
   std::size_t parallel_batches = 0;
+  std::size_t facet_parallel_tasks = 0;
   std::size_t max_parallel_facets = 0;
   std::size_t parallel_level_batches = 0;
   std::size_t max_parallel_levels = 0;
@@ -640,6 +643,7 @@ class ReductionKernelWorkspace {
     destination.reductions += source.reductions;
     destination.perforations += source.perforations;
     destination.parallel_batches += source.parallel_batches;
+    destination.facet_parallel_tasks += source.facet_parallel_tasks;
     destination.max_parallel_facets =
         std::max(destination.max_parallel_facets,
                  source.max_parallel_facets);
@@ -1297,26 +1301,57 @@ class ReductionKernelWorkspace {
       return results;
     }
 
-    for (std::size_t first = 0; first < facets.size(); first += workers) {
-      const std::size_t count = std::min(workers, facets.size() - first);
-      if constexpr (CollectMetrics) {
-        ++metrics.parallel_batches;
-        metrics.max_parallel_facets =
-            std::max(metrics.max_parallel_facets, count);
-      }
-      std::vector<std::future<FacetKernelResult<CollectMetrics>>> futures;
-      futures.reserve(count);
-      for (std::size_t offset = 0; offset < count; ++offset) {
-        const SimplexId facet = facets[first + offset];
-        futures.push_back(executor_->submit(
-            [this, level, facet, &bucket, &level_cells]() {
-              return compute_facet_kernel<CollectMetrics>(
-                  level, facet, bucket, level_cells);
-            }));
+    // Allocate before dispatch: tasks write disjoint, stable slots, and the
+    // coordinator consumes them in canonical facet order after all tasks join.
+    results.resize(facets.size());
+    const std::size_t task_count = std::min(workers, facets.size());
+    // Roughly four chunks per worker balance unequal facet costs without a
+    // future, queue lock, notification, and barrier for every individual facet.
+    const std::size_t chunk_size =
+        std::max<std::size_t>(1, facets.size() / task_count / 4);
+    std::atomic<std::size_t> next_facet{0};
+    std::vector<std::future<void>> futures;
+    futures.reserve(task_count);
+    if constexpr (CollectMetrics) {
+      ++metrics.parallel_batches;
+      metrics.facet_parallel_tasks += task_count;
+      metrics.max_parallel_facets =
+          std::max(metrics.max_parallel_facets, task_count);
+    }
+    try {
+      for (std::size_t task = 0; task < task_count; ++task) {
+        futures.push_back(executor_->submit([&, this, level]() {
+          while (true) {
+            const std::size_t first =
+                next_facet.fetch_add(chunk_size, std::memory_order_relaxed);
+            if (first >= facets.size()) {
+              break;
+            }
+            const std::size_t last =
+                first + std::min(chunk_size, facets.size() - first);
+            for (std::size_t index = first; index < last; ++index) {
+              results[index] = compute_facet_kernel<CollectMetrics>(
+                  level, facets[index], bucket, level_cells);
+            }
+          }
+        }));
       }
       for (auto& future : futures) {
-        results.push_back(executor_->get(future));
+        executor_->get(future);
       }
+    } catch (...) {
+      // Submission/allocation or a local kernel may throw. Drain every task
+      // before captured state (especially next_facet) can leave scope, and
+      // preserve the original exception if other tasks also fail.
+      for (auto& future : futures) {
+        if (future.valid()) {
+          try {
+            executor_->get(future);
+          } catch (...) {
+          }
+        }
+      }
+      throw;
     }
     return results;
   }

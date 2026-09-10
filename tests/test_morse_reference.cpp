@@ -7,6 +7,7 @@
 #include <iostream>
 #include <random>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -1188,6 +1189,8 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   assert_same_sequence(sequence, parallel_sequence);
   assert(parallel_metrics.reduction_kernel_parallel_batches > 0);
   assert(parallel_metrics.reduction_kernel_max_parallel_facets == 2);
+  assert(parallel_metrics.reduction_kernel_facet_parallel_tasks ==
+         2 * parallel_metrics.reduction_kernel_parallel_batches);
   assert(parallel_metrics.reduction_kernel_executor_workers == 2);
   assert(parallel_metrics.reduction_kernel_facet_discovery_parallel_tasks == 0);
   assert(parallel_metrics.reduction_kernel_facet_discovery_mask_tests > 0);
@@ -1225,6 +1228,7 @@ void test_flooding_reduction_kernel_on_shared_facets() {
   assert(multilevel_parallel_metrics
              .reduction_kernel_essential_parallel_tasks == 0);
   assert(multilevel_parallel_metrics.reduction_kernel_parallel_batches == 0);
+  assert(multilevel_parallel_metrics.reduction_kernel_facet_parallel_tasks == 0);
   assert(multilevel_parallel_metrics
              .reduction_kernel_aggregation_parallel_tasks == 0);
   assert(multilevel_parallel_metrics.reduction_kernel_max_parallel_levels ==
@@ -1410,6 +1414,12 @@ void test_reduction_kernel_linear_sparse_incidence() {
       assert(metrics.reduction_kernel_essential_parallel_tasks == 0);
       if (workers > 1 && complex.num_levels() == 1) {
         assert(metrics.reduction_kernel_parallel_batches > 0);
+        assert(metrics.reduction_kernel_parallel_batches <=
+               metrics.reduction_kernel_rounds);
+        assert(metrics.reduction_kernel_facet_parallel_tasks <=
+               workers * metrics.reduction_kernel_parallel_batches);
+        assert(metrics.reduction_kernel_facet_parallel_tasks <
+               metrics.reduction_kernel_facet_kernels);
       }
     }
   };
@@ -1434,6 +1444,99 @@ void test_reduction_kernel_linear_sparse_incidence() {
       // An isolated vertex exercises incidence for a dimension-zero facet.
       complex.add_simplex({140}, 0.0);
       check(complex, (std::size_t{1} << facet_vertices) - 1);
+    }
+  }
+}
+
+void test_reduction_kernel_batched_facets() {
+  // Unequal cells exercise chunk tails, result ordering, and both inline and
+  // overflow result storage, including dimensions above three.
+  for (std::size_t facet_count : {1, 2, 3, 7, 8, 9, 31, 32, 33, 65}) {
+    FilteredSimplicialComplex complex;
+    const std::vector<double> values(6 * facet_count + 1, 0.0);
+    for (std::size_t i = 0; i < facet_count; ++i) {
+      std::vector<morseframes::VertexId> facet;
+      for (std::size_t j = 0; j < 2 + i % 5; ++j) {
+        facet.push_back(static_cast<morseframes::VertexId>(6 * i + j));
+      }
+      add_weighted_closure(complex, facet, values);
+    }
+    complex.add_simplex(
+        {static_cast<morseframes::VertexId>(6 * facet_count)}, 0.0);
+    complex.finalize();
+    const auto expected =
+        FSequenceBuilder(complex).build_flooding_reduction_kernel();
+    for (std::size_t workers : {1, 2, 4, 8}) {
+      const auto compare = [&](const auto& actual) {
+        morseframes::validate_morse_sequence(complex, actual);
+        assert(expected.steps().size() == actual.steps().size());
+        for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+          const auto& a = expected.steps()[i];
+          const auto& b = actual.steps()[i];
+          assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+                 a.level == b.level);
+        }
+      };
+      compare(FSequenceBuilder(complex)
+                  .build_flooding_reduction_kernel_parallel(workers));
+      for (bool detailed : {false, true}) {
+        morseframes::MorseSequenceBuildMetrics metrics;
+        compare(FSequenceBuilder(complex, &metrics, detailed)
+                    .build_flooding_reduction_kernel_parallel(workers));
+        assert(metrics.reduction_kernel_parallel_batches <=
+               metrics.reduction_kernel_rounds);
+        assert(metrics.reduction_kernel_facet_parallel_tasks <=
+               workers * metrics.reduction_kernel_parallel_batches);
+        assert(metrics.reduction_kernel_max_parallel_facets <= workers);
+        if (!detailed || workers == 1) {
+          assert(metrics.reduction_kernel_facet_parallel_tasks == 0);
+        } else {
+          assert(metrics.reduction_kernel_facet_parallel_tasks > 0);
+        }
+      }
+    }
+  }
+}
+
+void test_reduction_kernel_facet_failure_drains_tasks() {
+  struct FailingFacetView : FilteredSimplicialComplex {
+    mutable std::atomic<std::size_t> failures{0};
+    const std::vector<morseframes::VertexId>& vertices(
+        morseframes::SimplexId) const {
+      // In a sparse graph, only the local facet kernel needs vertices().
+      // Every submitted task fails on its first chunk, even after a peer fails.
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      ++failures;
+      throw std::runtime_error("facet failure");
+    }
+  };
+  FailingFacetView complex;
+  const std::vector<double> values(81, 0.0);
+  for (morseframes::VertexId v = 1; v < values.size(); ++v) {
+    add_weighted_closure(complex, {0, v}, values);
+  }
+  complex.finalize();
+  assert(complex.size() > 128);
+  for (std::size_t workers : {2, 4, 8}) {
+    for (bool detailed : {false, true}) {
+      complex.failures = 0;
+      auto executor = std::make_shared<morseframes::BoundedTaskExecutor>(workers);
+      morseframes::ReductionKernelExecutionOptions options;
+      options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+      options.collect_metrics = detailed;
+      morseframes::ReductionKernelWorkspace<FailingFacetView> workspace(
+          complex, options, executor);
+      bool propagated = false;
+      try {
+        (void)workspace.compute_level_isolated(0);
+      } catch (const std::runtime_error& error) {
+        propagated = std::string(error.what()) == "facet failure";
+      }
+      assert(propagated);
+      // Check BEFORE workspace/executor teardown can implicitly join workers.
+      assert(complex.failures == workers);
+      auto following = executor->submit([]() { return 17; });
+      assert(executor->get(following) == 17);
     }
   }
 }
@@ -1504,6 +1607,8 @@ int main() {
   test_flooding_reduction_kernel_on_shared_facets();
   test_reduction_kernel_packed_core_matches_sparse_cache();
   test_reduction_kernel_linear_sparse_incidence();
+  test_reduction_kernel_batched_facets();
+  test_reduction_kernel_facet_failure_drains_tasks();
   test_instrumentation_metrics();
 
   std::cout << "All Morse persistence prototype tests passed.\n";

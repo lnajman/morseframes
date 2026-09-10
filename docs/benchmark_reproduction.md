@@ -5,10 +5,10 @@ repository. It is meant for software reproducibility: manuscript text and
 discussion notes live outside the public repository, in the private manuscript
 workspace until a public preprint or published version exists.
 
-The closure-based incidence section records the latest ReductionKernel update.
-The controlled packed-coface A/B, direct TTK comparison, and pre-incidence phase
-profile sections retain earlier snapshots, labeled by their measured revisions;
-those timings must not be treated as fresh measurements of subsequent changes.
+The facet-task batching section records the latest ReductionKernel update.
+The closure-based incidence, controlled packed-coface A/B, direct TTK comparison,
+and earlier phase-profile sections retain historical snapshots; those timings
+must not be treated as fresh measurements of subsequent changes.
 
 Run commands from the repository root.
 
@@ -652,7 +652,131 @@ efficiencies are 0.33 and 0.39, respectively.
 The grid-size aggregates are generated in
 `docs/tetrahedral_worker_scaling_table.tex`.
 
-## Closure-Based Incidence Update
+## Facet-Task Batching Update
+
+Following the `f466631` incidence update, intra-level RK now submits at most one
+long-lived facet task per configured worker in each round. Tasks claim chunks
+of consecutive facets and write disjoint preallocated result slots; merging
+still consumes results in canonical order. Chunk size is
+`max(1, facet_count / task_count / 4)` with integer division. This removes the
+individual facet futures and the barrier after each worker-sized wave, without
+changing local kernel choices, sequential execution, independent-level
+scheduling, or the global worker budget. Submitted tasks are drained before
+any local-kernel or submission exception propagates.
+
+The diagnostic `parallel_batches` counter now counts parallel facet rounds,
+not the old worker-sized waves. The new `facet_parallel_tasks` counts submitted
+facet-worker tasks; it is at most workers times parallel rounds. These counters
+are exposed through the C++ and native Python profiling APIs. Coarse profiling
+and uninstrumented execution do not collect detailed facet counters.
+
+The controlled comparison uses baseline `f466631`, eight alternating blocks
+of three uninstrumented repetitions and two warmups, on the Apple M1 Max with
+native ARM Clang 15 and `-std=c++17 -O3 -DNDEBUG -pthread`. Timing includes a
+fresh builder, workspace, worker pool, replay, and internal teardown; topology,
+validation, protocol I/O, and returned-sequence destruction are excluded.
+There is no persistence computation. The candidate header digest recorded by
+the harness is `ee0fc1448aa1296752f589af1c9c1a4838696d742fcf9847a3d5fda577d74676`.
+
+```sh
+LC_ALL=C python3 tools/benchmark_reduction_kernel_ab.py \
+  --baseline f466631 --candidate WORKTREE \
+  --family volume --filtration plateau --sizes 4 8 12 --seeds 0 \
+  --workers 1 2 4 8 --blocks 8 --repeats 3 --warmups 2 \
+  --input-dir ../rk-ab-inputs \
+  --output ../rk-facet-batch-volume-plateau-ab.json
+```
+
+Complementary runs use the same options with these substitutions:
+
+| Family | Filtration | Sizes | Seeds | Output basename |
+| --- | --- | --- | --- | --- |
+| terrain | plateau | 16, 32 | 0 | `rk-facet-batch-terrain-plateau-ab.json` |
+| volume | lower-star | 16, 32 | 0, 2 | `rk-facet-batch-volume-lower-star-ab.json` |
+| terrain | lower-star | 16, 64 | 0, 2 | `rk-facet-batch-terrain-lower-star-ab.json` |
+
+All 52 configurations preserve every sequence field and critical count across
+revisions and worker counts. Selected eight-worker plateau results are:
+
+| Input | Before (ms) | After (ms) | Paired after/before ratio |
+| --- | ---: | ---: | ---: |
+| 2D terrain, `n=32` | 66.49 | 4.49 | 0.0749 |
+| 3D volume, `n=8` | 26.61 | 2.72 | 0.0957 |
+| 3D volume, `n=12` | 122.61 | 10.16 | 0.0829 |
+
+Times are medians of all raw samples; ratios are medians of paired block
+ratios, so they need not equal ratios of the displayed times. All 15
+multiworker plateau configurations improve, with paired-bootstrap intervals
+below one. For the largest volume, two/four/eight-worker paired ratios are
+0.200, 0.097, and 0.083. The sequential candidate median is 8.53 ms: batching
+greatly reduces the parallel penalty but **does not establish an advantage
+over sequential RK on these plateaus**.
+
+A fresh confirmation uses twelve blocks of three repetitions: plateau volumes
+`8 12`, terrain `32`, seed `0`, workers `1 8`, and all ordinary lower-star
+controls above. Output basenames replace `-ab.json` with `-confirmation.json`.
+All 38 additional configurations preserve exact gradients. Confirmed
+eight-worker paired ratios are 0.0979 and 0.0610 for the two volumes, and
+0.0599 for the terrain; each is below one in all twelve blocks. The confirmed
+largest volume takes 8.43 ms at eight workers versus 7.43 ms sequentially.
+
+Ordinary lower-star controls show mixed timing shifts. Median eight-worker
+paired ratios across inputs are 1.003 initially / 0.974 in confirmation for
+volumes and 1.018 / 1.013 for terrains. No ordinary configuration has an
+above-one paired-bootstrap interval in both sessions. Two appear only in
+confirmation (volume `n=32`, seed 0, four workers; terrain `n=16`, seed 0,
+two workers). This is a nonregression check, not proof of performance
+equivalence or a general lower-star speedup. Session-level bootstrap intervals
+do not cover machine or between-session variability.
+
+A separate candidate phase run covers 13 inputs at 1/2/4/8 workers, retaining
+24 uninstrumented, eight coarse, and three detailed samples per configuration,
+plus warmups. All 52 configurations preserve the exact gradient. The largest
+volume still evaluates 40,806 facet kernels and visits 580,792 incidence
+entries, but at eight workers now submits only 143 facet tasks in 18 parallel
+rounds. The historical implementation used 5,108 worker-sized waves. The
+`n=32` terrain similarly drops from 2,744 waves to 249 tasks in 32 rounds,
+with its 21,854 facet kernels unchanged.
+
+For the largest volume, eight-worker detailed facet execution including
+dispatch/wait is about 2.62 ms and 29.6% of level wall time, versus about
+139 ms / 95.4% in the earlier diagnostic snapshot. Facet discovery accounts
+for 28.1%, closure construction 23.7%, and incidence 13.1%. For the terrain,
+facet execution is 49.9% and facet discovery 35.4%. These are median per-run
+elapsed shares on single-level inputs; cumulative local worker times must not
+be added to them. The fresh A/B tests above, not differences between separate
+diagnostic sessions, support the performance claim.
+
+The phase run's uninstrumented largest-volume medians are 7.63, 8.74, 8.00,
+and 8.67 ms at 1/2/4/8 workers. More workers still do not guarantee a faster
+plateau computation. Ordinary `n=32` lower stars retain about 2.81-fold
+eight-worker speedup in this separate phase run, with builder initialization
+about 31% of total coarse time. Phase-specific task granularity, especially
+facet discovery on modest active buckets, is the next plateau target; generic
+builder initialization remains separate ordinary-lower-star work.
+
+```sh
+LC_ALL=C python3 tools/benchmark_reduction_kernel_phases.py \
+  --input-dir ../rk-ab-inputs --output ../rk-phases-facet-batch.json
+
+python3 tools/render_reduction_kernel_phases.py \
+  --input ../rk-phases-facet-batch.json \
+  --table-output docs/reduction_kernel_facet_batch_phase_table.tex
+```
+
+The earlier phase tables remain historical. All raw timing samples, input and
+header hashes, intervals, counters, and exact-check results remain in the
+local JSON files under the repository output policy.
+
+Unit tests check exact gradients under uninstrumented, coarse, and detailed
+execution at 1/2/4/8 workers, with uneven chunk tails, mixed facet sizes,
+dimensions through five, inline/event overflow, and shared sparse faces.
+Structural bounds ensure at most one facet task per worker per parallel round.
+A throwing complex-view test verifies that all submitted facet tasks finish
+before the exception returns, with the executor still alive and reusable.
+Existing packed/sparse boundary tests and independent-level checks remain.
+
+## Closure-Based Incidence Update (Historical: `f466631`)
 
 This update implements the incidence optimization identified by the `8a2bd06`
 profile below. Sparse levels now accumulate saturated incidence by traversing
@@ -672,7 +796,7 @@ destruction remain outside timing.
 
 ```sh
 LC_ALL=C python3 tools/benchmark_reduction_kernel_ab.py \
-  --baseline 8a2bd06 --candidate WORKTREE \
+  --baseline 8a2bd06 --candidate f466631 \
   --family volume --filtration plateau --sizes 4 8 12 --seeds 0 \
   --workers 1 2 4 8 --blocks 8 --repeats 3 --warmups 2 \
   --input-dir ../rk-ab-inputs \
@@ -722,16 +846,17 @@ This is a regression check, not a claim of a general lower-star speedup or
 formal performance equivalence; absolute timings and small differences remain
 sensitive to system state.
 
-A separate current-code phase profile confirms that the all-pairs work is
+A separate `f466631` phase profile confirms that the all-pairs work is
 gone. Every worker count now records identical sparse incidence-entry visit
 counts. For the `n=12` volume this is 580,792 closure-entry visits, the same as
 the sequential implementation, replacing the old parallel path's 663,665,205
 containment tests. Eight-worker diagnostic incidence time is about 1.33 ms.
 Facet execution (including dispatch/wait) takes about 139 ms, or 95.4% of the
 level-processing interval. These are separate diagnostic measurements, not
-the uninstrumented timings in the A/B table. The next plateau optimization
-should batch facet tasks while preserving canonical result order; builder
-initialization remains a separate target for ordinary lower stars.
+the uninstrumented timings in the A/B table. This motivated the facet-task
+batching update above; builder initialization remains a separate target for
+ordinary lower stars. Check out `f466631` before reproducing this historical
+phase snapshot:
 
 ```sh
 LC_ALL=C python3 tools/benchmark_reduction_kernel_phases.py \
@@ -742,7 +867,7 @@ python3 tools/render_reduction_kernel_phases.py \
   --table-output docs/reduction_kernel_incidence_phase_table.tex
 ```
 
-The current phase run contains 13 inputs at 1/2/4/8 workers, with separate
+This historical phase run contains 13 inputs at 1/2/4/8 workers, with separate
 uninstrumented and diagnostic samples and exact sequence checks throughout.
 The preceding `docs/reduction_kernel_phase_table.tex` remains the historical
 pre-incidence table. Unit tests additionally bound incidence-entry visits by

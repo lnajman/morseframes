@@ -174,6 +174,7 @@ int main(int argc, char** argv) {
           RK_COUNT(min_worker_levels); RK_COUNT(max_worker_levels);
           RK_COUNT(min_worker_simplices); RK_COUNT(max_worker_simplices);
           RK_COUNT(rounds); RK_COUNT(facet_kernels); RK_COUNT(parallel_batches);
+          RK_COUNT(facet_parallel_tasks);
           RK_COUNT(max_parallel_facets); RK_COUNT(max_parallel_levels);
           RK_COUNT(facet_discovery_parallel_tasks); RK_COUNT(essential_parallel_tasks);
           RK_COUNT(facet_discovery_coboundary_visits); RK_COUNT(facet_discovery_mask_tests);

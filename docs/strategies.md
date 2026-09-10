@@ -334,8 +334,17 @@ excluded from subsequent gradient timings. The generic `ComplexView` contract
 is unchanged, and multiworker execution continues to use worker-local topology.
 
 The companion strategy `"flooding-reduction-kernel-parallel"` uses the same
-workspace and local-kernel routine. Facet cells in a round are evaluated in
-bounded batches against one immutable active-set snapshot. A reusable task pool
+workspace and local-kernel routine. Facet cells in a round are evaluated against
+one immutable active-set snapshot. At most one long-lived task per configured
+worker claims contiguous chunks of facets (roughly four chunks per worker),
+writing disjoint preallocated result slots. All tasks finish before results are
+consumed in canonical facet order. There is no per-facet future or barrier after
+each worker-sized group; failures drain the submitted tasks before propagating.
+The diagnostic `parallel_batches` counter now counts parallel facet rounds,
+not the former worker-sized waves. `facet_parallel_tasks` counts submitted
+facet-worker tasks; `max_parallel_facets` remains their maximum per-round
+concurrency bound, not measured CPU utilization. Sequential local execution and
+independent-level scheduling are unchanged. A reusable task pool
 is shared by level and facet work; waiting tasks cooperatively execute queued
 work, allowing nested parallelism without deadlock or repeated thread creation.
 Small levels discover facets and compute their core with the packed word

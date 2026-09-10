@@ -15,6 +15,11 @@ import render_tetrahedral_phase_profile as render  # noqa: E402
 
 
 class TetrahedralPhaseProfileBenchmarkTest(unittest.TestCase):
+    def test_zero_load_ratio_is_undefined(self):
+        self.assertTrue(math.isnan(bench._ratio(10.0, 0.0)))
+        self.assertTrue(math.isnan(bench._ratio(0.0, 0.0)))
+        self.assertEqual(bench._ratio(10.0, 5.0), 2.0)
+
     @unittest.skipUnless(bench.mp.cpp_backend_available(), "requires native timings")
     def test_phase_profile_contract(self):
         rows = bench.benchmark_profile(
@@ -85,9 +90,19 @@ class TetrahedralPhaseProfileBenchmarkTest(unittest.TestCase):
         self.assertGreaterEqual(
             parallel_kernel.reduction_kernel_task_time_imbalance, 1.0
         )
-        self.assertGreaterEqual(parallel_kernel.reduction_kernel_chunk_imbalance, 1.0)
-        self.assertGreaterEqual(parallel_kernel.reduction_kernel_level_imbalance, 1.0)
-        self.assertGreaterEqual(parallel_kernel.reduction_kernel_simplex_imbalance, 1.0)
+        # Dynamic claiming need not give every worker a chunk on this tiny
+        # input. An idle worker has zero chunks/levels/simplices, so all three
+        # max/min ratios are undefined; requiring >= 1 depends on scheduling.
+        load_ratios = (
+            parallel_kernel.reduction_kernel_chunk_imbalance,
+            parallel_kernel.reduction_kernel_level_imbalance,
+            parallel_kernel.reduction_kernel_simplex_imbalance,
+        )
+        if any(math.isnan(ratio) for ratio in load_ratios):
+            self.assertTrue(all(math.isnan(ratio) for ratio in load_ratios))
+        else:
+            self.assertTrue(all(math.isfinite(ratio) and ratio >= 1.0
+                                for ratio in load_ratios))
 
         output = StringIO()
         bench.write_rows(rows, output, "csv")

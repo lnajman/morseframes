@@ -684,6 +684,16 @@ class PythonApiTest(unittest.TestCase):
                 "sequence_reduction_kernel_aggregation_nanoseconds",
                 parallel_kernel_profile.frame_metrics,
             )
+            self.assertLessEqual(
+                parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_facet_parallel_tasks"
+                ],
+                parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_executor_workers"
+                ] * parallel_kernel_profile.frame_metrics[
+                    "sequence_reduction_kernel_parallel_batches"
+                ],
+            )
             if (
                 parallel_kernel_profile.frame_metrics[
                     "sequence_reduction_kernel_executor_workers"
@@ -1568,6 +1578,32 @@ class PythonApiTest(unittest.TestCase):
                     )
                 if _gudhi_available():
                     mp.assert_matches_gudhi(complex_)
+
+    def test_reduction_kernel_batched_facet_metrics(self):
+        complex_ = mp.FilteredComplex.from_lower_star(
+            [(0, v, v + 1) for v in range(1, 34)],
+            {v: 0.0 for v in range(35)},
+        )
+        sequential = mp.compute_morse_sequence(
+            complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_SEQUENCE
+        )
+        parallel = mp.compute_morse_sequence(
+            complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+            max_workers=4,
+        )
+        self.assertEqual(sequential.steps, parallel.steps)
+        if mp.cpp_backend_available() and complex_.cpp_backend_active():
+            metrics = mp.profile_morse_sequence(
+                complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+                max_workers=4,
+            ).metrics
+            self.assertGreater(metrics["reduction_kernel_facet_parallel_tasks"], 0)
+            self.assertLessEqual(metrics["reduction_kernel_parallel_batches"],
+                                 metrics["reduction_kernel_rounds"])
+            self.assertLessEqual(metrics["reduction_kernel_facet_parallel_tasks"],
+                                 4 * metrics["reduction_kernel_parallel_batches"])
+            self.assertLess(metrics["reduction_kernel_facet_parallel_tasks"],
+                            metrics["reduction_kernel_facet_kernels"])
 
     def test_reduction_kernel_high_dimensional_inline_overflow(self):
         vertices = tuple(range(5))

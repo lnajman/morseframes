@@ -1,5 +1,9 @@
 # PLS priority-key storage: profiling and optimization
 
+The subsequent [on-demand RK closure study](rk_lazy_closure_benchmark.md)
+changes RK only and refreshes RK/PLS/F-Max through dimension seven. The results
+below remain the historical key-storage study and latest direct TTK comparison.
+
 **Contiguous priority-key storage makes PLS faster without changing its ordered
 gradient.** All 56 paired configuration medians improve across two A/B studies;
 53 of their 56 within-session intervals are wholly below one. On the largest

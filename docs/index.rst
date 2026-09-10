@@ -50,6 +50,7 @@ The current public alpha can be installed from PyPI:
    simplicial_gradient_benchmark
    pls_ttk_gradient_benchmark
    pls_key_arena_benchmark
+   rk_lazy_closure_benchmark
    reduction_kernel_correctness
    phase0_conventions
 

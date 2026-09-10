@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include "../pls_profile.hpp"
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -105,6 +106,7 @@ struct Timing {
   double total = 0.0;
   Phases phases;
   Phases gradient_details;
+  Phases pls_profile;
 };
 
 struct MorseRun {
@@ -165,6 +167,7 @@ std::unique_ptr<MorseRun> run_morse(const Input& input, int algorithm, int worke
           {"emission_and_updates", 1e-9 * m.emit_nanoseconds},
           {"callbacks", 1e-9 * m.callback_nanoseconds}};
     } else if (algorithm == 3) {
+      run->timing.pls_profile = pls_phase_profile(m);
       run->timing.gradient_details = {
           {"lower_star_setup", 1e-9 * m.process_lower_stars_setup_nanoseconds},
           {"local_processing", 1e-9 * m.process_lower_stars_local_wall_nanoseconds},
@@ -323,6 +326,10 @@ void write_timing(const Timing& timing) {
   write_phases(timing.phases);
   std::cout << ",\"gradient_details_seconds\":";
   write_phases(timing.gradient_details);
+  if (!timing.pls_profile.empty()) {
+    std::cout << ",\"pls_profile_seconds\":";
+    write_phases(timing.pls_profile);
+  }
   std::cout << '}';
 }
 

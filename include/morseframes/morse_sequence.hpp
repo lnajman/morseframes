@@ -47,6 +47,8 @@ struct MorseStep {
   LevelId level = 0;
 };
 
+#define MORSEFRAMES_PLS_PHASE_PROFILE_VERSION 1
+
 struct MorseSequenceBuildMetrics {
   std::uint64_t init_nanoseconds = 0;
   std::uint64_t candidate_seed_nanoseconds = 0;
@@ -75,6 +77,21 @@ struct MorseSequenceBuildMetrics {
   std::uint64_t process_lower_stars_cumulative_task_nanoseconds = 0;
   std::uint64_t process_lower_stars_min_task_nanoseconds = 0;
   std::uint64_t process_lower_stars_max_task_nanoseconds = 0;
+  // Disjoint children of setup/local/cleanup, not additional wall time.
+  std::uint64_t process_lower_stars_output_init_nanoseconds = 0;
+  std::uint64_t process_lower_stars_vertex_order_nanoseconds = 0;
+  std::uint64_t process_lower_stars_executor_init_nanoseconds = 0;
+  std::uint64_t process_lower_stars_storage_init_nanoseconds = 0;
+  std::uint64_t process_lower_stars_owner_keys_nanoseconds = 0;
+  std::uint64_t process_lower_stars_partition_nanoseconds = 0;
+  std::uint64_t process_lower_stars_schedule_nanoseconds = 0;
+  std::uint64_t process_lower_stars_execution_nanoseconds = 0;
+  std::uint64_t process_lower_stars_cleanup_nanoseconds = 0;
+  std::uint64_t process_lower_stars_events_index_cleanup_nanoseconds = 0;
+  std::uint64_t process_lower_stars_keys_cleanup_nanoseconds = 0;
+  std::uint64_t process_lower_stars_membership_cleanup_nanoseconds = 0;
+  std::uint64_t process_lower_stars_executor_cleanup_nanoseconds = 0;
+  std::uint64_t process_lower_stars_vertices_cleanup_nanoseconds = 0;
   std::size_t candidate_pushes = 0;
   std::size_t candidate_pops = 0;
   std::size_t stale_candidate_skips = 0;
@@ -1051,6 +1068,30 @@ class FSequenceBuilder {
     MorseSequence sequence(n);
     auto&& callback = on_step;
 
+    profile_add(&MorseSequenceBuildMetrics::process_lower_stars_output_init_nanoseconds,
+                setup_start);
+    // Observe natural reverse-order destruction without moving it out of the
+    // gradient call or explicitly freeing buffers earlier in profiled runs.
+    auto cleanup_start = SequenceClock::time_point{};
+    struct CleanupCheckpoint {
+      MorseSequenceBuildMetrics* metrics;
+      std::uint64_t MorseSequenceBuildMetrics::* field;
+      SequenceClock::time_point& start;
+      ~CleanupCheckpoint() {
+        if (metrics != nullptr && start != SequenceClock::time_point{}) {
+          const auto stop = SequenceClock::now();
+          const auto elapsed = static_cast<std::uint64_t>(
+              std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start).count());
+          metrics->*field += elapsed;
+          metrics->process_lower_stars_cleanup_nanoseconds += elapsed;
+          start = stop;
+        }
+      }
+    };
+    CleanupCheckpoint vertices_cleanup{sequence_metrics_,
+        &MorseSequenceBuildMetrics::process_lower_stars_vertices_cleanup_nanoseconds,
+        cleanup_start};
+    const auto vertices_start = profile_start();
     std::vector<SimplexId> vertex_order;
     vertex_order.reserve(n);
     std::unordered_map<VertexId, SimplexId> vertex_simplex;
@@ -1086,11 +1127,29 @@ class FSequenceBuilder {
       vertex_rank.emplace(complex_.vertices(vertex_order[rank])[0], rank);
     }
 
+    profile_add(&MorseSequenceBuildMetrics::process_lower_stars_vertex_order_nanoseconds,
+                vertices_start);
+    CleanupCheckpoint executor_cleanup{sequence_metrics_,
+        &MorseSequenceBuildMetrics::process_lower_stars_executor_cleanup_nanoseconds,
+        cleanup_start};
+    const auto executor_start = profile_start();
     BoundedTaskExecutor executor(max_workers);
     const std::size_t worker_count = executor.worker_count();
+    profile_add(&MorseSequenceBuildMetrics::process_lower_stars_executor_init_nanoseconds,
+                executor_start);
+    CleanupCheckpoint membership_cleanup{sequence_metrics_,
+        &MorseSequenceBuildMetrics::process_lower_stars_membership_cleanup_nanoseconds,
+        cleanup_start};
+    const auto storage_start = profile_start();
     std::vector<SimplexId> owner(n, kInvalidSimplex);
     std::vector<std::vector<SimplexId>> owned(vertex_order.size());
+    CleanupCheckpoint keys_cleanup{sequence_metrics_,
+        &MorseSequenceBuildMetrics::process_lower_stars_keys_cleanup_nanoseconds,
+        cleanup_start};
     std::vector<std::vector<std::size_t>> robins_key(n);
+    profile_add(&MorseSequenceBuildMetrics::process_lower_stars_storage_init_nanoseconds,
+                storage_start);
+    const auto owner_keys_start = profile_start();
     auto build_owner_and_key = [&](SimplexId simplex) {
       const auto& vertices = complex_.vertices(simplex);
       if (vertices.empty()) {
@@ -1147,6 +1206,12 @@ class FSequenceBuilder {
         build_owner_and_key(simplex);
       }
     }
+    profile_add(&MorseSequenceBuildMetrics::process_lower_stars_owner_keys_nanoseconds,
+                owner_keys_start);
+    CleanupCheckpoint events_index_cleanup{sequence_metrics_,
+        &MorseSequenceBuildMetrics::process_lower_stars_events_index_cleanup_nanoseconds,
+        cleanup_start};
+    const auto partition_start = profile_start();
     // Dense simplex IDs let every star share an immutable direct-index map.
     // Its entries refer to positions in disjoint, worker-local state buffers.
     std::vector<std::size_t> local_index(n);
@@ -1154,6 +1219,8 @@ class FSequenceBuilder {
       local_index[simplex] = owned[owner[simplex]].size();
       owned[owner[simplex]].push_back(simplex);
     }
+    profile_add(&MorseSequenceBuildMetrics::process_lower_stars_partition_nanoseconds,
+                partition_start);
 
     struct RobinsMinPriority {
       const std::vector<std::vector<std::size_t>>* keys = nullptr;
@@ -1324,6 +1391,8 @@ class FSequenceBuilder {
       for (std::size_t star_rank = 0; star_rank < vertex_order.size(); ++star_rank) {
         process_lower_star(star_rank, workspace);
       }
+      profile_add(&MorseSequenceBuildMetrics::process_lower_stars_execution_nanoseconds,
+                  local_start);
       if (sequence_metrics_ != nullptr) {
         sequence_metrics_->process_lower_stars_min_task_load = n;
         sequence_metrics_->process_lower_stars_max_task_load = n;
@@ -1337,6 +1406,7 @@ class FSequenceBuilder {
             task_nanoseconds;
       }
     } else {
+      const auto schedule_start = profile_start();
       const std::size_t task_count = std::min(worker_count, vertex_order.size());
       std::vector<std::size_t> star_ranks(vertex_order.size());
       std::iota(star_ranks.begin(), star_ranks.end(), 0);
@@ -1358,6 +1428,9 @@ class FSequenceBuilder {
         task_loads[task_index] += owned[star_rank].size();
       }
 
+      profile_add(&MorseSequenceBuildMetrics::process_lower_stars_schedule_nanoseconds,
+                  schedule_start);
+      const auto dispatch_start = profile_start();
       std::vector<std::future<void>> futures;
       futures.reserve(task_count);
       const bool measure_tasks = sequence_metrics_ != nullptr;
@@ -1399,6 +1472,8 @@ class FSequenceBuilder {
         sequence_metrics_->process_lower_stars_max_task_nanoseconds =
             *std::max_element(task_nanoseconds.begin(), task_nanoseconds.end());
       }
+      profile_add(&MorseSequenceBuildMetrics::process_lower_stars_execution_nanoseconds,
+                  dispatch_start);
     }
     profile_add(
         &MorseSequenceBuildMetrics::process_lower_stars_local_wall_nanoseconds,
@@ -1425,6 +1500,7 @@ class FSequenceBuilder {
     profile_add(&MorseSequenceBuildMetrics::process_lower_stars_replay_nanoseconds,
                 replay_start);
 
+    cleanup_start = profile_start();
     return sequence;
   }
 

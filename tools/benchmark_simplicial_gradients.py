@@ -22,6 +22,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+from pls_phase_profile import validate as validate_pls_profile
 
 from benchmark_reduction_kernel_ab import (
     ROOT, Worker, command_output, header_digest, snapshot_headers, summarize,
@@ -148,6 +149,7 @@ def main():
         "headers_patch": command_output("git", "diff", "HEAD", "--", "include"),
         "driver_sha256": digest(source), "runner_sha256": digest(Path(__file__)),
         "helper_sha256": digest(ROOT / "tools/benchmark_reduction_kernel_ab.py"),
+        "profile_helper_sha256": digest(ROOT / "benchmarks/pls_profile.hpp"),
         "settings": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()
                      if k != "inputs"},
         "timing_scope": "Prepared common native complex; fresh builder plus full gradient, "
@@ -231,6 +233,11 @@ def main():
                             profile = w.read()
                             if profile["stars"] != identity["vertices"]:
                                 raise AssertionError("Incorrect profile star count")
+                            if "pls_profile_seconds" in profile:
+                                profile["validated_fine_seconds"] = validate_pls_profile(
+                                    profile["pls_profile_seconds"], profile["setup_seconds"],
+                                    profile["local_wall_seconds"], profile["replay_seconds"],
+                                    profile["algorithm_seconds"] - profile["builder_seconds"])
                             profiles[v].append(profile)
                     memory = {v: {a: [] for a in ALGORITHMS} for v in VERSIONS}
                     for repeat in range(args.memory_repeats):

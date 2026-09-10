@@ -941,6 +941,23 @@ void test_process_lower_stars_triangle_boundary() {
   assert(parallel_metrics.process_lower_stars_setup_nanoseconds > 0);
   assert(parallel_metrics.process_lower_stars_local_wall_nanoseconds > 0);
   assert(parallel_metrics.process_lower_stars_replay_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_cleanup_nanoseconds > 0);
+  assert(parallel_metrics.process_lower_stars_cleanup_nanoseconds ==
+         parallel_metrics.process_lower_stars_events_index_cleanup_nanoseconds +
+         parallel_metrics.process_lower_stars_keys_cleanup_nanoseconds +
+         parallel_metrics.process_lower_stars_membership_cleanup_nanoseconds +
+         parallel_metrics.process_lower_stars_executor_cleanup_nanoseconds +
+         parallel_metrics.process_lower_stars_vertices_cleanup_nanoseconds);
+  assert(parallel_metrics.process_lower_stars_setup_nanoseconds >=
+         parallel_metrics.process_lower_stars_output_init_nanoseconds +
+         parallel_metrics.process_lower_stars_vertex_order_nanoseconds +
+         parallel_metrics.process_lower_stars_executor_init_nanoseconds +
+         parallel_metrics.process_lower_stars_storage_init_nanoseconds +
+         parallel_metrics.process_lower_stars_owner_keys_nanoseconds +
+         parallel_metrics.process_lower_stars_partition_nanoseconds);
+  assert(parallel_metrics.process_lower_stars_local_wall_nanoseconds >=
+         parallel_metrics.process_lower_stars_schedule_nanoseconds +
+         parallel_metrics.process_lower_stars_execution_nanoseconds);
   assert(parallel_metrics.process_lower_stars_cumulative_task_nanoseconds > 0);
   assert(parallel_metrics.process_lower_stars_max_task_nanoseconds >=
          parallel_metrics.process_lower_stars_min_task_nanoseconds);

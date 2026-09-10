@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from benchmark_reduction_kernel_ab import header_digest
 from benchmark_ttk_process_lower_stars import TTK_REVISION, write_ttk_input
+from pls_phase_profile import validate as validate_pls_profile
 import benchmark_simplicial_strategies as generators
 
 ALGORITHMS = ("f_max", "reduction_kernel", "ttk")
@@ -162,7 +163,7 @@ def summarize(result, repeats, diagnostics):
             entry["performance_phases_seconds"] = {
                 k: distribution([r[k] for r in raw["performance_phases_seconds"]])
                 for k in OUTER_PHASES[algorithm]}
-        totals, phases, details, shares = [], {}, {}, {}
+        totals, phases, details, shares, fine_details = [], {}, {}, {}, {}
         for row in rows:
             total = row["total_seconds"]
             distribution([total], positive=True)
@@ -171,6 +172,13 @@ def summarize(result, repeats, diagnostics):
             if set(inner) != DETAIL_PHASES[algorithm]:
                 raise ValueError("Missing or unexpected phase measurements")
             validate_outer(outer, total, algorithm)
+            if "pls_profile_seconds" in row:
+                if algorithm != "process_lower_stars":
+                    raise ValueError("PLS profile on a different algorithm")
+                fine = validate_pls_profile(row["pls_profile_seconds"], inner["lower_star_setup"],
+                    inner["local_processing"], inner["replay"], outer["gradient"])
+                for name, value in fine.items():
+                    fine_details.setdefault(name, []).append(value)
             if inner:
                 distribution(list(inner.values()))
                 remaining = outer["gradient"] - sum(inner.values())
@@ -188,6 +196,10 @@ def summarize(result, repeats, diagnostics):
         entry["phase_shares"] = {k: distribution(v) for k, v in shares.items()}
         entry["gradient_details_seconds"] = (
             {k: distribution(v) for k, v in details.items()} if details else None)
+        if fine_details:
+            if any(len(v) != diagnostics for v in fine_details.values()):
+                raise ValueError("Incomplete fine PLS profiles")
+            entry["pls_profile_seconds"] = {k: distribution(v) for k,v in fine_details.items()}
         summary[algorithm] = entry
     counts = [result["algorithms"][a]["critical_counts"] for a in algorithms]
     if result.get("critical_counts_match") != all(c == counts[0] for c in counts):

@@ -12,9 +12,27 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import benchmark_simplicial_gradients as benchmark
+import pls_phase_profile as profile
 
 
 class SimplicialGradientBenchmarkTests(unittest.TestCase):
+    def test_fine_profile_accounting(self):
+        values = {key: .1 for key in profile.FIELDS}
+        values["cleanup"] = .5
+        parsed = profile.validate(values, 1., 1., .2, 3.)
+        self.assertAlmostEqual(parsed["gradient_unattributed"], .3)
+        self.assertAlmostEqual(parsed["setup_unattributed"], .4)
+        self.assertAlmostEqual(parsed["local_unattributed"], .8)
+        for bad in [dict(values, keys_cleanup=2.), dict(values, cleanup=.6),
+                    dict(values, execution=float('nan')), dict(values, owner_keys=-1.),
+                    {k:v for k,v in values.items() if k != 'schedule'}]:
+            with self.assertRaises(ValueError):
+                profile.validate(bad, 1., 1., .2, 3.)
+        with self.assertRaises(ValueError):
+            profile.validate(values, .1, 1., .2, 3.)
+        with self.assertRaises(ValueError):
+            profile.validate(values, 1., 1., .2, 2.)
+
     def test_grid_shape_and_injective_values(self):
         for dimension in range(1, 8):
             text = benchmark.grid_input(dimension, 2, 0)
@@ -83,6 +101,12 @@ class SimplicialGradientBenchmarkTests(unittest.TestCase):
                     runs = worker.run(count, 6)
                     benchmark.check_runs(runs, 6)
                     self.assertEqual(len({tuple(r) for r in runs}), 6)
+                    worker.process.stdin.write(f"profile {count}\n"); worker.process.stdin.flush()
+                    row = worker.read()
+                    fine = profile.validate(row["pls_profile_seconds"], row["setup_seconds"],
+                        row["local_wall_seconds"], row["replay_seconds"],
+                        row["algorithm_seconds"] - row["builder_seconds"])
+                    self.assertGreater(fine["cleanup"], 0)
             finally:
                 worker.close()
             self.assertEqual(worker.process.returncode, 0)

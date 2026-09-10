@@ -4,6 +4,7 @@
 #include "morseframes/lower_star_complex.hpp"
 #include "morseframes/reduction_kernel_sequence.hpp"
 #include <array>
+#include "pls_profile.hpp"
 #include <chrono>
 #include <cstring>
 #include <fstream>
@@ -227,6 +228,17 @@ int main(int argc, char** argv) {
 #define PLS_TIME(name) std::cout << ",\"" #name "_seconds\":" << 1e-9 * m.process_lower_stars_##name##_nanoseconds
         PLS_TIME(setup); PLS_TIME(local_wall); PLS_TIME(replay);
 #undef PLS_TIME
+        const auto detail = pls_phase_profile(m);
+        if (!detail.empty()) {
+          std::cout << ",\"pls_profile_seconds\":{";
+          bool first = true;
+          for (const auto& [key, value] : detail) {
+            if (!first) std::cout << ',';
+            first = false;
+            std::cout << '"' << key << "\":" << value;
+          }
+          std::cout << '}';
+        }
         std::cout << ",\"stars\":" << m.process_lower_stars_count
                   << ",\"max_star_size\":" << m.process_lower_stars_max_star_size
                   << ",\"executor_workers\":" << m.process_lower_stars_executor_workers << '}' << std::endl;

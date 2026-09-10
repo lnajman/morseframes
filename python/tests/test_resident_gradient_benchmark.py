@@ -287,6 +287,7 @@ class ResidentGradientNativeTest(unittest.TestCase):
                     self.assertEqual(raw["performance_orders"][0],
                                      [bench.PLS_ALGORITHMS[a] for a in bench.PLS_ORDERS[2]])
                     self.assertGreater(summary["process_lower_stars"]["gradient_details_seconds"]["lower_star_setup"]["median"], 0)
+                    self.assertGreater(summary["process_lower_stars"]["pls_profile_seconds"]["cleanup"]["median"], 0)
                     for algorithm in bench.PLS_ALGORITHMS:
                         c = bench.performance_components(raw, algorithm)
                         for i in range(4):

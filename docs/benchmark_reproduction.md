@@ -8,7 +8,10 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
-The latest [on-demand RK closure study](rk_lazy_closure_benchmark.md) gives
+The latest [ordered local-lookup study](rk_ordered_lookup_benchmark.md) gives
+local-search counters, a controlled membership optimization, repeated 2D–7D
+timings, and their limitations. Construction remains separate and TTK is not
+rerun. The [on-demand RK closure study](rk_lazy_closure_benchmark.md) gives
 coarse/detailed profiling commands, two frozen 2D–7D A/B comparisons, and an
 automated raw-evidence audit. Loading/construction remain separate; TTK is not
 rerun for this change.

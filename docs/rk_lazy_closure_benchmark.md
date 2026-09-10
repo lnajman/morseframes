@@ -1,5 +1,9 @@
 # RK: preparing closures only for exposed facets
 
+The subsequent [ordered local-lookup study](rk_ordered_lookup_benchmark.md)
+optimizes membership searches inside RK and refreshes the RK/PLS/F-Max
+comparison. This page retains the preceding closure study unchanged below.
+
 **On-demand closure preparation reduces eight-worker RK time by about 13–20%
 on the two tested 7D inputs, in two clean A/B studies.** Ordered gradients and
 critical counts are unchanged. RK is now statistically indistinguishable from

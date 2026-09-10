@@ -5,10 +5,13 @@ scripts in this repository. The full command list is in
 {doc}`benchmark_reproduction`.
 
 For the latest **gradient-only** RK optimization and RK/PLS/F-Max comparison
-through dimension seven, see the [on-demand RK closure study](rk_lazy_closure_benchmark.md).
-It records repeatable 7D gains, the unresolved 5D parallel control, and unchanged
-critical counts. TTK is not rerun there; the [PLS key-storage study](pls_key_arena_benchmark.md)
-remains the latest direct TTK comparison in 2D/3D.
+through dimension seven, see the [ordered local-lookup study](rk_ordered_lookup_benchmark.md).
+It records repeatable sequential 7D gains, less consistent parallel results,
+and unchanged gradients. The preceding [on-demand RK closure study](rk_lazy_closure_benchmark.md)
+remains available as historical evidence, including its repeatable 7D gains,
+unresolved 5D parallel control, and unchanged critical counts. Neither RK study
+reruns TTK; the [PLS key-storage study](pls_key_arena_benchmark.md) remains the
+latest direct TTK comparison in 2D/3D, on its documented earlier RK revision.
 The preceding [direct optimized-PLS/TTK study](pls_ttk_gradient_benchmark.md)
 remains available as historical evidence.
 For the comparison of RK, ProcessLowerStars and F-Max through dimension seven,

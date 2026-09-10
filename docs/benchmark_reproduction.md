@@ -8,7 +8,10 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
-The latest [eligible-candidate study](rk_eligible_candidates_benchmark.md) gives
+The latest [boundary-index study](rk_boundary_index_benchmark.md) gives the
+closure breakdown, measured index-preparation cost, two frozen A/B studies,
+and their raw-evidence audit. Native construction remains separate; no TTK rerun.
+The preceding [eligible-candidate study](rk_eligible_candidates_benchmark.md) gives
 the scan optimization, initial and retained candidate evidence, two final
 frozen comparisons, and the protected-visit audit option. Loading/construction
 remain separate; PLS, F-Max, scheduling, and TTK are unchanged.

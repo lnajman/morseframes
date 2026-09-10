@@ -51,8 +51,8 @@ struct ReductionKernelMetrics {
   std::uint64_t aggregation_nanoseconds = 0;
   std::uint64_t merge_nanoseconds = 0;
   std::uint64_t closure_nanoseconds = 0;
-  // Initial includes packed preparation. The remaining timers partition
-  // sparse preparation work, with dispatch/clock overhead left in closure.
+  // Initial includes packed and boundary-index preparation. Traversal, sort,
+  // and materialization are disjoint, with loop/clock overhead left in closure.
   std::uint64_t closure_initial_nanoseconds = 0;
   std::uint64_t closure_packed_nanoseconds = 0;
   std::uint64_t closure_boundary_index_nanoseconds = 0;

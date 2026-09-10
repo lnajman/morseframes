@@ -1,5 +1,8 @@
 # RK: ordered eligible-candidate scans
 
+Historical snapshot: the subsequent [boundary-index study](rk_boundary_index_benchmark.md)
+profiles and optimizes the remaining closure-preparation work with fresh evidence.
+
 **The retained implementation reduces total sequential RK time by about 10.5%
 on the tested 7D seed-2 input in both final studies.** It removes approximately
 90% of repeated sparse candidate visits in 7D without changing coface queries
@@ -239,4 +242,3 @@ SHA-256 identities:
 - Final headers: `bf0a02634a602177ee8b4daefe5edc502dabf56b11e9656f61deb5ebbb5e3a64`.
 - Initial main: `f61466e07ec4ca768fb2cffad004a8d5d3c1b56b1b72bb28e18a08d75a4dc52f`.
 - Initial confirmation: `1a2436200d69fb842b21aee9804ad2a81a49f49bb8d4be5bd91b4300ad5286d9`.
-

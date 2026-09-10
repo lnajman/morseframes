@@ -5,7 +5,12 @@ scripts in this repository. The full command list is in
 {doc}`benchmark_reproduction`.
 
 For the latest **gradient-only** RK optimization, see the
-[eligible-candidate study](rk_eligible_candidates_benchmark.md): repeatable
+[boundary-index study](rk_boundary_index_benchmark.md): repeatable sequential
+7D gains, unresolved parallel gains, and explicit preparation/memory costs.
+The slower controls are retained; PLS, F-Max, and scheduling are unchanged.
+
+The preceding
+[eligible-candidate study](rk_eligible_candidates_benchmark.md) records repeatable
 sequential gains on 7D seed 2, uncertain parallel gains, and the retained
 volume-control caveats. PLS, F-Max, construction, and scheduling are unchanged.
 

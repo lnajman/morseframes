@@ -162,6 +162,12 @@ Consequently it produces exactly the same deterministic sequence as
 budget, including the calling thread. The pure-Python fallback accepts the same
 name and preserves the result but currently executes the kernels sequentially.
 
+The native implementation uses a shared immutable direct-index map and reuses
+worker-local classification, boundary and heap buffers across stars. Preparation
+of this workspace remains part of gradient construction; it does not require a
+cached function-specific complex. See the [higher-dimensional gradient study](simplicial_gradient_benchmark.md)
+for exact-sequence checks and separate setup, local-work and replay measurements.
+
 ## F-Min
 
 Canonical name:

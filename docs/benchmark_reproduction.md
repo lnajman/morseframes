@@ -8,6 +8,10 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
+The [simplicial gradient study](simplicial_gradient_benchmark.md) records the
+latest PLS workspace optimization and two controlled gradient-only comparisons
+of RK, PLS and F-Max through dimension seven, including critical counts and
+separate loading/construction times. TTK was not rerun for that study.
 The [boundary and ordering reuse study](native_order_reuse_benchmark.md) records
 the latest shared-constructor change, repeated construction measurements and
 the refreshed RK/F-Max/TTK comparison with timing caveats.

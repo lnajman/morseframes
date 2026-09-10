@@ -1,5 +1,11 @@
 # Parallel RK closure preparation: useful on one large level, still opt-in
 
+**Follow-up:** the [selective-gate experiment](rk_selective_closure_benchmark.md)
+adds a per-level size threshold. The historical results below are unchanged.
+To reproduce the broad gate with the current API, also set
+`options.parallel_closure_min_level_size = 0`; the current opt-in otherwise uses
+the new selective threshold.
+
 ## Decision
 
 **Implemented and correctness-tested, but disabled by default.** Parallel closure

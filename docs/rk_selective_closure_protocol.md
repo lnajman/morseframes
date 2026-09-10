@@ -81,3 +81,8 @@ previous broad-on experiment's peak-RSS cost remains a relevant caveat, not a
 new selective-gate measurement. The data-validation skill informs the controls,
 independent calculations and restrained conclusion; deliverables remain code and
 repository benchmark notes.
+
+**Results:** the [completed follow-up](rk_selective_closure_benchmark.md) meets
+the selected-case benefit/control criteria. The feature remains opt-in as
+precommitted; only one input exercises the new path, and sequential version
+warnings remain unresolved.

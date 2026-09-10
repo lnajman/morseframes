@@ -57,11 +57,21 @@ Simplex-tree adapter used by the public wrapper.
 ## Owning-complex construction diagnostics
 
 `FilteredSimplicialComplex::finalize()` preserves lexicographic simplex IDs,
-filtration ordering, boundary order and coboundary order. Its ordered lookup is
-built with end hints from the already-sorted pending simplices. Finalization also
-reserves simplex/boundary storage, reuses a temporary face buffer and reads each
-pending filtration value directly. These shared changes apply to every strategy
-using this owning complex; direct external complex views are unaffected.
+filtration ordering, boundary order and coboundary order. The finalized simplex
+array itself is the sorted lookup index: a compact array records the start of
+each first-vertex range, and lookup binary-searches the range's vertex key and
+then its simplex records. No second tree or duplicate vertex-key storage is
+needed. The range keys are sparse (not an array indexed by vertex ID), and
+range offsets remain valid when the complex is copied or moved. Const lookup
+does not lazily mutate the index.
+
+Finalization also reserves simplex/boundary storage, reuses a temporary face
+buffer and reads each pending filtration value directly. These shared changes
+apply to every strategy using this owning complex and to arbitrary monotone
+filtrations; direct external complex views are unaffected. Pending insertion
+still uses the ordered map, and newly inserted simplices become findable only
+after finalization, as before. Boundary lookup uses the same compact index and
+still checks missing faces and filtration monotonicity.
 
 For a separate diagnostic run:
 
@@ -81,7 +91,7 @@ uninstrumented performance measurements.
 `tools/benchmark_complex_construction.py` compares identical resident input
 arrays against two header snapshots, checks exact reference complexes and
 gradients, and measures construction, gradient execution and fresh-process peak
-memory separately. Archived headers use the legacy per-face adapter: its
+memory separately. Snapshots without the bulk header use the legacy per-face adapter: its
 per-insertion diagnostic clocks perturb enumeration, whose residual includes
 clock overhead. Current headers use the bulk path below with separate named
 phase diagnostics. Neither diagnostic mode contributes performance samples.

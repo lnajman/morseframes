@@ -82,19 +82,20 @@ class FilteredSimplicialComplex {
     }
 
     simplices_.clear();
-    simplex_to_id_.clear();
+    first_vertex_ranges_.clear();
     level_values_.clear();
     level_buckets_.clear();
     filtration_order_.clear();
     clear_same_level_closure_cache();
     record(&ComplexConstructionMetrics::reset_seconds);
 
-    // pending_ is already lexicographically sorted: preserve IDs and insert at
-    // the known end of the ordered lookup rather than searching it again.
+    // The records themselves are the sorted lookup index. Keep only the start
+    // of each first-vertex range, not a second tree with copied vertex keys.
     simplices_.reserve(pending_.size());
     for (const auto& [vertices, filtration] : pending_) {
-      const SimplexId id = checked_id(simplices_.size());
-      simplex_to_id_.emplace_hint(simplex_to_id_.end(), vertices, id);
+      (void)checked_id(simplices_.size());
+      if (first_vertex_ranges_.empty() || first_vertex_ranges_.back().vertex != vertices.front())
+        first_vertex_ranges_.push_back({vertices.front(), simplices_.size()});
       simplices_.push_back(Simplex{});
       simplices_.back().vertices = vertices;
       simplices_.back().dimension = checked_dimension(vertices.size() - 1);
@@ -271,14 +272,35 @@ class FilteredSimplicialComplex {
   SimplexId find_simplex(const std::vector<VertexId>& vertices) const {
     std::vector<VertexId> canonical = vertices;
     canonicalize(canonical);
-    auto it = simplex_to_id_.find(canonical);
-    if (it == simplex_to_id_.end()) {
-      return kInvalidSimplex;
-    }
-    return it->second;
+    return find_canonical_simplex(canonical);
   }
 
  private:
+  struct FirstVertexRange {
+    VertexId vertex;
+    std::size_t first;
+  };
+
+  SimplexId find_canonical_simplex(const std::vector<VertexId>& vertices) const {
+    if (vertices.empty()) return kInvalidSimplex;
+    const auto range = std::lower_bound(
+        first_vertex_ranges_.begin(), first_vertex_ranges_.end(), vertices.front(),
+        [](const FirstVertexRange& entry, VertexId vertex) { return entry.vertex < vertex; });
+    if (range == first_vertex_ranges_.end() || range->vertex != vertices.front())
+      return kInvalidSimplex;
+    const auto first = simplices_.begin() + range->first;
+    const auto last = range + 1 == first_vertex_ranges_.end()
+                          ? simplices_.end() : simplices_.begin() + (range + 1)->first;
+    const auto match = std::lower_bound(first, last, vertices,
+        [](const Simplex& simplex, const std::vector<VertexId>& key) {
+          // The first vertices are equal throughout this range.
+          return std::lexicographical_compare(simplex.vertices.begin() + 1, simplex.vertices.end(),
+                                               key.begin() + 1, key.end());
+        });
+    if (match == last || match->vertices != vertices) return kInvalidSimplex;
+    return static_cast<SimplexId>(match - simplices_.begin());
+  }
+
   void clear_same_level_closure_cache() {
     same_level_closure_cache_ready_ = false;
     same_level_closure_entries_ = {};
@@ -354,12 +376,11 @@ class FilteredSimplicialComplex {
           }
         }
 
-        auto face_it = simplex_to_id_.find(face_vertices);
-        if (face_it == simplex_to_id_.end()) {
+        const SimplexId face_id = find_canonical_simplex(face_vertices);
+        if (face_id == kInvalidSimplex) {
           throw std::invalid_argument("Input is not closed under faces.");
         }
 
-        const SimplexId face_id = face_it->second;
         if (simplices_[face_id].filtration > simplex.filtration + 1e-12) {
           throw std::invalid_argument("Filtration is not monotone on faces.");
         }
@@ -407,7 +428,7 @@ class FilteredSimplicialComplex {
 
   bool finalized_ = false;
   std::map<std::vector<VertexId>, double, VectorLess> pending_;
-  std::map<std::vector<VertexId>, SimplexId, VectorLess> simplex_to_id_;
+  std::vector<FirstVertexRange> first_vertex_ranges_;
   std::vector<Simplex> simplices_;
   std::vector<double> level_values_;
   std::vector<std::vector<SimplexId>> level_buckets_;

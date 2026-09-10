@@ -2019,6 +2019,72 @@ void test_complex_construction_contract() {
   assert(rejected);
 }
 
+void test_compact_simplex_lookup() {
+  using Vertices = std::vector<morseframes::VertexId>;
+  const auto missing = morseframes::kInvalidSimplex;
+  const auto largest = std::numeric_limits<morseframes::VertexId>::max();
+  const Vertices vertices{0, 4, 17, 1000, 4000000000u, largest};
+  const std::vector<Vertices> cells{{0, 17, 4000000000u}, {17, 1000, largest},
+                                   {4}, {4000000000u, largest}};
+  std::map<Vertices, double> oracle;
+  FilteredSimplicialComplex complex;
+  assert(complex.find_simplex({}) == missing);
+  assert(complex.find_simplex({0}) == missing);
+  for (const auto& cell : cells) {
+    for (unsigned mask = 1; mask < (1u << cell.size()); ++mask) {
+      Vertices face;
+      for (unsigned i = 0; i < cell.size(); ++i) if (mask & (1u << i)) face.push_back(cell[i]);
+      std::sort(face.begin(), face.end());
+      oracle[face] = 0;
+      std::reverse(face.begin(), face.end());
+      complex.add_simplex(face, 0);
+    }
+  }
+  assert(complex.find_simplex({0}) == missing); // Pending insertion is not finalization.
+  const auto check = [&](const auto& view) {
+    for (unsigned mask = 0; mask < (1u << vertices.size()); ++mask) {
+      Vertices face;
+      for (unsigned i = 0; i < vertices.size(); ++i) if (mask & (1u << i)) face.push_back(vertices[i]);
+      const auto it = oracle.find(face);
+      const auto expected = it == oracle.end() ? missing
+          : static_cast<morseframes::SimplexId>(std::distance(oracle.begin(), it));
+      assert(view.find_simplex(face) == expected);
+      std::reverse(face.begin(), face.end());
+      assert(view.find_simplex(face) == expected);
+    }
+    for (auto vertex : {1u, 3u, 5u, 999u, 4000000001u})
+      assert(view.find_simplex({vertex}) == missing);
+    bool rejected = false;
+    try { (void)view.find_simplex({17, 17}); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    assert(rejected);
+  };
+  complex.finalize(); check(complex);
+  auto copied = complex;
+  auto moved = std::move(copied);
+  check(moved);
+  auto concurrent = std::async(std::launch::async, [&] { check(moved); });
+  check(moved); concurrent.get();
+  complex.add_simplex({2}, 0);
+  complex.add_simplex({2, 17}, 0);
+  assert(complex.find_simplex({2}) == missing);
+  oracle[{2}] = 0; oracle[{2, 17}] = 0;
+  complex.finalize(); check(complex); // New prefix inserted between existing ranges.
+  assert(complex.find_simplex({2}) != missing);
+  assert(complex.find_simplex({17, 2}) != missing);
+  complex.finalize(); check(complex);
+  // Missing faces must still be detected, including a missing singleton at
+  // the start of an otherwise present first-vertex range.
+  for (const auto& bad : {std::vector<Vertices>{{2, 9}, {9}},
+                          std::vector<Vertices>{{2}, {9}, {2, 9, 17}}}) {
+    FilteredSimplicialComplex invalid;
+    for (const auto& face : bad) invalid.add_simplex(face, 0);
+    bool rejected = false;
+    try { invalid.finalize(); } catch (const std::invalid_argument&) { rejected = true; }
+    assert(rejected);
+  }
+}
+
 void test_bulk_lower_star_construction() {
   using Cells = std::vector<std::vector<morseframes::VertexId>>;
   const auto legacy = [](auto& complex, const auto& values, const auto& cells) {
@@ -2145,6 +2211,7 @@ void test_bulk_lower_star_construction() {
 }  // namespace
 
 int main() {
+  test_compact_simplex_lookup();
   test_bulk_lower_star_construction();
   test_complex_construction_contract();
   test_bounded_task_executor();

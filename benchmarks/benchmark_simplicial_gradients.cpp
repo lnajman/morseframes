@@ -4,7 +4,9 @@
 #include "morseframes/lower_star_complex.hpp"
 #include "morseframes/reduction_kernel_sequence.hpp"
 #include <array>
+#ifndef MORSEFRAMES_BENCHMARK_ORDINARY_ONLY
 #include "pls_profile.hpp"
+#endif
 #include <chrono>
 #include <cstring>
 #include <fstream>
@@ -29,6 +31,7 @@ double seconds(Clock::time_point a, Clock::time_point b) {
   return std::chrono::duration<double>(b - a).count();
 }
 // New counters must not break reproduction against historical header sets.
+#ifndef MORSEFRAMES_BENCHMARK_ORDINARY_ONLY
 template <typename Metrics, typename = void>
 struct HasSearchProfile : std::false_type {};
 template <typename Metrics>
@@ -105,6 +108,7 @@ void boundary_index_profile(const Metrics& m) {
               << ",\"closure_boundary_index_entries\":" << m.reduction_kernel_closure_boundary_index_entries;
   }
 }
+#endif
 std::uint64_t peak_bytes() {
   rusage usage{};
   if (getrusage(RUSAGE_SELF, &usage)) throw std::runtime_error("getrusage failed");
@@ -167,7 +171,15 @@ std::unique_ptr<Run> run(const Complex& complex, int algorithm, std::size_t work
                          bool diagnostic = false, bool detailed = false) {
   const auto start = Clock::now();
   auto result = std::make_unique<Run>();
+#ifdef MORSEFRAMES_BENCHMARK_ORDINARY_ONLY
+  // Same Run layout/ownership and timing boundaries, but no diagnostic call
+  // site or runtime flag can enable collection in this executable.
+  (void)diagnostic;
+  auto* metrics = static_cast<morseframes::MorseSequenceBuildMetrics*>(nullptr);
+  detailed = false;
+#else
   auto* metrics = diagnostic ? &result->metrics : nullptr;
+#endif
   if (algorithm == 2) result->rk = std::make_unique<RBuilder>(complex, metrics, detailed);
   else result->f = std::make_unique<FBuilder>(complex, metrics, false);
   const auto ready = Clock::now();
@@ -202,7 +214,7 @@ std::uint64_t fingerprint(const Sequence& sequence, std::ostream* dump = nullptr
   }
   return hash.value;
 }
-#ifdef MORSEFRAMES_RK_LEVEL_PROFILE_VERSION
+#if defined(MORSEFRAMES_RK_LEVEL_PROFILE_VERSION) && !defined(MORSEFRAMES_BENCHMARK_ORDINARY_ONLY)
 std::unique_ptr<Run> run_levels(const Complex& complex, std::size_t workers,
                                bool detailed, morseframes::ReductionKernelLevelProfile& trace) {
   const auto start = Clock::now();
@@ -357,6 +369,7 @@ int main(int argc, char** argv) {
         const auto r = run(complex, 2, workers);
         if (fingerprint(*r->sequence) != references[2]) throw std::runtime_error("RK differs");
         timing(*r); std::cout << std::endl;
+#ifndef MORSEFRAMES_BENCHMARK_ORDINARY_ONLY
       } else if (command == "rk_coarse" || command == "rk_detailed" ||
                  command == "rk_levels_coarse" || command == "rk_levels_detailed") {
         std::cin >> workers;
@@ -424,6 +437,7 @@ int main(int argc, char** argv) {
         std::cout << ",\"stars\":" << m.process_lower_stars_count
                   << ",\"max_star_size\":" << m.process_lower_stars_max_star_size
                   << ",\"executor_workers\":" << m.process_lower_stars_executor_workers << '}' << std::endl;
+#endif
       } else throw std::runtime_error("Unknown worker command");
     }
   } catch (const std::exception& error) {

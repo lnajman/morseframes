@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepared-complex F-Max/PLS/RK comparison and exact old/new PLS checks.
+"""Prepared-complex F-Max/PLS/RK comparison and exact old/new gradient checks.
 
 Construction is separate. Fresh builders, lower-star partitioning, priorities,
 worker pools, local work and replay remain inside gradient timing. No persistence.
@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import tempfile
 from pls_phase_profile import validate as validate_pls_profile
+from profile_reduction_kernel_simplicial import validate as validate_rk_profile
 
 from benchmark_reduction_kernel_ab import (
     ROOT, Worker, command_output, header_digest, snapshot_headers, summarize,
@@ -112,13 +113,15 @@ def parse_args(argv=None):
     p.add_argument("--repeats", type=int, default=3)
     p.add_argument("--warmups", type=int, default=2)
     p.add_argument("--profiles", type=int, default=3)
+    p.add_argument("--rk-profiles", type=int, default=0)
     p.add_argument("--memory-repeats", type=int, default=3)
     p.add_argument("--compiler", default="clang++")
     p.add_argument("--cxx-flags", default="-std=c++17 -O3 -DNDEBUG -pthread")
     p.add_argument("--output", type=Path, required=True)
     a = p.parse_args(argv)
     if (a.blocks < 4 or a.blocks % 2 or a.repeats < 1 or a.blocks * a.repeats % 6
-            or min(a.workers) < 1 or a.warmups < 1 or a.profiles < 1 or a.memory_repeats < 0):
+            or min(a.workers) < 1 or a.warmups < 1 or a.profiles < 1
+            or a.rk_profiles < 0 or a.memory_repeats < 0):
         p.error("positive counts, even blocks >= 4, and total repetitions divisible by 6 required")
     if len(set(a.workers)) != len(a.workers) or len(set(a.seeds)) != len(a.seeds):
         p.error("duplicate worker counts or seeds")
@@ -150,6 +153,7 @@ def main():
         "driver_sha256": digest(source), "runner_sha256": digest(Path(__file__)),
         "helper_sha256": digest(ROOT / "tools/benchmark_reduction_kernel_ab.py"),
         "profile_helper_sha256": digest(ROOT / "benchmarks/pls_profile.hpp"),
+        "rk_profile_validator_sha256": digest(ROOT / "tools/profile_reduction_kernel_simplicial.py"),
         "settings": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()
                      if k != "inputs"},
         "timing_scope": "Prepared common native complex; fresh builder plus full gradient, "
@@ -239,6 +243,17 @@ def main():
                                     profile["local_wall_seconds"], profile["replay_seconds"],
                                     profile["algorithm_seconds"] - profile["builder_seconds"])
                             profiles[v].append(profile)
+                    rk_profiles = {v: {mode: [] for mode in ("rk_coarse", "rk_detailed")}
+                                   for v in VERSIONS}
+                    for repeat in range(args.rk_profiles):
+                        for v in VERSIONS[::(-1 if repeat % 2 else 1)]:
+                            for mode in list(rk_profiles[v])[::(-1 if repeat % 2 else 1)]:
+                                w = workers[v]
+                                w.process.stdin.write(f"{mode} {count}\n")
+                                w.process.stdin.flush()
+                                profile = w.read()
+                                profile["unattributed_seconds"] = validate_rk_profile(profile)
+                                rk_profiles[v][mode].append(profile)
                     memory = {v: {a: [] for a in ALGORITHMS} for v in VERSIONS}
                     for repeat in range(args.memory_repeats):
                         for v in VERSIONS[::(-1 if repeat % 2 else 1)]:
@@ -246,12 +261,14 @@ def main():
                                 memory[v][algorithm].append(json.loads(subprocess.check_output(
                                     [str(binaries[v]), str(path), "--memory", str(a), str(count)], text=True)))
                     case = {"input_index": case_index, "workers": count, "samples": samples,
-                            "profiles": profiles, "memory": memory,
+                            "profiles": profiles, "rk_profiles": rk_profiles, "memory": memory,
                             "summary": summaries(samples), "comparison": comparisons(samples)}
                     result["cases"].append(case)
                     args.output.write_text(json.dumps(result, indent=2) + "\n")
                     ratio = case["summary"]["process_lower_stars"]["algorithm_seconds"]["median_paired_ratio"]
                     print(f"{path.name}, workers={count}: PLS new/old {ratio:.3f}", flush=True)
+                    ratio = case["summary"]["reduction_kernel"]["algorithm_seconds"]["median_paired_ratio"]
+                    print(f"{path.name}, workers={count}: RK new/old {ratio:.3f}", flush=True)
         if len(result["cases"]) != len(inputs) * len(args.workers):
             raise AssertionError("Incomplete case coverage")
         result["completed"] = True

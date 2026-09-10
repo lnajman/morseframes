@@ -13,9 +13,19 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import benchmark_simplicial_gradients as benchmark
 import pls_phase_profile as profile
+import profile_reduction_kernel_simplicial as rk_profile
 
 
 class SimplicialGradientBenchmarkTests(unittest.TestCase):
+    def test_rk_profile_accounting(self):
+        row = dict(builder_seconds=.1, kernel_seconds=1., algorithm_seconds=1.1,
+                   setup_seconds=.1, level_wall_seconds=.6, replay_seconds=.2)
+        self.assertAlmostEqual(rk_profile.validate(row), .1)
+        for bad in [dict(row, algorithm_seconds=2.), dict(row, setup_seconds=.9),
+                    dict(row, kernel_seconds=float('nan')), dict(row, replay_seconds=-1.)]:
+            with self.assertRaises(ValueError):
+                rk_profile.validate(bad)
+
     def test_fine_profile_accounting(self):
         values = {key: .1 for key in profile.FIELDS}
         values["cleanup"] = .5
@@ -107,6 +117,18 @@ class SimplicialGradientBenchmarkTests(unittest.TestCase):
                         row["local_wall_seconds"], row["replay_seconds"],
                         row["algorithm_seconds"] - row["builder_seconds"])
                     self.assertGreater(fine["cleanup"], 0)
+                    for mode in ["rk_coarse", "rk_detailed"]:
+                        worker.process.stdin.write(f"{mode} {count}\n")
+                        worker.process.stdin.flush()
+                        row = worker.read()
+                        self.assertGreaterEqual(rk_profile.validate(row), 0)
+                        self.assertGreater(row["level_wall_seconds"], 0)
+                        if mode == "rk_detailed":
+                            self.assertGreater(row["rounds"], 0)
+                            self.assertGreater(row["closure_seconds"], 0)
+                        else:
+                            self.assertEqual(row["rounds"], 0)
+                            self.assertEqual(row["closure_seconds"], 0)
             finally:
                 worker.close()
             self.assertEqual(worker.process.returncode, 0)

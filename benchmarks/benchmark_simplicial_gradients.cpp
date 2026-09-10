@@ -85,11 +85,11 @@ struct Run {
   double builder_seconds = 0, kernel_seconds = 0, algorithm_seconds = 0;
 };
 std::unique_ptr<Run> run(const Complex& complex, int algorithm, std::size_t workers,
-                         bool diagnostic = false) {
+                         bool diagnostic = false, bool detailed = false) {
   const auto start = Clock::now();
   auto result = std::make_unique<Run>();
   auto* metrics = diagnostic ? &result->metrics : nullptr;
-  if (algorithm == 2) result->rk = std::make_unique<RBuilder>(complex, metrics, false);
+  if (algorithm == 2) result->rk = std::make_unique<RBuilder>(complex, metrics, detailed);
   else result->f = std::make_unique<FBuilder>(complex, metrics, false);
   const auto ready = Clock::now();
   if (algorithm == 0) result->sequence.emplace(result->f->build_f_max());
@@ -217,6 +217,31 @@ int main(int argc, char** argv) {
           std::cout << '}';
         }
         std::cout << ']' << std::endl;
+      } else if (command == "rk_coarse" || command == "rk_detailed") {
+        std::cin >> workers;
+        if (!std::cin || !workers) throw std::runtime_error("Invalid RK profile command");
+        const auto r = run(complex, 2, workers, true, command == "rk_detailed");
+        if (fingerprint(*r->sequence) != references[2]) throw std::runtime_error("RK profile differs");
+        const auto& m = r->metrics;
+        std::cout << "{\"builder_seconds\":" << r->builder_seconds
+                  << ",\"algorithm_seconds\":" << r->algorithm_seconds
+                  << ",\"kernel_seconds\":" << r->kernel_seconds;
+#define RK_TIME(name) std::cout << ",\"" #name "_seconds\":" << 1e-9 * m.reduction_kernel_##name##_nanoseconds
+#define RK_COUNT(name) std::cout << ",\"" #name "\":" << m.reduction_kernel_##name
+        RK_TIME(setup); RK_TIME(level_wall); RK_TIME(replay);
+        RK_TIME(closure); RK_TIME(facet); RK_TIME(essential); RK_TIME(core);
+        RK_TIME(local_reduction); RK_TIME(facet_execution); RK_TIME(aggregation); RK_TIME(merge);
+        RK_TIME(cumulative_level_task); RK_TIME(min_level_task); RK_TIME(max_level_task);
+        RK_COUNT(level_chunks); RK_COUNT(level_chunk_size);
+        RK_COUNT(min_worker_levels); RK_COUNT(max_worker_levels);
+        RK_COUNT(min_worker_simplices); RK_COUNT(max_worker_simplices);
+        RK_COUNT(rounds); RK_COUNT(facet_kernels); RK_COUNT(executor_workers);
+        RK_COUNT(facet_cell_visits); RK_COUNT(local_candidate_visits);
+        RK_COUNT(local_coboundary_visits); RK_COUNT(local_membership_tests);
+        RK_COUNT(inline_cell_overflows); RK_COUNT(inline_event_overflows);
+#undef RK_TIME
+#undef RK_COUNT
+        std::cout << '}' << std::endl;
       } else if (command == "profile") {
         std::cin >> workers;
         if (!std::cin || !workers) throw std::runtime_error("Invalid profile command");

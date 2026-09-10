@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Coarse versus detailed RK diagnostics on resident simplicial complexes."""
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+import math
+from pathlib import Path
+import statistics
+import tempfile
+
+from benchmark_reduction_kernel_ab import Worker, ROOT, command_output, header_digest
+
+
+def validate(row):
+    if any(not math.isfinite(v) or v < 0 for v in row.values()):
+        raise ValueError("Invalid RK diagnostic value")
+    if not math.isclose(row['algorithm_seconds'], row['builder_seconds'] + row['kernel_seconds'], rel_tol=1e-10):
+        raise ValueError("Outer RK phases do not partition algorithm time")
+    remainder = row['kernel_seconds'] - sum(row[k] for k in ['setup_seconds','level_wall_seconds','replay_seconds'])
+    if remainder < -1e-10:
+        raise ValueError("Coarse RK phases exceed kernel time")
+    # Detailed kernel fields sum over levels/tasks, not global elapsed time.
+    # Core/local are children of facet execution and must not be added to it.
+    return max(0., remainder)
+
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--binary',type=Path,required=True)
+    p.add_argument('--inputs',type=Path,nargs='+',required=True)
+    p.add_argument('--workers',type=int,nargs='+',default=[1,8])
+    p.add_argument('--repeats',type=int,default=5)
+    p.add_argument('--warmups',type=int,default=2)
+    p.add_argument('--output',type=Path,required=True)
+    a=p.parse_args()
+    if min(a.workers)<1 or a.repeats<1 or a.warmups<1 or a.output.exists():
+        p.error('positive counts and a fresh output path are required')
+    digest=lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+    data={'schema':'rk-simplicial-profile-v1','started_utc':datetime.now(timezone.utc).isoformat(),
+          'source_revision':command_output('git','rev-parse','HEAD'),
+          'source_status':command_output('git','status','--porcelain'),
+          'headers_sha256':header_digest(ROOT/'include'),'binary_sha256':digest(a.binary),
+          'driver_sha256':digest(ROOT/'benchmarks/benchmark_simplicial_gradients.cpp'),
+          'repeats':a.repeats,'warmups':a.warmups,'workers':a.workers,'cases':[]}
+    with a.output.open('x') as output, tempfile.TemporaryDirectory(prefix='rk-profile-') as directory:
+        for path in a.inputs:
+            w=Worker(a.binary.resolve(),path.resolve(),Path(directory)/'reference.dump')
+            try:
+                for count in a.workers:
+                    rows={mode:[] for mode in ['rk_coarse','rk_detailed']}
+                    for i in range(a.warmups+a.repeats):
+                        for mode in list(rows)[::(-1 if i%2 else 1)]:
+                            w.process.stdin.write(f'{mode} {count}\n'); w.process.stdin.flush()
+                            row=w.read(); row['unattributed_seconds']=validate(row)
+                            if i>=a.warmups: rows[mode].append(row)
+                    data['cases'].append({'input':str(path.resolve()),'input_sha256':digest(path),
+                        'workers':count,'metadata':w.metadata,'profiles':rows})
+                    for mode,values in rows.items():
+                        print(path.name,count,mode,{k:round(1000*statistics.median(r[k] for r in values),3)
+                            for k in values[0] if k.endswith('_seconds')},flush=True)
+                        print('COUNTS',{k:statistics.median(r[k] for r in values) for k in values[0] if not k.endswith('_seconds')},flush=True)
+            finally: w.close()
+        data['completed_utc']=datetime.now(timezone.utc).isoformat()
+        json.dump(data,output,indent=2); output.write('\n')
+
+
+if __name__=='__main__': main()

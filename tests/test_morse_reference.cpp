@@ -1498,6 +1498,101 @@ void test_reduction_kernel_batched_facets() {
   }
 }
 
+void test_reduction_kernel_discovery_granularity() {
+  // Connected stars collapse to one vertex in a single reducing round. Thus
+  // only the first discovery can dispatch tasks; later rounds must use the
+  // remaining active count rather than the original bucket size.
+  for (std::size_t size : {129, 8191, 8192, 8193, 12288, 32769}) {
+    FilteredSimplicialComplex original;
+    // One filled triangle enables closure storage, keeping this scheduling
+    // test independent of the graph-only local cell's full-bucket scan.
+    const std::size_t edges = (size - 7) / 2;
+    const std::vector<double> values(edges + 4, 0.0);
+    add_weighted_closure(original, {0, 1, 2}, values);
+    for (morseframes::VertexId v = 3; v < edges + 3; ++v) {
+      add_weighted_closure(original, {0, v}, values);
+    }
+    if (size % 2 == 0) {
+      original.add_simplex({static_cast<morseframes::VertexId>(edges + 3)}, 0.0);
+    }
+    original.finalize();
+    assert(original.size() == size);
+    for (bool cached : {false, true}) {
+      auto complex = original;
+      if (cached) complex.prepare_same_level_closure_cache();
+      morseframes::MorseSequenceBuildMetrics sequential_metrics;
+      const auto expected = FSequenceBuilder(complex, &sequential_metrics)
+                                .build_flooding_reduction_kernel();
+      const auto compare = [&](const auto& actual) {
+        morseframes::validate_morse_sequence(complex, actual);
+        assert(expected.steps().size() == actual.steps().size());
+        for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+          const auto& a = expected.steps()[i];
+          const auto& b = actual.steps()[i];
+          assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+                 a.level == b.level);
+        }
+      };
+      for (std::size_t workers : {1, 2, 4, 8}) {
+        morseframes::MorseSequenceBuildMetrics metrics;
+        compare(FSequenceBuilder(complex, &metrics)
+                    .build_flooding_reduction_kernel_parallel(workers));
+        const auto tasks = std::min(workers, size / 4096);
+        assert(metrics.reduction_kernel_facet_discovery_parallel_tasks ==
+               (tasks > 1 ? tasks : 0));
+        assert(metrics.reduction_kernel_facet_discovery_coboundary_visits ==
+               sequential_metrics.reduction_kernel_facet_discovery_coboundary_visits);
+        assert(metrics.reduction_kernel_incidence_cell_visits ==
+               sequential_metrics.reduction_kernel_incidence_cell_visits);
+        assert(metrics.reduction_kernel_rounds > 1);
+      }
+      compare(FSequenceBuilder(complex).build_flooding_reduction_kernel_parallel(8));
+    }
+  }
+}
+
+void test_reduction_kernel_discovery_failure_drains_tasks() {
+  struct FailingDiscoveryView : FilteredSimplicialComplex {
+    mutable std::atomic<std::size_t> failures{0};
+    const std::vector<morseframes::SimplexId>& coboundary(
+        morseframes::SimplexId) const {
+      // A graph has no cached closure build, so the first coboundary access is
+      // in discovery. Each static chunk throws, including after a peer fails.
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      ++failures;
+      throw std::runtime_error("discovery failure");
+    }
+  };
+  FailingDiscoveryView complex;
+  const std::vector<double> values(16385, 0.0);
+  for (morseframes::VertexId v = 1; v < values.size(); ++v) {
+    add_weighted_closure(complex, {0, v}, values);
+  }
+  complex.finalize();
+  assert(complex.size() == 32769);
+  for (std::size_t workers : {2, 4, 8}) {
+    for (bool detailed : {false, true}) {
+      complex.failures = 0;
+      auto executor = std::make_shared<morseframes::BoundedTaskExecutor>(workers);
+      morseframes::ReductionKernelExecutionOptions options;
+      options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+      options.collect_metrics = detailed;
+      morseframes::ReductionKernelWorkspace<FailingDiscoveryView> workspace(
+          complex, options, executor);
+      bool propagated = false;
+      try {
+        (void)workspace.compute_level_isolated(0);
+      } catch (const std::runtime_error& error) {
+        propagated = std::string(error.what()) == "discovery failure";
+      }
+      assert(propagated);
+      assert(complex.failures == workers); // Before implicit teardown joins.
+      auto following = executor->submit([]() { return 17; });
+      assert(executor->get(following) == 17);
+    }
+  }
+}
+
 void test_reduction_kernel_facet_failure_drains_tasks() {
   struct FailingFacetView : FilteredSimplicialComplex {
     mutable std::atomic<std::size_t> failures{0};
@@ -1608,6 +1703,8 @@ int main() {
   test_reduction_kernel_packed_core_matches_sparse_cache();
   test_reduction_kernel_linear_sparse_incidence();
   test_reduction_kernel_batched_facets();
+  test_reduction_kernel_discovery_granularity();
+  test_reduction_kernel_discovery_failure_drains_tasks();
   test_reduction_kernel_facet_failure_drains_tasks();
   test_instrumentation_metrics();
 

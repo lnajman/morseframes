@@ -1604,6 +1604,32 @@ class PythonApiTest(unittest.TestCase):
                                  4 * metrics["reduction_kernel_parallel_batches"])
             self.assertLess(metrics["reduction_kernel_facet_parallel_tasks"],
                             metrics["reduction_kernel_facet_kernels"])
+            self.assertEqual(metrics["reduction_kernel_facet_discovery_parallel_tasks"], 0)
+
+    def test_reduction_kernel_discovery_active_count_scheduling(self):
+        if not mp.cpp_backend_available():
+            self.skipTest("requires native discovery scheduling")
+        for vertices in (4095, 4096):
+            complex_ = mp.FilteredComplex.from_lower_star(
+                [(0, 1, 2)] + [(0, v) for v in range(3, vertices)],
+                {v: 0.0 for v in range(vertices)},
+            )
+            if not complex_.cpp_backend_active():
+                self.skipTest("requires a native complex")
+            expected = mp.compute_morse_sequence(
+                complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_SEQUENCE)
+            for workers in (2, 8):
+                actual = mp.compute_morse_sequence(
+                    complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+                    max_workers=workers)
+                self.assertEqual(expected.steps, actual.steps)
+                metrics = mp.profile_morse_sequence(
+                    complex_, algorithm=mp.FLOODING_REDUCTION_KERNEL_PARALLEL_SEQUENCE,
+                    max_workers=workers).metrics
+                # 8191 / 8193 simplices. Only the first round is large enough;
+                # an original-bucket-based policy would submit tasks again.
+                self.assertEqual(metrics["reduction_kernel_facet_discovery_parallel_tasks"],
+                                 0 if vertices == 4095 else 2)
 
     def test_reduction_kernel_high_dimensional_inline_overflow(self):
         vertices = tuple(range(5))

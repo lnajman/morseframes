@@ -118,6 +118,10 @@ class ReductionKernelWorkspace {
   static constexpr std::size_t kInlineCellCapacity = 16;
   static constexpr std::size_t kInlineEventCapacity = 8;
   static constexpr std::size_t kPackedClosureBucketCapacity = 128;
+  // Facet discovery only tests immediate cofaces. Give each submitted task
+  // enough active candidates to amortize dispatch/wait, including shrinking
+  // rounds on large plateaus. This does not gate local facet execution.
+  static constexpr std::size_t kMinFacetDiscoveryTaskSize = 4096;
   using PackedMask =
       std::array<std::uint64_t, (kPackedClosureBucketCapacity + 63) / 64>;
 
@@ -484,7 +488,7 @@ class ReductionKernelWorkspace {
         kernel_round_changed = false;
         const auto facet_start = profile_start<CollectMetrics>();
         const auto& facets = active_facets<CollectMetrics>(
-            level, bucket, scratch, metrics,
+            level, bucket, remaining, scratch, metrics,
             allow_intra_level_parallelism);
         profile_add<CollectMetrics>(metrics.facet_nanoseconds, facet_start);
         if constexpr (CollectMetrics) {
@@ -602,7 +606,7 @@ class ReductionKernelWorkspace {
 
       const auto facet_start = profile_start<CollectMetrics>();
       const auto& facets = active_facets<CollectMetrics>(
-          level, bucket, scratch, metrics,
+          level, bucket, remaining, scratch, metrics,
           allow_intra_level_parallelism);
       profile_add<CollectMetrics>(metrics.facet_nanoseconds, facet_start);
       if (facets.empty()) {
@@ -829,33 +833,37 @@ class ReductionKernelWorkspace {
 
   template <typename Function>
   std::size_t parallel_for_indices(std::size_t count,
-                                   Function&& function,
-                                   bool allow_parallelism) const {
-    const std::size_t workers =
-        executor_ == nullptr ? 1 : executor_->worker_count();
-    if (!allow_parallelism ||
-        options_.policy == ReductionKernelExecutionPolicy::Sequential ||
-        workers <= 1 || count <= 1) {
-      for (std::size_t index = 0; index < count; ++index) {
-        function(index);
-      }
-      return 0;
-    }
-
-    const std::size_t task_count = std::min(workers, count);
-    const std::size_t chunk_size = (count + task_count - 1) / task_count;
+                                   std::size_t task_count,
+                                   Function&& function) const {
+    const std::size_t chunk_size = count / task_count;
+    const std::size_t extra = count % task_count;
     std::vector<std::future<void>> futures;
     futures.reserve(task_count);
-    for (std::size_t first = 0; first < count; first += chunk_size) {
-      const std::size_t last = std::min(count, first + chunk_size);
-      futures.push_back(executor_->submit([first, last, &function]() {
-        for (std::size_t index = first; index < last; ++index) {
-          function(index);
+    try {
+      for (std::size_t task = 0; task < task_count; ++task) {
+        const std::size_t first = task * chunk_size + std::min(task, extra);
+        const std::size_t last = first + chunk_size + (task < extra ? 1 : 0);
+        futures.push_back(executor_->submit([first, last, &function]() {
+          for (std::size_t index = first; index < last; ++index) {
+            function(index);
+          }
+        }));
+      }
+      for (auto& future : futures) {
+        executor_->get(future);
+      }
+    } catch (...) {
+      // A view accessor or submission may throw. Every task captures function
+      // and its round buffers, so drain before those captures leave scope.
+      for (auto& future : futures) {
+        if (future.valid()) {
+          try {
+            executor_->get(future);
+          } catch (...) {
+          }
         }
-      }));
-    }
-    for (auto& future : futures) {
-      executor_->get(future);
+      }
+      throw;
     }
     return futures.size();
   }
@@ -863,6 +871,7 @@ class ReductionKernelWorkspace {
   template <bool CollectMetrics>
   const std::vector<SimplexId>& active_facets(
       LevelId level, const std::vector<SimplexId>& bucket,
+      std::size_t remaining,
       LevelScratch& scratch,
       ReductionKernelMetrics& metrics,
       bool allow_parallelism) const {
@@ -898,10 +907,12 @@ class ReductionKernelWorkspace {
     }
     const std::size_t workers =
         executor_ == nullptr ? 1 : executor_->worker_count();
+    const std::size_t task_count =
+        std::min(workers, remaining / kMinFacetDiscoveryTaskSize);
     const bool sequential_scan =
         !allow_parallelism ||
         options_.policy == ReductionKernelExecutionPolicy::Sequential ||
-        workers <= 1;
+        task_count <= 1;
     const bool use_cache = use_precomputed_cache();
     if (sequential_scan) {
       std::size_t active_count = 0;
@@ -930,16 +941,22 @@ class ReductionKernelWorkspace {
       return facets;
     }
 
+    // Preserve canonical order while discarding removals before dispatch.
+    // No task sees or mutates this list until all discovery tasks have joined.
+    auto& candidates = scratch.active_simplices;
+    candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
+                                   [this](SimplexId simplex) {
+                                     return !active_[simplex];
+                                   }), candidates.end());
     auto& facet_flags = scratch.facet_flags;
     auto& coboundary_visits = scratch.coboundary_visits;
-    std::fill(facet_flags.begin(), facet_flags.end(), 0);
-    std::fill(coboundary_visits.begin(), coboundary_visits.end(), 0);
     const std::size_t parallel_tasks = parallel_for_indices(
-        bucket.size(), [this, level, &bucket, &facet_flags,
-                        &coboundary_visits, use_cache](std::size_t index) {
-          const SimplexId simplex = bucket[index];
-          if (!active_[simplex]) {
-            return;
+        candidates.size(), task_count,
+        [this, level, &candidates, &facet_flags,
+         &coboundary_visits, use_cache](std::size_t index) {
+          const SimplexId simplex = candidates[index];
+          if constexpr (CollectMetrics) {
+            coboundary_visits[index] = 0;
           }
           bool has_active_coface = false;
           visit_same_level_coboundary(
@@ -953,21 +970,18 @@ class ReductionKernelWorkspace {
                 }
                 return true;
               });
-          if (has_active_coface) {
-            return;
-          }
-          facet_flags[index] = 1;
-        }, allow_parallelism);
+          facet_flags[index] = !has_active_coface;
+        });
     if constexpr (CollectMetrics) {
       metrics.facet_discovery_parallel_tasks += parallel_tasks;
-      for (std::size_t visits : coboundary_visits) {
-        metrics.facet_discovery_coboundary_visits += visits;
-      }
     }
 
-    for (std::size_t index = 0; index < bucket.size(); ++index) {
+    for (std::size_t index = 0; index < candidates.size(); ++index) {
+      if constexpr (CollectMetrics) {
+        metrics.facet_discovery_coboundary_visits += coboundary_visits[index];
+      }
       if (facet_flags[index]) {
-        facets.push_back(bucket[index]);
+        facets.push_back(candidates[index]);
       }
     }
     return facets;

@@ -8,7 +8,7 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
-The facet-task batching section records the latest ReductionKernel update.
+The facet-discovery scheduling section records the latest ReductionKernel update.
 The closure-based incidence, controlled packed-coface A/B, direct TTK comparison,
 and earlier phase-profile sections retain historical snapshots; those timings
 must not be treated as fresh measurements of subsequent changes.
@@ -243,6 +243,10 @@ remeasured alongside RK and TTK. Raw input/binary/source hashes, revision, wait 
 orders, exact reference checks and critical counts remain recorded as described below.
 
 ### Construction-separated results
+
+These measurements are the `d466174` snapshot, preceding the facet-discovery
+scheduling update below. Their timing definition remains the primary comparison,
+but they have not been rerun for that scheduling change.
 
 The main run uses the same Apple M1 Max, native ARM release build, pinned TTK,
 eight inputs, 1/2/4/8 workers, 12 performance repetitions, six diagnostic
@@ -930,7 +934,141 @@ efficiencies are 0.33 and 0.39, respectively.
 The grid-size aggregates are generated in
 `docs/tetrahedral_worker_scaling_table.tex`.
 
-## Facet-Task Batching Update
+## Facet-Discovery Scheduling Update
+
+Sparse facet discovery now dispatches work according to the **remaining active
+simplex count**, not the original level-bucket size. It submits
+`min(workers, floor(active_count / 4096))` tasks only if that number is at least
+two and intra-level parallelism is allowed. Each task receives a contiguous,
+balanced range of at least 4,096 active candidates. Smaller rounds use the
+existing ordered sequential scan. This threshold is an implementation heuristic
+for the cheap immediate-coface test, not a claim of optimal scheduling on every
+machine or complex.
+
+Before parallel discovery, the coordinator stably compacts the active list.
+Workers write disjoint flag/counter slots for that list; unused buffer capacity
+is neither cleared nor scanned. The coordinator collects facets in the original
+canonical order after joining every task. Submission or accessor exceptions drain
+all submitted work before captured buffers can leave scope. Cached same-level
+coboundaries use the same policy. Packed-mask discovery, local facet-task batching,
+independent-level scheduling, and the global worker budget are unchanged.
+
+Native tests exercise 8,191/8,192/8,193 active simplices, the three-task threshold,
+an eight-task case, cached/uncached topology, and contraction to one/two active
+vertices. They require exact gradient fields and equal incidence/coface-visit
+counts against sequential RK. Failure-injection tests check that discovery tasks
+finish before an exception propagates and the executor remains usable. Python
+tests also check the dispatch count on both sides of the threshold. Graph-only
+local-cell construction is not changed by this scheduling update.
+
+The controlled A/B baseline is `d466174`. Its gradient headers are the same as
+the preceding `ec408dc` facet-task batching revision. Timing starts from an
+already finalized native complex and includes fresh builder/workspace/pool
+creation, gradient computation, replay and internal teardown. Input loading and
+native complex construction remain outside this algorithm comparison. This RK
+implementation A/B study is not a fresh comparison against TTK or F-Max.
+
+```sh
+LC_ALL=C python3 tools/benchmark_reduction_kernel_ab.py \
+  --baseline d466174 --candidate WORKTREE \
+  --family volume --filtration plateau --sizes 4 8 12 --seeds 0 \
+  --workers 1 2 4 8 --blocks 8 --repeats 3 --warmups 2 \
+  --input-dir ../rk-ab-inputs \
+  --output ../rk-discovery-volume-plateau-ab.json
+```
+
+Complementary main runs use the same options with these substitutions:
+
+| Family | Filtration | Sizes | Seeds | Output basename |
+| --- | --- | --- | --- | --- |
+| terrain | plateau | 16, 32 | 0 | `rk-discovery-terrain-plateau-ab.json` |
+| volume | lower-star | 16, 32 | 0, 2 | `rk-discovery-volume-lower-star-ab.json` |
+| terrain | lower-star | 16, 64 | 0, 2 | `rk-discovery-terrain-lower-star-ab.json` |
+
+The main run covers 52 configurations on the Apple M1 Max with native ARM Clang
+15 and `-std=c++17 -O3 -DNDEBUG -pthread`. The candidate header digest is
+`52d2a43d2330a2eaaf7f422e6d23589cb880ba7a127c9a36c07f60adb4fd57e8`.
+Every sequence field and critical count agrees across revisions and worker
+counts. All 15 multiworker plateau configurations have a below-one paired
+median ratio; 12 have a paired-bootstrap interval wholly below one. Selected
+eight-worker results are:
+
+| Plateau input | Before (ms) | After (ms) | Paired after/before ratio |
+| --- | ---: | ---: | ---: |
+| 2D terrain, `n=32` | 4.554 | 2.935 | 0.683 |
+| 3D volume, `n=8` | 2.910 | 2.389 | 0.788 |
+| 3D volume, `n=12` | 11.326 | 9.777 | 0.895 |
+
+The latter two main-run intervals include one. A fresh confirmation uses twelve
+blocks of three repetitions: plateau volumes `8 12`, terrain `32`, seed `0`,
+workers `1 8`, and all 32 ordinary lower-star controls above. Output basenames
+replace `-ab.json` with `-confirmation.json`. Confirmed eight-worker results are:
+
+| Plateau input | Before (ms) | After (ms) | Paired after/before ratio | 95% paired-block interval |
+| --- | ---: | ---: | ---: | --- |
+| 2D terrain, `n=32` | 4.172 | 3.093 | 0.807 | [0.651, 0.881] |
+| 3D volume, `n=8` | 3.196 | 2.489 | 0.793 | [0.646, 0.921] |
+| 3D volume, `n=12` | 9.866 | 9.192 | 0.923 | [0.807, 0.962] |
+
+These are roughly 19%, 21% and 8% reductions in paired median algorithm time,
+respectively, not universal speedup factors. Times are medians over raw samples;
+ratios are medians over paired block ratios and need not equal ratios of the
+displayed medians. All 38 confirmation configurations preserve exact gradients.
+Construction/loading are excluded from both versions equally and no diagnostic
+samples enter these A/B estimates.
+
+The main ordinary-volume controls initially suggested a 10--20% slowdown at
+`n=32`. A dedicated twelve-block repeat at one/eight workers, both seeds,
+(`rk-discovery-v1-volume-lower-star-confirmation.json`) did not reproduce that
+shift: sequential ratios are 0.983/0.996 and eight-worker ratios 1.038/1.009.
+The broader confirmation also does not reproduce it. No ordinary configuration
+has an above-one paired-bootstrap interval in both main and broad confirmation
+sessions. Eight-worker median control ratios are 1.073 / 1.011 for volumes and
+1.003 / 0.956 for terrains (main / broad confirmation). This supports retaining
+the change with a variability caveat, not a proof of performance equivalence,
+a general lower-star improvement, or an established compiler-inlining diagnosis.
+All 94 A/B configurations, including the dedicated repeat, pass exact checks.
+
+A separate candidate phase profile covers the same 13 inputs at 1/2/4/8 workers,
+with 24 uninstrumented, eight coarse and three detailed samples per configuration.
+All 52 configurations preserve the exact sequence. Compared with the historical
+`ec408dc` profile, local facet-task counts, facet-kernel counts, incidence visits,
+and discovery coface/mask work are identical. Discovery task counts at eight
+workers change as follows:
+
+| Plateau input | Previous discovery tasks | New discovery tasks |
+| --- | ---: | ---: |
+| 2D terrain, `n=16` | 144 | 0 |
+| 2D terrain, `n=32` | 272 | 0 |
+| 3D volume, `n=4` | 64 | 0 |
+| 3D volume, `n=8` | 112 | 4 |
+| 3D volume, `n=12` | 160 | 38 |
+
+On the larger terrain, discovery is about 12% of detailed level wall time and
+facet execution about 70%; on the larger volume these shares are about 28%
+and 36%. Diagnostic timings are separate snapshots, not the basis of the A/B
+speedup estimate. In particular, the larger volume's detailed discovery time
+does not fall relative to the earlier snapshot despite fewer tasks; profiling
+overhead and session variability must not be mistaken for a causal phase result.
+
+Parallel RK is **not consistently faster than sequential RK on plateaus**. The
+confirmed larger volume takes 9.192 ms with eight workers versus 8.782 ms
+sequentially, while the separate phase run gives 8.061 versus 8.531 ms. The
+larger terrain remains slower in parallel. Ordinary `n=32` volumes retain about
+2.46-fold eight-worker speedup in the phase run, with builder initialization
+about 30% of coarse total time. Further local-facet granularity and builder work
+remain distinct possible targets; they are not changed here.
+
+```sh
+LC_ALL=C python3 tools/benchmark_reduction_kernel_phases.py \
+  --input-dir ../rk-ab-inputs --output ../rk-phases-discovery.json
+
+python3 tools/render_reduction_kernel_phases.py \
+  --input ../rk-phases-discovery.json \
+  --table-output docs/reduction_kernel_discovery_phases_table.tex
+```
+
+## Facet-Task Batching Update (Historical `ec408dc`)
 
 Following the `f466631` incidence update, intra-level RK now submits at most one
 long-lived facet task per configured worker in each round. Tasks claim chunks
@@ -1031,7 +1169,9 @@ plateau computation. Ordinary `n=32` lower stars retain about 2.81-fold
 eight-worker speedup in this separate phase run, with builder initialization
 about 31% of total coarse time. Phase-specific task granularity, especially
 facet discovery on modest active buckets, is the next plateau target; generic
-builder initialization remains separate ordinary-lower-star work.
+builder initialization remains separate ordinary-lower-star work. The discovery
+scheduling update above addresses the former target; these batching measurements
+remain the historical `ec408dc` snapshot.
 
 ```sh
 LC_ALL=C python3 tools/benchmark_reduction_kernel_phases.py \

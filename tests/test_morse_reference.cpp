@@ -2085,6 +2085,112 @@ void test_compact_simplex_lookup() {
   }
 }
 
+void test_boundary_and_filtration_order() {
+  using Vertices = std::vector<morseframes::VertexId>;
+  using Id = morseframes::SimplexId;
+  const auto largest = std::numeric_limits<morseframes::VertexId>::max();
+  std::mt19937 rng(509);
+  for (unsigned dimension = 0; dimension <= 7; ++dimension) {
+    for (unsigned trial = 0; trial < 4; ++trial) {
+      Vertices vertices{0, 2, 19, 1000, 1000003, 2000007, 3000017,
+                        4000000000u, largest - 2, largest};
+      std::map<morseframes::VertexId, double> weights;
+      for (auto vertex : vertices) weights[vertex] = trial % 2 ? double(rng() % 4) : 0;
+      std::vector<Vertices> cells{
+          Vertices(vertices.begin(), vertices.begin() + dimension + 1),
+          Vertices(vertices.begin() + 1, vertices.begin() + dimension + 2),
+          {largest - 2, largest}, {vertices[dimension + 1]}, {largest}};
+      std::map<Vertices, double> faces;
+      for (const auto& cell : cells) {
+        for (unsigned mask = 1; mask < (1u << cell.size()); ++mask) {
+          Vertices face;
+          double value = 0;
+          for (unsigned i = 0; i < cell.size(); ++i) if (mask & (1u << i)) {
+            face.push_back(cell[i]); value = std::max(value, weights.at(cell[i]));
+          }
+          // Also exercise monotone filtrations which are not vertex lower stars.
+          if (trial >= 2) value += double(face.size() - 1);
+          faces[face] = value;
+        }
+      }
+      std::vector<Vertices> ordered, shuffled;
+      std::map<Vertices, Id> ids;
+      for (const auto& entry : faces) {
+        ids[entry.first] = static_cast<Id>(ordered.size());
+        ordered.push_back(entry.first);
+      }
+      shuffled = ordered;
+      std::shuffle(shuffled.begin(), shuffled.end(), rng);
+      FilteredSimplicialComplex complex;
+      for (auto face : shuffled) {
+        const auto value = faces.at(face);
+        std::reverse(face.begin(), face.end());
+        complex.add_simplex(face, value);
+      }
+      for (unsigned pass = 0; pass < 2; ++pass) {
+        if (pass) {
+          morseframes::ComplexConstructionMetrics metrics;
+          complex.finalize_with_metrics(metrics);
+        } else complex.finalize();
+        std::vector<std::vector<Id>> expected_coboundaries(ordered.size());
+        std::vector<Id> expected_order;
+        std::vector<double> levels;
+        for (Id id = 0; id < ordered.size(); ++id) {
+          assert(complex.vertices(id) == ordered[id]);
+          std::vector<Id> boundary;
+          if (ordered[id].size() > 1) {
+            for (std::size_t removed = 0; removed < ordered[id].size(); ++removed) {
+              auto face = ordered[id]; face.erase(face.begin() + removed);
+              boundary.push_back(ids.at(face));
+              expected_coboundaries[ids.at(face)].push_back(id);
+            }
+          }
+          assert(complex.boundary(id) == boundary); // Deletion order, not sorted IDs.
+          expected_order.push_back(id);
+          levels.push_back(faces.at(ordered[id]));
+        }
+        for (Id id = 0; id < ordered.size(); ++id)
+          assert(complex.coboundary(id) == expected_coboundaries[id]);
+        std::sort(levels.begin(), levels.end());
+        levels.erase(std::unique(levels.begin(), levels.end()), levels.end());
+        assert(complex.level_values() == levels);
+        // Independent legacy comparator: filtration, dimension, vertex vector.
+        std::sort(expected_order.begin(), expected_order.end(), [&](Id a, Id b) {
+          const auto av = faces.at(ordered[a]), bv = faces.at(ordered[b]);
+          if (av != bv) return av < bv;
+          if (ordered[a].size() != ordered[b].size()) return ordered[a].size() < ordered[b].size();
+          return ordered[a] < ordered[b];
+        });
+        assert(complex.filtration_order() == expected_order);
+        for (std::size_t level = 0; level < levels.size(); ++level) {
+          std::vector<Id> bucket;
+          for (Id id : expected_order)
+            if (faces.at(ordered[id]) == levels[level]) bucket.push_back(id);
+          assert(complex.simplices_of_level(level) == bucket);
+        }
+      }
+    }
+  }
+  // Detect absent and non-monotone facets in both the general lookup (removed
+  // first vertex) and the reused-range lookup (every other removed vertex).
+  const Vertices cell{2, 19, 4000000000u, largest};
+  for (unsigned removed = 0; removed < cell.size(); ++removed) {
+    auto bad_face = cell; bad_face.erase(bad_face.begin() + removed);
+    for (bool missing : {false, true}) {
+      FilteredSimplicialComplex invalid;
+      for (unsigned mask = 1; mask < (1u << cell.size()); ++mask) {
+        Vertices face;
+        for (unsigned i = 0; i < cell.size(); ++i) if (mask & (1u << i)) face.push_back(cell[i]);
+        if (missing && face == bad_face) continue;
+        invalid.add_simplex(face, face == bad_face ? 1 : 0);
+      }
+      bool rejected = false;
+      try { invalid.finalize(); } catch (const std::invalid_argument&) { rejected = true; }
+      assert(rejected);
+    }
+  }
+}
+
 void test_bulk_lower_star_construction() {
   using Cells = std::vector<std::vector<morseframes::VertexId>>;
   const auto legacy = [](auto& complex, const auto& values, const auto& cells) {
@@ -2212,6 +2318,7 @@ void test_bulk_lower_star_construction() {
 
 int main() {
   test_compact_simplex_lookup();
+  test_boundary_and_filtration_order();
   test_bulk_lower_star_construction();
   test_complex_construction_contract();
   test_bounded_task_executor();

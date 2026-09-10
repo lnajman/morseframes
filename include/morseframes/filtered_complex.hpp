@@ -288,9 +288,18 @@ class FilteredSimplicialComplex {
         [](const FirstVertexRange& entry, VertexId vertex) { return entry.vertex < vertex; });
     if (range == first_vertex_ranges_.end() || range->vertex != vertices.front())
       return kInvalidSimplex;
-    const auto first = simplices_.begin() + range->first;
     const auto last = range + 1 == first_vertex_ranges_.end()
-                          ? simplices_.end() : simplices_.begin() + (range + 1)->first;
+                          ? simplices_.size() : (range + 1)->first;
+    return find_canonical_simplex_in_range(vertices, range->first, last);
+  }
+
+  // All records in [first_id, last_id) have vertices.front() as their first
+  // vertex. Callers may reuse a known range without searching the prefix index.
+  SimplexId find_canonical_simplex_in_range(const std::vector<VertexId>& vertices,
+                                           std::size_t first_id,
+                                           std::size_t last_id) const {
+    const auto first = simplices_.begin() + first_id;
+    const auto last = simplices_.begin() + last_id;
     const auto match = std::lower_bound(first, last, vertices,
         [](const Simplex& simplex, const std::vector<VertexId>& key) {
           // The first vertices are equal throughout this range.
@@ -358,7 +367,17 @@ class FilteredSimplicialComplex {
 
   void build_boundaries_and_check_filtration() {
     std::vector<VertexId> face_vertices;
+    std::size_t range_index = 0;
+    std::size_t range_end = first_vertex_ranges_.size() > 1
+                                ? first_vertex_ranges_[1].first : simplices_.size();
     for (SimplexId simplex_id = 0; simplex_id < simplices_.size(); ++simplex_id) {
+      // Lexicographic IDs visit each first-vertex range contiguously, including
+      // singleton ranges. Only deleting the first vertex changes this range.
+      if (simplex_id == range_end) {
+        ++range_index;
+        range_end = range_index + 1 < first_vertex_ranges_.size()
+                        ? first_vertex_ranges_[range_index + 1].first : simplices_.size();
+      }
       auto& simplex = simplices_[simplex_id];
       simplex.boundary.clear();
 
@@ -376,7 +395,10 @@ class FilteredSimplicialComplex {
           }
         }
 
-        const SimplexId face_id = find_canonical_simplex(face_vertices);
+        const SimplexId face_id = removed == 0
+            ? find_canonical_simplex(face_vertices)
+            : find_canonical_simplex_in_range(
+                  face_vertices, first_vertex_ranges_[range_index].first, range_end);
         if (face_id == kInvalidSimplex) {
           throw std::invalid_argument("Input is not closed under faces.");
         }
@@ -416,7 +438,8 @@ class FilteredSimplicialComplex {
       if (a.dimension != b.dimension) {
         return a.dimension < b.dimension;
       }
-      return a.vertices < b.vertices;
+      // IDs are positions in the lexicographically sorted simplex array.
+      return lhs < rhs;
     };
     std::sort(filtration_order_.begin(), filtration_order_.end(), simplex_less);
 

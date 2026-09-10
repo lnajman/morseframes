@@ -7,23 +7,25 @@ import json
 from pathlib import Path
 import statistics
 
-from benchmark_resident_gradients import ALGORITHMS, ALGORITHM_PHASES, CONSTRUCTION_PHASES, summarize
+from benchmark_resident_gradients import ALGORITHMS, ALGORITHM_PHASES, CONSTRUCTION_PHASES, algorithm_names, summarize
 
-LABELS = {"f_max": "F-Max", "reduction_kernel": "RK", "ttk": "TTK"}
+LABELS = {"f_max": "F-Max", "reduction_kernel": "RK", "ttk": "TTK", "process_lower_stars": "PLS"}
 PHASE_ORDER = {
     "f_max": ("representation_and_filtration", "builder_setup", "gradient"),
     "reduction_kernel": ("representation_and_filtration", "builder_setup", "gradient"),
+    "process_lower_stars": ("representation_and_filtration", "builder_setup", "gradient"),
     "ttk": ("native_object_init", "vertex_order", "representation_setup",
             "connectivity_precondition", "gradient"),
 }
 
 
 def validated_groups(data):
-    if data.get("schema") not in ("resident-gradient-study-v1", "resident-gradient-study-v2") or not data.get("completed_utc"):
+    if data.get("schema") not in ("resident-gradient-study-v1", "resident-gradient-study-v2", "resident-gradient-study-v3") or not data.get("completed_utc"):
         raise ValueError("Expected a completed resident-input benchmark, not legacy kernel timings")
-    split = data["schema"] == "resident-gradient-study-v2"
-    if split and (data.get("construction_phases") != {a: sorted(CONSTRUCTION_PHASES[a]) for a in ALGORITHMS}
-                  or data.get("algorithm_phases") != {a: sorted(ALGORITHM_PHASES[a]) for a in ALGORITHMS}):
+    split = data["schema"] != "resident-gradient-study-v1"
+    algorithms = algorithm_names(data["schema"])
+    if split and (data.get("construction_phases") != {a: sorted(CONSTRUCTION_PHASES[a]) for a in algorithms}
+                  or data.get("algorithm_phases") != {a: sorted(ALGORITHM_PHASES[a]) for a in algorithms}):
         raise ValueError("Missing or changed construction/algorithm boundary")
     if not data.get("cases"):
         raise ValueError("Empty benchmark")
@@ -42,7 +44,7 @@ def validated_groups(data):
         if {m["workers"] for m in measurements} != set(data["arguments"]["workers"]):
             raise ValueError("Incomplete worker configurations")
         for measurement in measurements:
-            expected_schema = "resident-gradient-v2" if split else "resident-gradient-v1"
+            expected_schema = data["schema"].replace("study-", "")
             if measurement["raw"].get("schema") != expected_schema:
                 raise ValueError("Mixed timing schemas")
             if measurement["raw"]["workers"] != measurement["workers"]:
@@ -57,10 +59,12 @@ def validated_groups(data):
 
 def render_tables(data, comparison=None):
     groups = validated_groups(data)
-    split = data["schema"] == "resident-gradient-study-v2"
+    split = data["schema"] != "resident-gradient-study-v1"
+    algorithms = algorithm_names(data["schema"])
+    extended = "process_lower_stars" in algorithms
     comparison = comparison or ("algorithm" if split else "total")
     if comparison not in ("algorithm", "total") or (comparison == "algorithm" and not split):
-        raise ValueError("Algorithm comparisons require v2 non-profiled phase samples")
+        raise ValueError("Algorithm comparisons require v2/v3 non-profiled phase samples")
     metric = "algorithm_seconds" if comparison == "algorithm" else "total_seconds"
     ratios = "algorithm_paired_ratios" if comparison == "algorithm" else "paired_ratios"
     header = r"Input & $n$ & Workers & F-Max (ms) & RK (ms) & TTK (ms) & RK/TTK \\"
@@ -68,22 +72,31 @@ def render_tables(data, comparison=None):
         label = "algorithm" if comparison == "algorithm" else "total"
         header = (f"Input & $n$ & Workers & F-Max {label} (ms) & RK {label} (ms) & "
                   f"TTK {label} (ms) & RK/TTK " + r"\\")
-    totals = [r"\begin{tabular}{llrrrrr}", r"\hline",
+    if extended:
+        label = "algorithm" if comparison == "algorithm" else "total"
+        header = ("Input & $n$ & Workers & " +
+                  " & ".join(f"{LABELS[a]} {label} (ms)" for a in algorithms) +
+                  " & RK/TTK & PLS/TTK " + r"\\")
+    totals = [r"\begin{tabular}{ll" + "r" * (len(algorithms) + 2 + extended) + "}", r"\hline",
               header, r"\hline"]
     phases = [r"\begin{tabular}{lrrllr}", r"\hline",
               r"Input & $n$ & Workers & Algorithm & Phase & Time (ms) \\", r"\hline"]
     for (family, size, workers), summaries in sorted(groups.items()):
         label = "2D" if family == "terrain" else "3D"
         times = [1e3 * statistics.median(s[a][metric]["median"] for s in summaries)
-                 for a in ALGORITHMS]
+                 for a in algorithms]
         ratio = statistics.median(s[ratios]["reduction_kernel/ttk"]["median"]
                                   for s in summaries)
+        ratio_values = [ratio]
+        if extended:
+            ratio_values.append(statistics.median(
+                s[ratios]["process_lower_stars/ttk"]["median"] for s in summaries))
         totals.append(f"{label} & {size} & {workers} & " +
-                      " & ".join(f"{v:.3f}" for v in times) + f" & {ratio:.3f} " + r"\\")
+                      " & ".join(f"{v:.3f}" for v in times + ratio_values) + " " + r"\\")
         # Keep the phase fragment compact: largest case per family, 1/8 workers.
         if workers not in (1, 8) or size != max(k[1] for k in groups if k[0] == family):
             continue
-        for algorithm in ALGORITHMS:
+        for algorithm in algorithms:
             total = 1e3 * statistics.median(
                 s[algorithm]["total_seconds" if split else "diagnostic_total_seconds"]["median"] for s in summaries)
             prefix = f"{label} & {size} & {workers} & {LABELS[algorithm]}"
@@ -104,20 +117,24 @@ def render_tables(data, comparison=None):
                     "% Separate diagnostic runs, largest input per family at 1/8 workers."),
                    ("% Phases partition each raw performance total; medians and rounded values need not add." if split else
                     "% Phases partition each raw diagnostic total; medians and rounded values need not add."),
-                   "% Nested RK/F-Max details remain in raw JSON; do not add them to parent phases.",
+                   ("% Nested RK/F-Max/PLS details remain in raw JSON; do not add them to parent phases." if extended else
+                    "% Nested RK/F-Max details remain in raw JSON; do not add them to parent phases."),
                    "% TTK gradient includes lower-star construction and matching together."])
     return "\n".join(totals) + "\n", "\n".join(phases) + "\n"
 
 
 def render_construction(data):
     groups = validated_groups(data)
-    if data["schema"] != "resident-gradient-study-v2":
-        raise ValueError("Construction reporting requires v2 non-profiled phase samples")
-    rows = [r"\begin{tabular}{llrrrrr}", r"\hline",
-            r"Input & $n$ & Workers & F-Max construction (ms) & RK construction (ms) & TTK construction (ms) & Shared loading (ms) \\", r"\hline"]
+    if data["schema"] == "resident-gradient-study-v1":
+        raise ValueError("Construction reporting requires v2/v3 non-profiled phase samples")
+    algorithms = algorithm_names(data["schema"])
+    rows = [r"\begin{tabular}{ll" + "r" * (len(algorithms) + 2) + "}", r"\hline",
+            "Input & $n$ & Workers & " +
+            " & ".join(f"{LABELS[a]} construction (ms)" for a in algorithms) +
+            " & Shared loading (ms) " + r"\\", r"\hline"]
     for (family, size, workers), summaries in sorted(groups.items()):
         times = [1e3 * statistics.median(s[a]["construction_seconds"]["median"] for s in summaries)
-                 for a in ALGORITHMS]
+                 for a in algorithms]
         loading = 1e3 * statistics.median(
             m["raw"]["input_loading_seconds"] for c in data["cases"]
             if c["family"] == family and c["size"] == size

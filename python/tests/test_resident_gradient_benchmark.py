@@ -1,4 +1,5 @@
 import copy
+from collections import Counter
 from contextlib import redirect_stderr
 from io import StringIO
 import math
@@ -189,10 +190,118 @@ class ResidentGradientBenchmarkTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "v2"):
             render.render_construction(data)
 
+    def pls_raw(self):
+        raw = self.split_raw()
+        raw.update(schema="resident-gradient-v3", euler_characteristic=1,
+                   performance_orders=[[bench.PLS_ALGORITHMS[a] for a in bench.PLS_ORDERS[i % 4]]
+                                       for i in range(12)])
+        raw["algorithms"]["process_lower_stars"] = copy.deepcopy(raw["algorithms"]["f_max"])
+        raw["algorithms"]["process_lower_stars"]["diagnostics"][0]["gradient_details_seconds"] = {
+            k: 0.5 for k in bench.DETAIL_PHASES["process_lower_stars"]}
+        for a in raw["algorithms"].values():
+            a["performance_seconds"] *= 4
+            a["performance_phases_seconds"] *= 4
+        return raw
+
+    def test_pls_partition_ratios_and_count_differences(self):
+        raw = self.pls_raw()
+        original = copy.deepcopy(raw)
+        summary = bench.summarize(raw, 12, 1)
+        self.assertEqual(summary["process_lower_stars"]["algorithm_seconds"]["median"], 10)
+        self.assertEqual(bench.ALGORITHM_PHASES["process_lower_stars"], {"builder_setup", "gradient"})
+        ratio = summary["algorithm_paired_ratios"]["process_lower_stars/ttk"]
+        self.assertAlmostEqual(ratio["median"], 100 / 51)
+        self.assertIn("paired_repetition_bootstrap_95_interval", ratio)
+        self.assertEqual(summary, bench.summarize(raw, 12, 1))
+        self.assertEqual(original, raw)
+        raw["algorithms"]["process_lower_stars"]["critical_counts"] = [2, 1, 0]
+        raw["critical_counts_match"] = False
+        bench.summarize(raw, 12, 1)  # Valid difference, same Euler characteristic.
+        raw["algorithms"]["process_lower_stars"]["critical_counts"] = [3, 0, 0]
+        with self.assertRaisesRegex(ValueError, "Euler"):
+            bench.summarize(raw, 12, 1)
+
+    def test_pls_order_balance_and_arguments(self):
+        for position in range(4):
+            self.assertEqual(sorted(row[position] for row in bench.PLS_ORDERS), list(range(4)))
+        adjacent = Counter((a, b) for row in bench.PLS_ORDERS for a, b in zip(row, row[1:]))
+        self.assertEqual(adjacent, {(a, b): 1 for a in range(4) for b in range(4) if a != b})
+        with tempfile.TemporaryDirectory() as directory:
+            args = ["--benchmark", "native", "--input-dir", directory, "--include-pls",
+                    "--output", str(Path(directory) / "raw.json")]
+            parsed = bench.parse_args(args)
+            self.assertEqual((parsed.repeats, parsed.diagnostics), (12, 4))
+            for bad in [["--repeats", "6"], ["--diagnostics", "6"], ["--order-offset", "4"]]:
+                with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+                    bench.parse_args(args + bad)
+
+    def test_pls_rejects_missing_or_inconsistent_evidence(self):
+        for mutate in (
+            lambda r: r["algorithms"].pop("process_lower_stars"),
+            lambda r: r["performance_orders"].pop(),
+            lambda r: r["performance_orders"][0].__setitem__(0, "ttk"),
+            lambda r: r.pop("euler_characteristic"),
+            lambda r: r["algorithms"]["process_lower_stars"]["diagnostics"][0]["gradient_details_seconds"].update(replay=99.),
+            lambda r: r.update(critical_counts_match=False),
+        ):
+            raw = self.pls_raw()
+            mutate(raw)
+            with self.assertRaises(ValueError):
+                bench.summarize(raw, 12, 1)
+
+    def test_pls_renderer_preserves_all_four_methods(self):
+        data = dict(schema="resident-gradient-study-v3", completed_utc="test",
+                    construction_phases={a: sorted(bench.CONSTRUCTION_PHASES[a]) for a in bench.PLS_ALGORITHMS},
+                    algorithm_phases={a: sorted(bench.ALGORITHM_PHASES[a]) for a in bench.PLS_ALGORITHMS},
+                    arguments=dict(repeats=12, diagnostics=1, workers=[1],
+                                   terrain_sizes=[3], volume_sizes=[], seeds=[0]),
+                    cases=[dict(family="terrain", size=3, seed=0,
+                                measurements=[dict(workers=1, raw=self.pls_raw(), summary={})])])
+        table, phases = render.render_tables(data)
+        self.assertIn("PLS algorithm (ms)", table)
+        self.assertIn("PLS/TTK", table)
+        self.assertIn("10000.000 & 2000.000 & 2000.000 & 10000.000 & 1.000 & 1.961", table)
+        self.assertIn("PLS & builder setup", phases)
+        self.assertIn("PLS construction (ms)", render.render_construction(data))
+
 
 @unittest.skipUnless(os.environ.get("MORSEFRAMES_RESIDENT_BENCHMARK"),
                      "requires the separately built TTK resident benchmark")
 class ResidentGradientNativeTest(unittest.TestCase):
+    def test_native_pls_reference_phases_and_orders(self):
+        executable = Path(os.environ["MORSEFRAMES_RESIDENT_BENCHMARK"])
+        examples = (
+            "morseframes-ttk-v1 1 3 3\n2 0 1\n0 1\n1 2\n0 2\n",
+            "morseframes-ttk-v1 2 3 1\n2 0 1\n0 1 2\n",
+            "morseframes-ttk-v1 3 5 2\n3 0 4 2 1\n0 1 2 3\n1 2 3 4\n",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "complex.txt"
+            for source in examples:
+                path.write_text(source)
+                for workers in (1, 4):
+                    raw = bench.run_native(executable, path, workers, 4, 4, 0, True, 2)
+                    summary = bench.summarize(raw, 4, 4)
+                    self.assertEqual(raw["schema"], "resident-gradient-v3")
+                    self.assertTrue(raw["exact_reference_checks"])
+                    self.assertEqual(raw["performance_orders"][0],
+                                     [bench.PLS_ALGORITHMS[a] for a in bench.PLS_ORDERS[2]])
+                    self.assertGreater(summary["process_lower_stars"]["gradient_details_seconds"]["lower_star_setup"]["median"], 0)
+                    for algorithm in bench.PLS_ALGORITHMS:
+                        c = bench.performance_components(raw, algorithm)
+                        for i in range(4):
+                            self.assertAlmostEqual(c["construction_seconds"][i] + c["algorithm_seconds"][i],
+                                                   raw["algorithms"][algorithm]["performance_seconds"][i])
+
+    def test_native_pls_rejects_ties_without_changing_legacy_mode(self):
+        executable = Path(os.environ["MORSEFRAMES_RESIDENT_BENCHMARK"])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "complex.txt"
+            path.write_text("morseframes-ttk-v1 2 3 1\n0 0 0\n0 1 2\n")
+            self.assertEqual(bench.run_native(executable, path, 1, 1, 1, 0)["schema"], "resident-gradient-v2")
+            with self.assertRaises(subprocess.CalledProcessError):
+                bench.run_native(executable, path, 1, 4, 4, 0, True)
+
     def test_native_fresh_runs_ties_and_phase_accounting(self):
         executable = Path(os.environ["MORSEFRAMES_RESIDENT_BENCHMARK"])
         examples = (

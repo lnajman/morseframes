@@ -36,6 +36,11 @@ constexpr std::array<const char*, 3> kAlgorithms{{"f_max", "reduction_kernel", "
 constexpr std::array<std::array<int, 3>, 6> kOrders{{
     {{0, 1, 2}}, {{2, 1, 0}}, {{1, 2, 0}},
     {{0, 2, 1}}, {{2, 0, 1}}, {{1, 0, 2}}}};
+constexpr const char* kPlsAlgorithm = "process_lower_stars";
+// Williams design: every method occupies each position once; all 12 directed
+// adjacent method pairs occur once within a four-round cycle.
+constexpr std::array<std::array<int, 4>, 4> kPlsOrders{{
+    {{0, 1, 3, 2}}, {{1, 2, 0, 3}}, {{2, 3, 1, 0}}, {{3, 0, 2, 1}}}};
 
 double seconds(Clock::time_point a, Clock::time_point b) {
   return std::chrono::duration<double>(b - a).count();
@@ -124,7 +129,7 @@ std::unique_ptr<MorseRun> run_morse(const Input& input, int algorithm, int worke
   const auto representation_stop = Clock::now();
   // Coarse RK profiling leaves local kernels uninstrumented. F-Max's existing
   // diagnostics are finer-grained and are used only in separate phase runs.
-  if (algorithm == 0) {
+  if (algorithm == 0 || algorithm == 3) {
     run->builder = std::make_unique<Builder>(
         run->complex, Diagnostic ? &run->metrics : nullptr, false);
   } else {
@@ -134,6 +139,10 @@ std::unique_ptr<MorseRun> run_morse(const Input& input, int algorithm, int worke
   const auto builder_stop = Clock::now();
   if (algorithm == 0) {
     run->sequence.emplace(run->builder->build_f_max());
+  } else if (algorithm == 3) {
+    run->sequence.emplace(workers == 1
+        ? run->builder->build_process_lower_stars()
+        : run->builder->build_process_lower_stars_parallel(workers));
   } else if (workers == 1) {
     run->sequence.emplace(run->rk_builder->build_flooding_reduction_kernel());
   } else {
@@ -155,6 +164,11 @@ std::unique_ptr<MorseRun> run_morse(const Input& input, int algorithm, int worke
           {"candidate_selection", 1e-9 * m.candidate_loop_nanoseconds},
           {"emission_and_updates", 1e-9 * m.emit_nanoseconds},
           {"callbacks", 1e-9 * m.callback_nanoseconds}};
+    } else if (algorithm == 3) {
+      run->timing.gradient_details = {
+          {"lower_star_setup", 1e-9 * m.process_lower_stars_setup_nanoseconds},
+          {"local_processing", 1e-9 * m.process_lower_stars_local_wall_nanoseconds},
+          {"replay", 1e-9 * m.process_lower_stars_replay_nanoseconds}};
     } else {
       run->timing.gradient_details = {
           {"workspace_and_pool", 1e-9 * m.reduction_kernel_setup_nanoseconds},
@@ -267,6 +281,8 @@ TtkSignature ttk_signature(const TtkRun& run, int dimension) {
 struct Options {
   std::string input;
   int workers = 1, repeats = 6, diagnostics = 3, warmups = 1;
+  bool include_pls = false;
+  int order_offset = 0;
 };
 
 Options parse_options(int argc, char** argv) {
@@ -279,10 +295,13 @@ Options parse_options(int argc, char** argv) {
     else if (key == "--repeats") result.repeats = std::stoi(value);
     else if (key == "--diagnostics") result.diagnostics = std::stoi(value);
     else if (key == "--warmups") result.warmups = std::stoi(value);
+    else if (key == "--include-pls" && (value == "0" || value == "1")) result.include_pls = value == "1";
+    else if (key == "--order-offset") result.order_offset = std::stoi(value);
     else throw std::runtime_error("Unknown option: " + key);
   }
   if (result.input.empty() || result.workers < 1 || result.repeats < 1 ||
-      result.diagnostics < 1 || result.warmups < 0) {
+      result.diagnostics < 1 || result.warmups < 0 || result.order_offset < 0 ||
+      result.order_offset >= (result.include_pls ? 4 : 6)) {
     throw std::runtime_error("Invalid resident benchmark options.");
   }
   return result;
@@ -312,6 +331,17 @@ void write_timing(const Timing& timing) {
 int main(int argc, char** argv) {
   try {
     const auto options = parse_options(argc, argv);
+    std::vector<std::string> algorithms(kAlgorithms.begin(), kAlgorithms.end());
+    std::vector<std::vector<int>> orders;
+    if (options.include_pls) {
+      algorithms.emplace_back(kPlsAlgorithm);
+      for (const auto& order : kPlsOrders) orders.emplace_back(order.begin(), order.end());
+    } else {
+      for (const auto& order : kOrders) orders.emplace_back(order.begin(), order.end());
+    }
+    const auto order_at = [&](int round) -> const std::vector<int>& {
+      return orders[(round + options.order_offset) % orders.size()];
+    };
     const auto loading_start = Clock::now();
     const auto input = read_input(options.input);
     const auto loading_stop = Clock::now();
@@ -323,18 +353,37 @@ int main(int argc, char** argv) {
     auto ttk_reference_run = run_ttk<false>(input, 1);
     const auto ttk_reference = ttk_signature(*ttk_reference_run, input.dimension);
     const auto simplex_count = f_reference->complex.size();
+    std::int64_t euler = 0;
+    for (morseframes::SimplexId id = 0; id < simplex_count; ++id) {
+      euler += f_reference->complex.dimension(id) % 2 ? -1 : 1;
+    }
     if (ttk_reference.cells.size() != simplex_count) {
       throw std::runtime_error("TTK and MorseFrames simplex counts differ.");
     }
-    const std::array<std::vector<std::size_t>, 3> counts{{
+    std::vector<std::vector<std::size_t>> counts{
         morse_counts(*f_reference, input.dimension),
-        morse_counts(*rk_reference, input.dimension), ttk_reference.counts}};
+        morse_counts(*rk_reference, input.dimension), ttk_reference.counts};
     // Only reference outputs need to remain resident, not prepared native data.
     const auto f_sequence = std::move(*f_reference->sequence);
     const auto rk_sequence = std::move(*rk_reference->sequence);
+    std::optional<Sequence> pls_sequence;
+    if (options.include_pls) {
+      auto pls_reference = run_morse<false>(input, 3, 1);
+      morseframes::validate_morse_sequence(pls_reference->complex, *pls_reference->sequence);
+      counts.push_back(morse_counts(*pls_reference, input.dimension));
+      pls_sequence.emplace(std::move(*pls_reference->sequence));
+    }
     f_reference.reset();
     rk_reference.reset();
     ttk_reference_run.reset();
+    for (const auto& critical_counts : counts) {
+      std::int64_t critical_euler = 0;
+      for (std::size_t dim = 0; dim < critical_counts.size(); ++dim) {
+        critical_euler += dim % 2 ? -static_cast<std::int64_t>(critical_counts[dim])
+                                 : static_cast<std::int64_t>(critical_counts[dim]);
+      }
+      if (critical_euler != euler) throw std::runtime_error("Critical-cell Euler characteristic differs.");
+    }
 
     const auto measure = [&](int algorithm, bool diagnostic) {
       if (algorithm == 2) {
@@ -348,28 +397,30 @@ int main(int argc, char** argv) {
       }
       auto run = diagnostic ? run_morse<true>(input, algorithm, options.workers)
                             : run_morse<false>(input, algorithm, options.workers);
-      compare_sequences(algorithm == 0 ? f_sequence : rk_sequence, *run->sequence);
+      compare_sequences(algorithm == 0 ? f_sequence : algorithm == 1 ? rk_sequence : *pls_sequence,
+                        *run->sequence);
       return run->timing;
     };
     for (int i = 0; i < options.warmups; ++i) {
-      for (int algorithm : kOrders[i % kOrders.size()]) (void)measure(algorithm, false);
+      for (int algorithm : order_at(i)) (void)measure(algorithm, false);
     }
-    std::array<std::vector<Timing>, 3> performance, diagnostics;
+    std::vector<std::vector<Timing>> performance(algorithms.size()), diagnostics(algorithms.size());
     for (int i = 0; i < options.repeats; ++i) {
-      for (int algorithm : kOrders[i % kOrders.size()]) {
+      for (int algorithm : order_at(i)) {
         performance[algorithm].push_back(measure(algorithm, false));
       }
     }
     for (int i = 0; i < options.warmups; ++i) {
-      for (int algorithm : kOrders[i % kOrders.size()]) (void)measure(algorithm, true);
+      for (int algorithm : order_at(i)) (void)measure(algorithm, true);
     }
     for (int i = 0; i < options.diagnostics; ++i) {
-      for (int algorithm : kOrders[i % kOrders.size()]) {
+      for (int algorithm : order_at(i)) {
         diagnostics[algorithm].push_back(measure(algorithm, true));
       }
     }
 
-    std::cout << std::setprecision(17) << "{\"schema\":\"" << kSchema
+    std::cout << std::setprecision(17) << "{\"schema\":\""
+              << (options.include_pls ? "resident-gradient-v3" : kSchema)
               << "\",\"ttk_revision\":\"" << MORSEFRAMES_TTK_REVISION
               << "\",\"dimension\":" << input.dimension
               << ",\"vertices\":" << input.values.size()
@@ -377,11 +428,26 @@ int main(int argc, char** argv) {
               << ",\"workers\":" << options.workers
               << ",\"input_loading_seconds\":" << seconds(loading_start, loading_stop)
               << ",\"exact_reference_checks\":true,\"critical_counts_match\":"
-              << (counts[0] == counts[1] && counts[1] == counts[2] ? "true" : "false")
-              << ",\"algorithms\":{";
-    for (int algorithm = 0; algorithm < 3; ++algorithm) {
+              << (std::all_of(counts.begin(), counts.end(), [&](const auto& c) { return c == counts[0]; })
+                      ? "true" : "false");
+    if (options.include_pls) {
+      std::cout << ",\"euler_characteristic\":" << euler << ",\"performance_orders\":[";
+      for (int round = 0; round < options.repeats; ++round) {
+        if (round) std::cout << ',';
+        std::cout << '[';
+        const auto& order = order_at(round);
+        for (std::size_t position = 0; position < order.size(); ++position) {
+          if (position) std::cout << ',';
+          std::cout << '"' << algorithms[order[position]] << '"';
+        }
+        std::cout << ']';
+      }
+      std::cout << ']';
+    }
+    std::cout << ",\"algorithms\":{";
+    for (std::size_t algorithm = 0; algorithm < algorithms.size(); ++algorithm) {
       if (algorithm != 0) std::cout << ',';
-      std::cout << '"' << kAlgorithms[algorithm] << "\":{\"critical_counts\":[";
+      std::cout << '"' << algorithms[algorithm] << "\":{\"critical_counts\":[";
       for (std::size_t i = 0; i < counts[algorithm].size(); ++i) {
         if (i != 0) std::cout << ',';
         std::cout << counts[algorithm][i];

@@ -1,0 +1,66 @@
+\begin{tabular}{lrrllr}
+\hline
+Input & $n$ & Workers & Algorithm & Phase & Time (ms) \\
+\hline
+2D & 64 & 1 & F-Max & Total (diagnostic) & 26.070 \\
+2D & 64 & 1 & F-Max & representation and filtration & 22.890 \\
+2D & 64 & 1 & F-Max & builder setup & 0.077 \\
+2D & 64 & 1 & F-Max & gradient & 2.867 \\
+2D & 64 & 1 & RK & Total (diagnostic) & 24.408 \\
+2D & 64 & 1 & RK & representation and filtration & 23.128 \\
+2D & 64 & 1 & RK & builder setup & 0.104 \\
+2D & 64 & 1 & RK & gradient & 1.267 \\
+2D & 64 & 1 & TTK & Total (diagnostic) & 1.503 \\
+2D & 64 & 1 & TTK & native object init & 0.013 \\
+2D & 64 & 1 & TTK & vertex order & 0.180 \\
+2D & 64 & 1 & TTK & representation setup & 0.067 \\
+2D & 64 & 1 & TTK & connectivity precondition & 0.379 \\
+2D & 64 & 1 & TTK & gradient & 0.882 \\
+2D & 64 & 8 & F-Max & Total (diagnostic) & 26.666 \\
+2D & 64 & 8 & F-Max & representation and filtration & 23.747 \\
+2D & 64 & 8 & F-Max & builder setup & 0.084 \\
+2D & 64 & 8 & F-Max & gradient & 2.800 \\
+2D & 64 & 8 & RK & Total (diagnostic) & 24.342 \\
+2D & 64 & 8 & RK & representation and filtration & 23.490 \\
+2D & 64 & 8 & RK & builder setup & 0.084 \\
+2D & 64 & 8 & RK & gradient & 0.788 \\
+2D & 64 & 8 & TTK & Total (diagnostic) & 1.249 \\
+2D & 64 & 8 & TTK & native object init & 0.014 \\
+2D & 64 & 8 & TTK & vertex order & 0.318 \\
+2D & 64 & 8 & TTK & representation setup & 0.076 \\
+2D & 64 & 8 & TTK & connectivity precondition & 0.478 \\
+2D & 64 & 8 & TTK & gradient & 0.390 \\
+3D & 16 & 1 & F-Max & Total (diagnostic) & 147.558 \\
+3D & 16 & 1 & F-Max & representation and filtration & 131.489 \\
+3D & 16 & 1 & F-Max & builder setup & 0.405 \\
+3D & 16 & 1 & F-Max & gradient & 15.218 \\
+3D & 16 & 1 & RK & Total (diagnostic) & 139.837 \\
+3D & 16 & 1 & RK & representation and filtration & 134.298 \\
+3D & 16 & 1 & RK & builder setup & 0.422 \\
+3D & 16 & 1 & RK & gradient & 4.302 \\
+3D & 16 & 1 & TTK & Total (diagnostic) & 18.503 \\
+3D & 16 & 1 & TTK & native object init & 0.015 \\
+3D & 16 & 1 & TTK & vertex order & 0.196 \\
+3D & 16 & 1 & TTK & representation setup & 0.197 \\
+3D & 16 & 1 & TTK & connectivity precondition & 6.883 \\
+3D & 16 & 1 & TTK & gradient & 11.213 \\
+3D & 16 & 8 & F-Max & Total (diagnostic) & 149.235 \\
+3D & 16 & 8 & F-Max & representation and filtration & 131.748 \\
+3D & 16 & 8 & F-Max & builder setup & 0.381 \\
+3D & 16 & 8 & F-Max & gradient & 16.828 \\
+3D & 16 & 8 & RK & Total (diagnostic) & 132.561 \\
+3D & 16 & 8 & RK & representation and filtration & 130.263 \\
+3D & 16 & 8 & RK & builder setup & 0.394 \\
+3D & 16 & 8 & RK & gradient & 1.669 \\
+3D & 16 & 8 & TTK & Total (diagnostic) & 8.020 \\
+3D & 16 & 8 & TTK & native object init & 0.015 \\
+3D & 16 & 8 & TTK & vertex order & 0.320 \\
+3D & 16 & 8 & TTK & representation setup & 0.207 \\
+3D & 16 & 8 & TTK & connectivity precondition & 4.270 \\
+3D & 16 & 8 & TTK & gradient & 3.045 \\
+\hline
+\end{tabular}
+% Separate diagnostic runs, largest input per family at 1/8 workers.
+% Phases partition each raw diagnostic total; medians and rounded values need not add.
+% Nested RK/F-Max details remain in raw JSON; do not add them to parent phases.
+% TTK gradient includes lower-star construction and matching together.

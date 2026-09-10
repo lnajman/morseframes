@@ -9,6 +9,11 @@ mkdir -p "${work_root_input}"
 readonly WORK_ROOT="$(cd "${work_root_input}" && pwd)"
 readonly TTK_SOURCE="${WORK_ROOT}/ttk-${TTK_REVISION}"
 readonly BUILD_DIR="${WORK_ROOT}/build-${TTK_REVISION}"
+readonly BENCHMARK_TARGET="${2:-morseframes_ttk_gradient_benchmark}"
+case "${BENCHMARK_TARGET}" in
+  morseframes_ttk_gradient_benchmark|morseframes_resident_gradient_benchmark) ;;
+  *) printf 'Unknown benchmark target: %s\n' "${BENCHMARK_TARGET}" >&2; exit 1 ;;
+esac
 
 if [[ ! -d "${TTK_SOURCE}/.git" ]]; then
   git init "${TTK_SOURCE}" >&2
@@ -61,5 +66,5 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
 fi
 
 cmake "${cmake_args[@]}" >&2
-cmake --build "${BUILD_DIR}" --target morseframes_ttk_gradient_benchmark --parallel >&2
-printf '%s\n' "${BUILD_DIR}/morseframes_ttk_gradient_benchmark"
+cmake --build "${BUILD_DIR}" --target "${BENCHMARK_TARGET}" --parallel >&2
+printf '%s\n' "${BUILD_DIR}/${BENCHMARK_TARGET}"

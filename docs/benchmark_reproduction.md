@@ -5,6 +5,8 @@ repository. It is meant for software reproducibility: manuscript text and
 discussion notes live outside the public repository, in the private manuscript
 workspace until a public preprint or published version exists.
 
+The resident-array comparison records total gradient computation including all
+native preparation, starting from a common in-memory mesh and vertex function.
 The facet-task batching section records the latest ReductionKernel update.
 The closure-based incidence, controlled packed-coface A/B, direct TTK comparison,
 and earlier phase-profile sections retain historical snapshots; those timings
@@ -171,7 +173,157 @@ The exact paper-ready values are generated in
 scheduler study, not yet the comparison with Robins' implementation; that
 external benchmark remains a separate stage.
 
-## TTK ProcessLowerStars Reference
+## Resident-Array Gradient Comparison
+
+This is the primary comparison for **one gradient from a common in-memory
+complex and function**. The starting representation consists of vertex values,
+vertex coordinates, and maximal-cell vertex arrays. No vertex ranks,
+lower-star lists, full simplex enumeration, incidence arrays, library-specific
+triangulation, or builder is prepared for free. The current adapter covers
+pure 1D--3D meshes; the generated comparison cases are 2D terrains and 3D
+tetrahedral volumes. The function on simplices is the max-vertex extension.
+
+Every repetition starts from these same resident arrays and constructs fresh
+native objects. Timing stops when the algorithm's native gradient is ready.
+It includes native representation conversion, filtration extension, ordering,
+connectivity preparation, builder setup, internal workspace/task-pool creation,
+and gradient construction. Input generation, file I/O, reference validation,
+destruction after gradient readiness, and persistence are excluded. Temporary
+cleanup performed internally before a build method returns remains included.
+Warmups prime the process/runtime, not a reusable prepared complex or gradient.
+
+This timing boundary differs from both earlier benchmarks:
+
+| Benchmark | Starting point | Native preparation |
+| --- | --- | --- |
+| Resident-array comparison | Common mesh arrays and vertex values | Included for every algorithm |
+| RK implementation A/B | Finalized MorseFrames filtered complex | Complex construction excluded; fresh builder included |
+| Earlier prepared-kernel TTK comparison | Native topology, TTK offsets/connectivity, MorseFrames builder | Excluded from headline kernel times |
+
+The new native executable does not change the historical executable or its
+output schema. The new Python runner and table renderer reject legacy timing
+schemas, incomplete studies, missing phases, nonfinite values, failed exact
+reference checks, and double-counted nested phase times.
+
+### Global and phase timings
+
+The main performance runs have only outer clock reads and no local diagnostic
+instrumentation. F-Max, RK, and TTK execute in all six permutations, balanced
+over repetition counts divisible by six. Every raw total is retained; the
+headline statistics are medians and IQRs, with paired per-repetition ratios.
+The worker setting applies to RK and TTK; F-Max remains sequential and is
+remeasured alongside them. Native preparation may itself remain sequential.
+
+Separate diagnostic repetitions report these outer phases, which partition
+each individual diagnostic total:
+
+- F-Max and RK: native complex construction and filtration preparation;
+  builder setup; gradient construction.
+- TTK: native object initialization; vertex ordering using TTK's own
+  `preconditionOrderArray`; representation setup; connectivity preconditioning;
+  gradient construction with the cache bypassed. The same worker budget is
+  supplied to TTK's ordering, triangulation, and gradient routines.
+
+Within RK's gradient phase, coarse diagnostics further report workspace/pool
+setup, level processing, replay, and an explicit residual. F-Max's existing
+finer instrumentation reports workspace initialization, candidate seeding,
+candidate selection, emission/updates, callbacks, and a residual. These are
+**children of the gradient phase**, not additional total-time components.
+The unmodified pinned TTK backend constructs lower stars inside `buildGradient`;
+lower-star construction and matching are included but reported together.
+Separating those two internal TTK operations would require additional
+instrumentation and is not claimed here.
+
+Diagnostic samples never enter the headline speed comparisons. F-Max's fine
+timers can noticeably perturb its gradient phase. Phase shares use each
+diagnostic sample's own total, not an uninstrumented median; medians over
+samples or seeds and rounded phase values need not sum to the displayed
+median total. No cumulative worker duration is presented as elapsed time.
+
+### Reproduction
+
+The build helper's second argument selects the new target; omitting it still
+builds the historical prepared-kernel executable. Rebuild before measuring.
+The TTK revision is embedded in the executable and checked by the runner.
+Input, binary, driver, and MorseFrames header hashes plus source state, worker
+orders, raw measurements, and the OpenMP wait policy are saved with the study.
+Source hashes describe the source state at run time, not a substitute for
+rebuilding the executable after edits.
+
+```sh
+LC_ALL=C tools/build_ttk_gradient_benchmark.sh \
+  ../work/ttk-benchmark morseframes_resident_gradient_benchmark
+
+OMP_WAIT_POLICY=PASSIVE LC_ALL=C python3 tools/benchmark_resident_gradients.py \
+  --benchmark ../work/ttk-benchmark/build-f4ffd1a1049d0ccf6e8f3eb4f7c096a6cc251ba0/morseframes_resident_gradient_benchmark \
+  --terrain-sizes 16 64 --volume-sizes 8 16 --seeds 0 2 --workers 1 2 4 8 \
+  --repeats 12 --diagnostics 6 --warmups 2 \
+  --input-dir ../rk-ab-inputs --output ../rk-resident-gradients-main.json
+
+python3 tools/render_resident_gradients.py \
+  --input ../rk-resident-gradients-main.json \
+  --table-output docs/resident_gradient_comparison_table.tex \
+  --phases-output docs/resident_gradient_phases_table.tex
+```
+
+The main run covers eight inputs and 32 worker configurations on the Apple M1
+Max, using the release native ARM build and `OMP_WAIT_POLICY=PASSIVE`. Every
+timed and diagnostic result, including warmups, matches its own algorithm's
+one-worker reference: full Morse sequence fields for F-Max/RK and per-cell
+critical/upward/downward pairing data for TTK. MorseFrames reference sequences
+are also validated independently of timing. Critical counts by dimension are
+reported separately for every algorithm; unlike same-algorithm reference
+differences, differences between algorithms are allowed and explicitly flagged.
+All counts agree in this run.
+
+Selected **uninstrumented total times**, milliseconds, are medians over the
+two seed-specific medians:
+
+| Input | Workers | F-Max | RK | TTK |
+| --- | ---: | ---: | ---: | ---: |
+| 2D terrain, `n=64` | 1 | 24.61 | 24.28 | 1.54 |
+| 2D terrain, `n=64` | 8 | 25.23 | 24.72 | 1.36 |
+| 3D volume, `n=16` | 1 | 151.71 | 138.13 | 18.26 |
+| 3D volume, `n=16` | 8 | 141.94 | 136.32 | 8.02 |
+
+TTK has the lower paired-median total in all 32 configurations. In separate
+diagnostics, representation/filtration preparation accounts for about 96%
+of RK's total on the largest eight-worker terrain and 98% on the largest
+volume. For the latter, RK's diagnostic gradient phase is about 1.67 ms and
+TTK's is 3.05 ms, but the complete measured workflows have the opposite
+ranking. These diagnostic phase times are not an uninstrumented kernel
+comparison. The result identifies the current MorseFrames input adapter and
+native preparation as the dominant cost, not an intrinsic limitation of RK.
+The adapter currently enumerates each maximal cell's faces and inserts them
+through `FilteredSimplicialComplex::add_simplex`, then finalizes the complex;
+bulk/compact input construction is a separate optimization opportunity.
+
+A fresh confirmation repeats the largest terrain (`64`) and volume (`16`),
+both seeds, and workers `1 8`, with `--repeats 18 --diagnostics 6 --warmups 2`.
+It is saved as `../rk-resident-gradients-confirmation.json`. All eight
+configurations retain exact reference agreement and matching critical counts,
+and TTK again has the lower paired-median total in every configuration.
+The confirmed eight-worker RK/TTK total medians are 24.03/1.35 ms for the
+terrain and 143.21/8.90 ms for the volume (medians over the two seed medians).
+These independent sessions support the direction of the observed ranking,
+not a universal speed ratio or an inference about other input representations.
+
+Raw evidence stays outside the public repository. The selected total and
+outer-phase tables are tracked; nested per-algorithm diagnostics and all
+critical-count vectors remain in the JSON. These results are local to this
+implementation, machine, workload family, and wait policy.
+
+The optional native integration tests exercise graph, tied triangle, and
+shared tetrahedral inputs, fresh runs at one/four workers, phase accounting,
+and invalid-input rejection. Enable them with:
+
+```sh
+OMP_WAIT_POLICY=PASSIVE \
+MORSEFRAMES_RESIDENT_BENCHMARK=../work/ttk-benchmark/build-f4ffd1a1049d0ccf6e8f3eb4f7c096a6cc251ba0/morseframes_resident_gradient_benchmark \
+  python3 -m pytest -q python/tests/test_resident_gradient_benchmark.py
+```
+
+## TTK ProcessLowerStars Reference (Prepared Kernels)
 
 The external reference benchmark uses TTK's classic `DiscreteGradient`
 backend, which implements the Robins ProcessLowerStars algorithm for explicit
@@ -300,9 +452,9 @@ Median reductions were 42.7% sequentially and 25.6% with eight workers, and all
 paired-block intervals were below parity. Its exact sequence checks also
 passed; raw evidence is `../rk-packed-cofaces-ab-confirmation.json`.
 
-### Direct TTK versus parallel ReductionKernel
+### Direct TTK versus parallel ReductionKernel (Prepared Kernels)
 
-The publication-facing comparison runs F-Max, TTK ProcessLowerStars, and the
+The earlier prepared-kernel comparison runs F-Max, TTK ProcessLowerStars, and the
 parallel ReductionKernel in the same native process. The execution order is
 balanced over all six permutations of the algorithms. Each CSV row retains
 all timing samples and their interquartile ranges. Reported times are medians;

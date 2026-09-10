@@ -38,3 +38,21 @@ target_link_libraries(morseframes_ttk_gradient_benchmark PRIVATE
   discreteGradient
   Threads::Threads
 )
+
+add_executable(morseframes_resident_gradient_benchmark
+  benchmark_resident_gradient.cpp
+)
+target_compile_features(morseframes_resident_gradient_benchmark PRIVATE cxx_std_17)
+target_include_directories(morseframes_resident_gradient_benchmark PRIVATE
+  "${CMAKE_CURRENT_LIST_DIR}/../../include"
+)
+target_link_libraries(morseframes_resident_gradient_benchmark PRIVATE
+  discreteGradient
+  Threads::Threads
+)
+execute_process(COMMAND git -C "${TTK_SOURCE_DIR}" rev-parse HEAD
+  OUTPUT_VARIABLE MORSEFRAMES_TTK_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE
+  COMMAND_ERROR_IS_FATAL ANY)
+target_compile_definitions(morseframes_resident_gradient_benchmark PRIVATE
+  MORSEFRAMES_TTK_REVISION="${MORSEFRAMES_TTK_REVISION}"
+)

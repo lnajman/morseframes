@@ -77,3 +77,17 @@ This protocol is committed before performance measurement. The metric-diagnostic
 and validation skills informed the separate comparisons, independent recomputation,
 and distinction between observations and causal explanations; the repository's
 benchmark artifacts remain the controlling evidence and requested deliverable.
+
+## Post-hoc identical-binary control
+
+After the two four-build sessions, add a separately recorded A/A control because
+some changes also affect unchanged F-Max/PLS. Reuse the **exact same retained
+candidate ordinary-only executable path and hash** in two independent processes;
+there is no recompilation or header-version difference. Use volume-32 seed 0,
+1/8 workers, three fresh process pairs at each count, two warmups and four balanced
+blocks of six repetitions. Alternate process-launch and first-measurement order.
+`tools/benchmark_rk_same_binary.py` retains every pair separately. Its block
+intervals are conditional on that process pair, not an across-process interval.
+This addition is explicitly post-hoc and cannot replace or discard either
+original session. A/A differences test the magnitude of non-version variation;
+they do not identify a particular allocator, CPU placement or clock mechanism.

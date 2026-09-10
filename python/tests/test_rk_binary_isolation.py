@@ -11,9 +11,19 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools'))
 import benchmark_rk_binary_isolation as isolation
+import benchmark_rk_same_binary as same_binary
 
 
 class BinaryIsolationTests(unittest.TestCase):
+    def test_same_binary_schedule_and_ratios(self):
+        for reverse in (0, 1):
+            orders = same_binary.orders(reverse)
+            self.assertEqual(Counter(tuple(r) for r in orders), {('a', 'b'): 2, ('b', 'a'): 2})
+        source = self.blocks()
+        blocks = [dict(order=['a', 'b'], runs={'a': b['runs']['baseline_ordinary'], 'b': b['runs']['candidate_ordinary']}) for b in source[:4]]
+        for phases in same_binary.summarize(blocks).values():
+            self.assertEqual(phases['algorithm_seconds']['median_paired_ratio'], 2)
+
     def test_trace_symbol_detection(self):
         self.assertEqual(isolation.trace_symbols('xbuild_reduction_kernel_implILb0E'), 0)
         self.assertEqual(isolation.trace_symbols('xbuild_reduction_kernel_implILb1E\nxrun_levels'), 2)

@@ -1732,20 +1732,43 @@ void test_reduction_kernel_lazy_sparse_closures() {
       complex.add_simplex({9000, 9001}, 100.0);
       complex.finalize();
       bool sparse_level = false;
+      bool non_numeric_bucket = false;
       for (morseframes::LevelId level = 0; level < complex.num_levels(); ++level) {
-        sparse_level |= complex.simplices_of_level(level).size() > 128;
+        const auto& bucket = complex.simplices_of_level(level);
+        sparse_level |= bucket.size() > 128;
+        non_numeric_bucket |= !std::is_sorted(bucket.begin(), bucket.end());
       }
+      assert(non_numeric_bucket);
       // Injective 4D/7D stars are small; retain packed-path controls.
       assert(sparse_level || (dimension <= 7 && filtration == 2));
       auto cached = complex;
       cached.prepare_same_level_closure_cache();
-      const auto expected = FSequenceBuilder(cached).build_flooding_reduction_kernel();
+      morseframes::MorseSequenceBuildMetrics linear_metrics;
+      const auto expected = FSequenceBuilder(cached, &linear_metrics)
+                                .build_flooding_reduction_kernel();
       for (std::size_t workers : {1, 2, 4, 8}) {
         for (bool detailed : {false, true}) {
           morseframes::MorseSequenceBuildMetrics metrics;
           FSequenceBuilder builder(complex, &metrics, detailed);
           const auto actual = workers == 1 ? builder.build_flooding_reduction_kernel()
                                           : builder.build_flooding_reduction_kernel_parallel(workers);
+          if (!detailed) {
+            assert(metrics.reduction_kernel_local_membership_comparisons == 0);
+            assert(metrics.reduction_kernel_local_sparse_scan_passes == 0);
+          } else if (dimension == 9 && filtration == 0) {
+            // A large sparse plateau plus a graph control: only membership
+            // lookup changes. Verify fewer probes independently of timing,
+            // including threaded facet execution on the plateau.
+            assert(metrics.reduction_kernel_local_large_membership_tests > 0);
+            assert(metrics.reduction_kernel_local_membership_tests ==
+                   linear_metrics.reduction_kernel_local_membership_tests);
+            assert(metrics.reduction_kernel_local_membership_comparisons <
+                   linear_metrics.reduction_kernel_local_membership_comparisons);
+            assert(metrics.reduction_kernel_local_sparse_candidate_visits ==
+                   linear_metrics.reduction_kernel_local_sparse_candidate_visits);
+            assert(metrics.reduction_kernel_local_sparse_scan_passes ==
+                   linear_metrics.reduction_kernel_local_sparse_scan_passes);
+          }
           morseframes::validate_morse_sequence(complex, actual);
           assert(expected.steps().size() == actual.steps().size());
           for (std::size_t i = 0; i < expected.steps().size(); ++i) {

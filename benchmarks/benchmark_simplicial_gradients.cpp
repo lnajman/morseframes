@@ -13,6 +13,8 @@
 #include <memory>
 #include <optional>
 #include <sys/resource.h>
+#include <type_traits>
+#include <utility>
 
 namespace {
 using Complex = morseframes::FilteredSimplicialComplex;
@@ -25,6 +27,33 @@ constexpr std::array<std::array<int, 3>, 6> orders{{
     {{0, 1, 2}}, {{2, 1, 0}}, {{1, 2, 0}}, {{0, 2, 1}}, {{2, 0, 1}}, {{1, 0, 2}}}};
 double seconds(Clock::time_point a, Clock::time_point b) {
   return std::chrono::duration<double>(b - a).count();
+}
+// New counters must not break reproduction against historical header sets.
+template <typename Metrics, typename = void>
+struct HasSearchProfile : std::false_type {};
+template <typename Metrics>
+struct HasSearchProfile<Metrics, std::void_t<
+    decltype(std::declval<Metrics>().reduction_kernel_local_membership_comparisons),
+    decltype(std::declval<Metrics>().reduction_kernel_local_large_membership_tests),
+    decltype(std::declval<Metrics>().reduction_kernel_local_large_membership_comparisons),
+    decltype(std::declval<Metrics>().reduction_kernel_local_sparse_scan_passes),
+    decltype(std::declval<Metrics>().reduction_kernel_local_sparse_candidate_visits),
+    decltype(std::declval<Metrics>().reduction_kernel_local_removed_candidate_visits),
+    decltype(std::declval<Metrics>().reduction_kernel_local_protected_candidate_visits)>>
+    : std::true_type {};
+template <typename Metrics>
+void search_profile(const Metrics& m) {
+  if constexpr (HasSearchProfile<Metrics>::value) {
+#define RK_SEARCH_COUNT(name) std::cout << ",\"" #name "\":" << m.reduction_kernel_##name
+    RK_SEARCH_COUNT(local_membership_comparisons);
+    RK_SEARCH_COUNT(local_large_membership_tests);
+    RK_SEARCH_COUNT(local_large_membership_comparisons);
+    RK_SEARCH_COUNT(local_sparse_scan_passes);
+    RK_SEARCH_COUNT(local_sparse_candidate_visits);
+    RK_SEARCH_COUNT(local_removed_candidate_visits);
+    RK_SEARCH_COUNT(local_protected_candidate_visits);
+#undef RK_SEARCH_COUNT
+  }
 }
 std::uint64_t peak_bytes() {
   rusage usage{};
@@ -238,13 +267,7 @@ int main(int argc, char** argv) {
         RK_COUNT(rounds); RK_COUNT(facet_kernels); RK_COUNT(executor_workers);
         RK_COUNT(facet_cell_visits); RK_COUNT(local_candidate_visits);
         RK_COUNT(local_coboundary_visits); RK_COUNT(local_membership_tests);
-        RK_COUNT(local_membership_comparisons);
-        RK_COUNT(local_large_membership_tests);
-        RK_COUNT(local_large_membership_comparisons);
-        RK_COUNT(local_sparse_scan_passes);
-        RK_COUNT(local_sparse_candidate_visits);
-        RK_COUNT(local_removed_candidate_visits);
-        RK_COUNT(local_protected_candidate_visits);
+        search_profile(m);
         RK_COUNT(inline_cell_overflows); RK_COUNT(inline_event_overflows);
 #undef RK_TIME
 #undef RK_COUNT

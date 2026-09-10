@@ -1282,6 +1282,39 @@ class ReductionKernelWorkspace {
         overflow_removed[index] = 1;
       }
     };
+    // Workspace cells inherit canonical bucket order, not numerical simplex
+    // ID order. Preserve arbitrary external cache ordering via the old lookup.
+    const bool ordered_lookup = cell.size() > kInlineCellCapacity &&
+                                level_cells.cached_entries == nullptr;
+    const auto find_coface_index = [&](SimplexId coface,
+                                       std::size_t* comparisons = nullptr) {
+      if (!ordered_lookup) {
+        return cell.template index_of<CollectMetrics>(coface, comparisons);
+      }
+      const std::size_t rank = bucket_index_[coface];
+      std::size_t first = 0;
+      std::size_t last = cell.size();
+      while (first < last) {
+        const std::size_t middle = first + (last - first) / 2;
+        if constexpr (CollectMetrics) {
+          ++*comparisons;
+        }
+        if (bucket_index_[cell[middle]] < rank) {
+          first = middle + 1;
+        } else {
+          last = middle;
+        }
+      }
+      if (first < cell.size()) {
+        if constexpr (CollectMetrics) {
+          ++*comparisons;
+        }
+        if (cell[first] == coface) {
+          return first;
+        }
+      }
+      return cell.size();
+    };
     while (true) {
       if constexpr (CollectMetrics) {
         ++result.local_sparse_scan_passes;
@@ -1328,14 +1361,14 @@ class ReductionKernelWorkspace {
               std::size_t coface_index;
               if constexpr (CollectMetrics) {
                 std::size_t comparisons = 0;
-                coface_index = cell.template index_of<true>(coface, &comparisons);
+                coface_index = find_coface_index(coface, &comparisons);
                 result.local_membership_comparisons += comparisons;
                 if (cell.size() > kInlineCellCapacity) {
                   ++result.local_large_membership_tests;
                   result.local_large_membership_comparisons += comparisons;
                 }
               } else {
-                coface_index = cell.index_of(coface);
+                coface_index = find_coface_index(coface);
               }
               if (coface_index == cell.size()) {
                 return true;

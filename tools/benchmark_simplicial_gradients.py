@@ -145,6 +145,7 @@ def main():
     flags = shlex.split(args.cxx_flags)
     result = {
         "schema": "simplicial-gradient-ab-v1", "completed": False,
+        "source_revision": command_output("git", "rev-parse", "HEAD"),
         "started_utc": datetime.now(timezone.utc).isoformat(),
         "platform": platform.platform(), "architecture": platform.machine(),
         "cpu_count": os.cpu_count(), "compiler": command_output(compiler, "--version"),

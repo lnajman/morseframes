@@ -68,7 +68,8 @@ def audit(path):
     static_counts = ('rounds', 'facet_kernels', 'facet_cell_visits',
                      'local_candidate_visits', 'local_coboundary_visits',
                      'local_membership_tests', 'inline_cell_overflows', 'inline_event_overflows')
-    if settings['rk_profiles'] and 'local_sparse_scan_passes' in data['cases'][0]['rk_profiles']['candidate']['rk_detailed'][0]:
+    if settings['rk_profiles'] and all('local_sparse_scan_passes' in
+            data['cases'][0]['rk_profiles'][v]['rk_detailed'][0] for v in benchmark.VERSIONS):
         static_counts += ('local_large_membership_tests', 'local_sparse_scan_passes',
                           'local_sparse_candidate_visits', 'local_removed_candidate_visits',
                           'local_protected_candidate_visits')

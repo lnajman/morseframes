@@ -2159,6 +2159,135 @@ void test_reduction_kernel_facet_failure_drains_tasks() {
   }
 }
 
+void test_reduction_kernel_level_profile() {
+  const auto check = [](FilteredSimplicialComplex complex) {
+    complex.finalize();
+    auto cached = complex;
+    cached.prepare_same_level_closure_cache();
+    const auto expected = FSequenceBuilder(cached).build_flooding_reduction_kernel();
+    for (bool use_cache : {false, true}) {
+      const auto& view = use_cache ? cached : complex;
+      for (std::size_t workers : {1, 2, 4, 8}) {
+        for (int mode : {0, 1, 2}) { // No global metrics, coarse, detailed.
+          morseframes::MorseSequenceBuildMetrics metrics;
+          morseframes::ReductionKernelSequenceBuilder builder(
+              view, mode ? &metrics : nullptr, mode == 2);
+          morseframes::ReductionKernelExecutionOptions options;
+          options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+          options.max_workers = workers;
+          morseframes::ReductionKernelLevelProfile trace;
+          trace.levels.resize(1234); // Reuse must discard stale entries.
+          trace.completed = true;
+          const auto actual = builder.build_flooding_reduction_kernel_with_level_profile(trace, options);
+          morseframes::validate_morse_sequence(view, actual);
+          assert(actual.steps().size() == expected.steps().size());
+          for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+            const auto& a = expected.steps()[i];
+            const auto& b = actual.steps()[i];
+            assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau && a.level == b.level);
+          }
+          assert(trace.completed && trace.detailed == (mode == 2));
+          assert(trace.levels.size() == view.num_levels());
+          assert(trace.executor_workers == workers);
+          assert(trace.level_tasks == std::min(workers, view.num_levels()));
+          std::size_t cells = 0, events = 0, reductions = 0, rounds = 0;
+          std::uint64_t closure_time = 0;
+          std::vector<std::vector<std::pair<std::uint64_t, std::uint64_t>>> timelines(workers);
+          for (std::size_t level = 0; level < trace.levels.size(); ++level) {
+            const auto& row = trace.levels[level];
+            assert(row.completed && row.level == level && row.task < trace.level_tasks);
+            assert(row.simplices == view.simplices_of_level(level).size());
+            assert(row.events > 0 && row.events <= row.simplices);
+            const auto end = row.start_nanoseconds + row.duration_nanoseconds;
+            assert(end <= trace.level_wall_nanoseconds);
+            timelines[row.task].emplace_back(row.start_nanoseconds, end);
+            cells += row.simplices; events += row.events;
+            const auto& m = row.metrics;
+            reductions += m.reductions; rounds += m.kernel_rounds;
+            closure_time += m.closure_nanoseconds;
+            if (mode == 2) {
+              assert(m.reductions + m.perforations == row.events);
+              assert(2 * m.reductions + m.perforations == row.simplices);
+              assert(m.closure_nanoseconds + m.facet_nanoseconds + m.essential_nanoseconds +
+                     m.facet_execution_nanoseconds + m.aggregation_nanoseconds + m.merge_nanoseconds
+                     <= row.duration_nanoseconds);
+              assert(m.closure_initial_nanoseconds + m.closure_traversal_nanoseconds +
+                     m.closure_sort_nanoseconds + m.closure_materialize_nanoseconds <= m.closure_nanoseconds);
+              assert(m.closure_packed_nanoseconds + m.closure_boundary_index_nanoseconds <= m.closure_initial_nanoseconds);
+              if (workers == 1 || view.num_levels() > 1) {
+                assert(m.core_nanoseconds + m.local_reduction_nanoseconds <= m.facet_execution_nanoseconds);
+              }
+            } else {
+              assert(m.reductions == 0 && m.kernel_rounds == 0 && m.closure_nanoseconds == 0);
+            }
+          }
+          for (auto& timeline : timelines) {
+            std::sort(timeline.begin(), timeline.end());
+            for (std::size_t i = 1; i < timeline.size(); ++i) assert(timeline[i-1].second <= timeline[i].first);
+          }
+          assert(cells == view.size() && events == actual.steps().size());
+          assert(reductions == metrics.reduction_kernel_reductions);
+          assert(rounds == metrics.reduction_kernel_rounds);
+          assert(closure_time == metrics.reduction_kernel_closure_nanoseconds);
+          if (mode) assert(trace.level_wall_nanoseconds <= metrics.reduction_kernel_level_wall_nanoseconds);
+          if (view.size()) {
+            bool propagated = false;
+            try {
+              builder.build_flooding_reduction_kernel_with_level_profile(
+                  options, trace, [](const auto&, const auto&) { throw std::runtime_error("callback"); });
+            } catch (const std::runtime_error&) { propagated = true; }
+            assert(propagated && !trace.completed);
+            for (const auto& row : trace.levels) assert(row.completed);
+          }
+        }
+      }
+    }
+  };
+  FilteredSimplicialComplex singleton;
+  singleton.add_simplex({0}, 0);
+  check(singleton);
+  for (std::size_t dimension : {1, 4, 7}) {
+    for (int weights : {0, 1, 2}) {
+      FilteredSimplicialComplex complex;
+      std::vector<double> values(dimension + 3);
+      for (std::size_t v = 0; v < values.size(); ++v) values[v] = weights == 0 ? 0 : (weights == 1 ? v % 3 : v);
+      for (std::size_t offset : {0, 1, 2}) {
+        std::vector<morseframes::VertexId> vertices;
+        for (std::size_t v = offset; v <= dimension + offset; ++v) vertices.push_back(v);
+        add_weighted_closure(complex, vertices, values);
+      }
+      check(complex);
+    }
+  }
+  struct FailingView : FilteredSimplicialComplex {
+    mutable std::atomic<std::size_t> failures{0};
+    const std::vector<morseframes::SimplexId>& coboundary(morseframes::SimplexId) const {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      ++failures;
+      throw std::runtime_error("level failure");
+    }
+  } complex;
+  for (morseframes::VertexId v = 0; v < 32; ++v) {
+    complex.add_simplex({2 * v}, v);
+    complex.add_simplex({2 * v + 1}, v);
+    complex.add_simplex({2 * v, 2 * v + 1}, v);
+  }
+  complex.finalize();
+  for (std::size_t workers : {1, 2, 4, 8}) {
+    morseframes::ReductionKernelExecutionOptions options;
+    options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+    options.max_workers = workers;
+    morseframes::ReductionKernelLevelProfile trace;
+    complex.failures = 0;
+    bool propagated = false;
+    try {
+      morseframes::ReductionKernelSequenceBuilder<FailingView>(complex)
+          .build_flooding_reduction_kernel_with_level_profile(trace, options);
+    } catch (const std::runtime_error& error) { propagated = std::string(error.what()) == "level failure"; }
+    assert(propagated && !trace.completed && complex.failures == workers);
+  }
+}
+
 void test_instrumentation_metrics() {
   FilteredSimplicialComplex complex;
   add_simplex(complex, {0}, 0.0);
@@ -2601,6 +2730,7 @@ int main() {
   test_reduction_kernel_discovery_granularity();
   test_reduction_kernel_discovery_failure_drains_tasks();
   test_reduction_kernel_facet_failure_drains_tasks();
+  test_reduction_kernel_level_profile();
   test_instrumentation_metrics();
 
   std::cout << "All Morse persistence prototype tests passed.\n";

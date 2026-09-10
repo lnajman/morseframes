@@ -57,6 +57,7 @@ The current public alpha can be installed from PyPI:
    rk_worker_scaling_benchmark
    rk_worker_scaling_protocol
    rk_worker_scaling_tables
+   rk_level_profile_protocol
    reduction_kernel_correctness
    phase0_conventions
 

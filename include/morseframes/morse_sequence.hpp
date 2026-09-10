@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <functional>
+#include <exception>
 #include <future>
 #include <limits>
 #include <memory>
@@ -48,6 +49,30 @@ struct MorseStep {
 };
 
 #define MORSEFRAMES_PLS_PHASE_PROFILE_VERSION 1
+#define MORSEFRAMES_RK_LEVEL_PROFILE_VERSION 1
+
+// Optional O(number of levels) diagnostics, never allocated by ordinary builds.
+// Task IDs identify persistent level tasks/scratch slots, not physical threads
+// or cores. Timestamps share the start of the level-processing phase as origin.
+struct ReductionKernelLevelTrace {
+  LevelId level = 0;
+  std::size_t task = 0;
+  std::size_t simplices = 0;
+  std::size_t events = 0;
+  std::uint64_t start_nanoseconds = 0;
+  std::uint64_t duration_nanoseconds = 0;
+  bool completed = false;
+  ReductionKernelMetrics metrics;
+};
+
+struct ReductionKernelLevelProfile {
+  std::vector<ReductionKernelLevelTrace> levels;
+  std::uint64_t level_wall_nanoseconds = 0;
+  std::size_t executor_workers = 1;
+  std::size_t level_tasks = 0;
+  bool detailed = false;
+  bool completed = false;  // False on exceptions, including replay callbacks.
+};
 
 struct MorseSequenceBuildMetrics {
   std::uint64_t init_nanoseconds = 0;
@@ -1741,6 +1766,34 @@ class FSequenceBuilder {
   template <typename StepCallback>
   MorseSequence build_flooding_reduction_kernel_with_execution_options(
       ReductionKernelExecutionOptions options, StepCallback&& on_step) const {
+    return build_reduction_kernel_impl<false>(
+        options, std::forward<StepCallback>(on_step), nullptr);
+  }
+
+  // Detailed phases use the builder's existing metrics/detail settings.
+  // With no sequence metrics, the trace still records coarse level lifetimes.
+  // The caller must not read/reuse this profile until the build has returned.
+  template <typename StepCallback>
+  MorseSequence build_flooding_reduction_kernel_with_level_profile(
+      ReductionKernelExecutionOptions options, ReductionKernelLevelProfile& profile,
+      StepCallback&& on_step) const {
+    profile = ReductionKernelLevelProfile{};
+    return build_reduction_kernel_impl<true>(
+        options, std::forward<StepCallback>(on_step), &profile);
+  }
+
+  MorseSequence build_flooding_reduction_kernel_with_level_profile(
+      ReductionKernelLevelProfile& profile,
+      ReductionKernelExecutionOptions options = {}) const {
+    return build_flooding_reduction_kernel_with_level_profile(
+        options, profile, [](const MorseSequence&, const MorseStep&) {});
+  }
+
+ private:
+  template <bool TraceLevels, typename StepCallback>
+  MorseSequence build_reduction_kernel_impl(
+      ReductionKernelExecutionOptions options, StepCallback&& on_step,
+      ReductionKernelLevelProfile* level_profile) const {
     // Coarse profiling retains the ordinary metrics-free local kernels. It
     // measures only construction phases and long-lived level-worker activity.
     const bool measure_workers = sequence_metrics_ != nullptr;
@@ -1781,12 +1834,20 @@ class FSequenceBuilder {
         options.collect_metrics ? num_levels : 0);
     ReductionKernelMetrics kernel_metrics;
     kernel_metrics.executor_workers = workers;
+    if constexpr (TraceLevels) {
+      level_profile->levels.resize(num_levels);
+      level_profile->executor_workers = workers;
+      level_profile->level_tasks = level_workers;
+      level_profile->detailed = options.collect_metrics;
+    }
     profile_add(&MorseSequenceBuildMetrics::reduction_kernel_setup_nanoseconds,
                 setup_start);
 
-    const auto level_start = profile_start();
+    const auto level_start = TraceLevels ? SequenceClock::now() : profile_start();
     if (level_workers == 1 || num_levels <= 1) {
       for (LevelId level = 0; level < num_levels; ++level) {
+        SequenceClock::time_point trace_start;
+        if constexpr (TraceLevels) trace_start = SequenceClock::now();
         if (options.collect_metrics) {
           level_metrics[level] = workspace.compute_level_isolated_into(
               level, 0, level_events + event_offsets[level],
@@ -1797,6 +1858,17 @@ class FSequenceBuilder {
               level, 0, level_events + event_offsets[level],
               event_offsets[level + 1] - event_offsets[level],
               level_event_counts[level]);
+        }
+        if constexpr (TraceLevels) {
+          auto& row = level_profile->levels[level];
+          row.duration_nanoseconds = elapsed_nanoseconds(trace_start, SequenceClock::now());
+          row.start_nanoseconds = elapsed_nanoseconds(level_start, trace_start);
+          row.level = level;
+          row.task = 0;
+          row.simplices = event_offsets[level + 1] - event_offsets[level];
+          row.events = level_event_counts[level];
+          if (options.collect_metrics) row.metrics = level_metrics[level];
+          row.completed = true;
         }
       }
     } else {
@@ -1827,11 +1899,13 @@ class FSequenceBuilder {
       std::vector<std::future<void>> futures;
       futures.reserve(task_count);
       for (std::size_t task = 0; task < task_count; ++task) {
-        futures.push_back(executor->submit(
+        auto task_body =
             [task, &next_level, num_levels, &workspace, &event_offsets,
              level_events, &level_event_counts, &level_metrics,
              collect_metrics = options.collect_metrics,
-             measure_workers, level_chunk_size, &level_worker_profiles]() {
+             measure_workers, level_chunk_size, &level_worker_profiles](
+                ReductionKernelLevelProfile* trace,
+                SequenceClock::time_point trace_origin) {
               LevelWorkerProfile worker_profile;
               const auto worker_start =
                   measure_workers ? SequenceClock::now()
@@ -1854,6 +1928,8 @@ class FSequenceBuilder {
                     worker_profile.simplices +=
                         event_offsets[level + 1] - event_offsets[level];
                   }
+                  SequenceClock::time_point trace_start;
+                  if constexpr (TraceLevels) trace_start = SequenceClock::now();
                   if (collect_metrics) {
                     level_metrics[level] =
                         workspace.compute_level_isolated_into(
@@ -1866,6 +1942,17 @@ class FSequenceBuilder {
                         event_offsets[level + 1] - event_offsets[level],
                         level_event_counts[level], false);
                   }
+                  if constexpr (TraceLevels) {
+                    auto& row = trace->levels[level];
+                    row.duration_nanoseconds = elapsed_nanoseconds(trace_start, SequenceClock::now());
+                    row.start_nanoseconds = elapsed_nanoseconds(trace_origin, trace_start);
+                    row.level = level;
+                    row.task = task;
+                    row.simplices = event_offsets[level + 1] - event_offsets[level];
+                    row.events = level_event_counts[level];
+                    if (collect_metrics) row.metrics = level_metrics[level];
+                    row.completed = true;
+                  }
                 }
               }
               if (measure_workers) {
@@ -1873,10 +1960,38 @@ class FSequenceBuilder {
                     worker_start, SequenceClock::now());
                 level_worker_profiles[task] = worker_profile;
               }
+            };
+        // Ordinary task payloads do not capture the trace pointer or clock.
+        if constexpr (TraceLevels) {
+          try {
+            futures.push_back(executor->submit([task_body, level_profile, level_start]() {
+              task_body(level_profile, level_start);
             }));
+          } catch (...) {
+            // Submission itself may allocate. Preserve that exception after
+            // draining previously queued tasks, which still own trace writes.
+            for (auto& future : futures) {
+              try { executor->get(future); } catch (...) {}
+            }
+            throw;
+          }
+        } else {
+          futures.push_back(executor->submit([task_body]() {
+            task_body(nullptr, SequenceClock::time_point{});
+          }));
+        }
       }
-      for (auto& future : futures) {
-        executor->get(future);
+      if constexpr (TraceLevels) {
+        // Do not let a failed build return a trace still being written by
+        // another task. Drain every submitted task before propagating errors.
+        std::exception_ptr failure;
+        for (auto& future : futures) {
+          try { executor->get(future); }
+          catch (...) { if (!failure) failure = std::current_exception(); }
+        }
+        if (failure) std::rethrow_exception(failure);
+      } else {
+        for (auto& future : futures) executor->get(future);
       }
       if (measure_workers) {
         sequence_metrics_->reduction_kernel_level_chunk_size =
@@ -1922,6 +2037,9 @@ class FSequenceBuilder {
               worker_profile.simplices);
         }
       }
+    }
+    if constexpr (TraceLevels) {
+      level_profile->level_wall_nanoseconds = elapsed_nanoseconds(level_start, SequenceClock::now());
     }
     profile_add(
         &MorseSequenceBuildMetrics::reduction_kernel_level_wall_nanoseconds,
@@ -2049,9 +2167,11 @@ class FSequenceBuilder {
           kernel_metrics.inline_event_overflows;
     }
 
+    if constexpr (TraceLevels) level_profile->completed = true;
     return sequence;
   }
 
+ public:
   template <typename StepCallback>
   MorseSequence build_flooding_min_with_step_callback(StepCallback&& on_step) const {
     return build_flooding_with_step_callback(FloodingScheme::Minimal,

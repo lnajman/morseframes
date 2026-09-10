@@ -202,6 +202,61 @@ std::uint64_t fingerprint(const Sequence& sequence, std::ostream* dump = nullptr
   }
   return hash.value;
 }
+#ifdef MORSEFRAMES_RK_LEVEL_PROFILE_VERSION
+std::unique_ptr<Run> run_levels(const Complex& complex, std::size_t workers,
+                               bool detailed, morseframes::ReductionKernelLevelProfile& trace) {
+  const auto start = Clock::now();
+  auto result = std::make_unique<Run>();
+  result->rk = std::make_unique<RBuilder>(complex, &result->metrics, detailed);
+  const auto ready = Clock::now();
+  morseframes::ReductionKernelExecutionOptions options;
+  if (workers > 1) options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+  options.max_workers = workers;
+  result->sequence.emplace(result->rk->build_flooding_reduction_kernel_with_level_profile(trace, options));
+  const auto stop = Clock::now();
+  result->builder_seconds = seconds(start, ready);
+  result->kernel_seconds = seconds(ready, stop);
+  result->algorithm_seconds = seconds(start, stop);
+  return result;
+}
+
+void level_profile_json(const morseframes::ReductionKernelLevelProfile& trace) {
+  std::cout << ",\"level_trace\":{\"completed\":" << (trace.completed ? "true" : "false")
+            << ",\"detailed\":" << (trace.detailed ? "true" : "false")
+            << ",\"executor_workers\":" << trace.executor_workers
+            << ",\"level_tasks\":" << trace.level_tasks
+            << ",\"level_wall_seconds\":" << 1e-9 * trace.level_wall_nanoseconds << ",\"levels\":[";
+  bool first = true;
+  for (const auto& row : trace.levels) {
+    if (!first) std::cout << ',';
+    first = false;
+    std::cout << "{\"level\":" << row.level << ",\"task\":" << row.task
+              << ",\"simplices\":" << row.simplices << ",\"events\":" << row.events
+              << ",\"completed\":" << (row.completed ? "true" : "false")
+              << ",\"start_seconds\":" << 1e-9 * row.start_nanoseconds
+              << ",\"duration_seconds\":" << 1e-9 * row.duration_nanoseconds;
+    const auto& m = row.metrics;
+#define LEVEL_TIME(name) std::cout << ",\"" #name "_seconds\":" << 1e-9 * m.name##_nanoseconds
+#define LEVEL_COUNT(name) std::cout << ",\"" #name "\":" << m.name
+    LEVEL_TIME(closure); LEVEL_TIME(facet); LEVEL_TIME(essential);
+    LEVEL_TIME(facet_execution); LEVEL_TIME(aggregation); LEVEL_TIME(merge);
+    LEVEL_TIME(core); LEVEL_TIME(local_reduction);
+    LEVEL_TIME(closure_initial); LEVEL_TIME(closure_packed); LEVEL_TIME(closure_boundary_index);
+    LEVEL_TIME(closure_traversal); LEVEL_TIME(closure_sort); LEVEL_TIME(closure_materialize);
+    LEVEL_COUNT(kernel_rounds); LEVEL_COUNT(facet_kernels);
+    LEVEL_COUNT(reductions); LEVEL_COUNT(perforations); LEVEL_COUNT(parallel_batches);
+    LEVEL_COUNT(closure_sparse_cells); LEVEL_COUNT(closure_sparse_entries);
+    LEVEL_COUNT(closure_boundary_visits); LEVEL_COUNT(closure_duplicate_faces);
+    LEVEL_COUNT(closure_boundary_index_visits); LEVEL_COUNT(closure_boundary_index_entries);
+    LEVEL_COUNT(local_candidate_visits); LEVEL_COUNT(local_coboundary_visits);
+    LEVEL_COUNT(local_membership_tests); LEVEL_COUNT(local_membership_comparisons);
+#undef LEVEL_TIME
+#undef LEVEL_COUNT
+    std::cout << '}';
+  }
+  std::cout << "]}";
+}
+#endif
 template <class T> void array(const std::vector<T>& values) {
   std::cout << '[';
   for (std::size_t i = 0; i < values.size(); ++i) { if (i) std::cout << ','; std::cout << values[i]; }
@@ -296,10 +351,27 @@ int main(int argc, char** argv) {
           std::cout << '}';
         }
         std::cout << ']' << std::endl;
-      } else if (command == "rk_coarse" || command == "rk_detailed") {
+      } else if (command == "rk_plain") {
+        std::cin >> workers;
+        if (!std::cin || !workers) throw std::runtime_error("Invalid RK command");
+        const auto r = run(complex, 2, workers);
+        if (fingerprint(*r->sequence) != references[2]) throw std::runtime_error("RK differs");
+        timing(*r); std::cout << std::endl;
+      } else if (command == "rk_coarse" || command == "rk_detailed" ||
+                 command == "rk_levels_coarse" || command == "rk_levels_detailed") {
         std::cin >> workers;
         if (!std::cin || !workers) throw std::runtime_error("Invalid RK profile command");
-        const auto r = run(complex, 2, workers, true, command == "rk_detailed");
+        const bool trace_levels = command == "rk_levels_coarse" || command == "rk_levels_detailed";
+        const bool detailed = command == "rk_detailed" || command == "rk_levels_detailed";
+        std::unique_ptr<Run> r;
+#ifdef MORSEFRAMES_RK_LEVEL_PROFILE_VERSION
+        morseframes::ReductionKernelLevelProfile trace;
+        if (trace_levels) r = run_levels(complex, workers, detailed, trace);
+        else r = run(complex, 2, workers, true, detailed);
+#else
+        if (trace_levels) throw std::runtime_error("These headers do not support level traces");
+        r = run(complex, 2, workers, true, detailed);
+#endif
         if (fingerprint(*r->sequence) != references[2]) throw std::runtime_error("RK profile differs");
         const auto& m = r->metrics;
         std::cout << "{\"builder_seconds\":" << r->builder_seconds
@@ -323,6 +395,9 @@ int main(int argc, char** argv) {
         RK_COUNT(inline_cell_overflows); RK_COUNT(inline_event_overflows);
 #undef RK_TIME
 #undef RK_COUNT
+#ifdef MORSEFRAMES_RK_LEVEL_PROFILE_VERSION
+        if (trace_levels) level_profile_json(trace);
+#endif
         std::cout << '}' << std::endl;
       } else if (command == "profile") {
         std::cin >> workers;

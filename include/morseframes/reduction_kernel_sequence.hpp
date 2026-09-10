@@ -25,6 +25,7 @@ class ReductionKernelSequenceBuilder : private FSequenceBuilder<ComplexView> {
   using Base::build_flooding_reduction_kernel_with_step_callback;
   using Base::build_flooding_reduction_kernel_parallel_with_step_callback;
   using Base::build_flooding_reduction_kernel_with_execution_options;
+  using Base::build_flooding_reduction_kernel_with_level_profile;
 };
 
 template <class ComplexView>

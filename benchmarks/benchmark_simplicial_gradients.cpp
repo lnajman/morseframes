@@ -238,6 +238,10 @@ std::unique_ptr<Run> run_levels(const Complex& complex, std::size_t workers,
   morseframes::ReductionKernelExecutionOptions options;
   if (workers > 1) options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
   options.max_workers = workers;
+#ifdef MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION
+  // Match run()/rk_plain: profiling must describe the same opt-in policy.
+  options.parallel_closure_preparation = true;
+#endif
   result->sequence.emplace(result->rk->build_flooding_reduction_kernel_with_level_profile(trace, options));
   const auto stop = Clock::now();
   result->builder_seconds = seconds(start, ready);

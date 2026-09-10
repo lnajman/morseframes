@@ -2161,6 +2161,7 @@ void test_reduction_kernel_facet_failure_drains_tasks() {
 
 void test_reduction_kernel_parallel_closures() {
   assert(!morseframes::ReductionKernelExecutionOptions{}.parallel_closure_preparation);
+  assert(morseframes::ReductionKernelExecutionOptions{}.parallel_closure_min_level_size == 32768);
   for (std::size_t groups : {1, 3}) {
     FilteredSimplicialComplex complex;
     std::vector<double> values(10000, 0.0);
@@ -2198,39 +2199,45 @@ void test_reduction_kernel_parallel_closures() {
       }
     };
     same(expected);
-    for (std::size_t workers : {1, 2, 4, 8}) {
-      for (bool enabled : {false, true}) {
-        for (bool detailed : {false, true}) {
-          morseframes::ReductionKernelExecutionOptions options;
-          options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
-          options.max_workers = workers;
-          options.parallel_closure_preparation = enabled;
-          morseframes::MorseSequenceBuildMetrics m;
-          FSequenceBuilder builder(complex, &m, detailed);
-          same(builder.build_flooding_reduction_kernel_with_execution_options(
-              options, [](const auto&, const auto&) {}));
-          const bool dispatched = detailed && enabled && workers > 1;
-          assert((m.reduction_kernel_closure_parallel_batches > 0) == dispatched);
-          assert((m.reduction_kernel_closure_parallel_tasks > 0) == dispatched);
-          assert(m.reduction_kernel_closure_parallel_tasks <=
-                 workers * m.reduction_kernel_closure_parallel_batches);
-          assert(m.reduction_kernel_closure_initial_nanoseconds +
-                 m.reduction_kernel_closure_traversal_nanoseconds +
-                 m.reduction_kernel_closure_sort_nanoseconds +
-                 m.reduction_kernel_closure_materialize_nanoseconds +
-                 m.reduction_kernel_closure_parallel_nanoseconds <=
-                 m.reduction_kernel_closure_nanoseconds);
-          assert(m.reduction_kernel_closure_parallel_merge_nanoseconds <=
-                 m.reduction_kernel_closure_parallel_nanoseconds);
-          if (detailed) {
-            assert(m.reduction_kernel_closure_sparse_cells == serial.reduction_kernel_closure_sparse_cells);
-            assert(m.reduction_kernel_closure_sparse_entries == serial.reduction_kernel_closure_sparse_entries);
-            assert(m.reduction_kernel_closure_boundary_visits == serial.reduction_kernel_closure_boundary_visits);
-            assert(m.reduction_kernel_closure_duplicate_faces == serial.reduction_kernel_closure_duplicate_faces);
-          }
-          if (groups > 1) {
-            assert(m.reduction_kernel_parallel_batches == 0); // Facet execution is still serial per level.
-            assert(m.reduction_kernel_facet_discovery_parallel_tasks == 0);
+    const auto level_size = complex.simplices_of_level(0).size();
+    // Exercise the broad and selective gates, and both sides of the inclusive
+    // boundary. Several smaller concurrent levels must not be summed together.
+    for (std::size_t threshold : {std::size_t{0}, std::size_t{32768}, level_size, level_size + 1}) {
+      for (std::size_t workers : {1, 2, 4, 8}) {
+        for (bool enabled : {false, true}) {
+          for (bool detailed : {false, true}) {
+            morseframes::ReductionKernelExecutionOptions options;
+            options.policy = morseframes::ReductionKernelExecutionPolicy::Parallel;
+            options.max_workers = workers;
+            options.parallel_closure_preparation = enabled;
+            options.parallel_closure_min_level_size = threshold;
+            morseframes::MorseSequenceBuildMetrics m;
+            FSequenceBuilder builder(complex, &m, detailed);
+            same(builder.build_flooding_reduction_kernel_with_execution_options(
+                options, [](const auto&, const auto&) {}));
+            const bool dispatched = detailed && enabled && workers > 1 && level_size >= threshold;
+            assert((m.reduction_kernel_closure_parallel_batches > 0) == dispatched);
+            assert((m.reduction_kernel_closure_parallel_tasks > 0) == dispatched);
+            assert(m.reduction_kernel_closure_parallel_tasks <=
+                   workers * m.reduction_kernel_closure_parallel_batches);
+            assert(m.reduction_kernel_closure_initial_nanoseconds +
+                   m.reduction_kernel_closure_traversal_nanoseconds +
+                   m.reduction_kernel_closure_sort_nanoseconds +
+                   m.reduction_kernel_closure_materialize_nanoseconds +
+                   m.reduction_kernel_closure_parallel_nanoseconds <=
+                   m.reduction_kernel_closure_nanoseconds);
+            assert(m.reduction_kernel_closure_parallel_merge_nanoseconds <=
+                   m.reduction_kernel_closure_parallel_nanoseconds);
+            if (detailed) {
+              assert(m.reduction_kernel_closure_sparse_cells == serial.reduction_kernel_closure_sparse_cells);
+              assert(m.reduction_kernel_closure_sparse_entries == serial.reduction_kernel_closure_sparse_entries);
+              assert(m.reduction_kernel_closure_boundary_visits == serial.reduction_kernel_closure_boundary_visits);
+              assert(m.reduction_kernel_closure_duplicate_faces == serial.reduction_kernel_closure_duplicate_faces);
+            }
+            if (groups > 1) {
+              assert(m.reduction_kernel_parallel_batches == 0); // Facet execution is still serial per level.
+              assert(m.reduction_kernel_facet_discovery_parallel_tasks == 0);
+            }
           }
         }
       }

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import hashlib
 import itertools
 import json
+import os
 from pathlib import Path
 import platform
 import shutil
@@ -80,6 +81,7 @@ def audit(path):
             common.snapshot_headers(build['revision'], root)
             assert common.header_digest(root / 'include') == build['headers_sha256']
     settings = data['settings']
+    assert type(settings.get('baseline_closure_serial', False)) is bool
     assert settings['workers'] == ([8, 1] if settings['reverse'] else [1, 8])
     assert settings['process_pairs'] == 2 and settings['blocks'] == 6
     assert settings['repetitions'] == 6 and settings['warmups'] == 2
@@ -96,9 +98,10 @@ def audit(path):
     return data
 
 
-def run_mode(processes, mode, workers, repeats):
+def run_mode(processes, mode, workers, repeats, baseline_closure_serial=False):
     process = processes['baseline' if mode == 'baseline' else 'candidate']
-    command = 'run_closure_serial' if mode == 'candidate_off' else 'run'
+    serial = mode == 'candidate_off' or (mode == 'baseline' and baseline_closure_serial)
+    command = 'run_closure_serial' if serial else 'run'
     process.process.stdin.write(f'{command} {workers} {repeats}\n')
     process.process.stdin.flush()
     return process.read()
@@ -108,6 +111,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--baseline')
     p.add_argument('--candidate')
+    p.add_argument('--baseline-closure-serial', action='store_true',
+                   help='Use the baseline library policy (closure opt-in disabled), not its experimental run mode')
     p.add_argument('--inputs', type=Path, nargs='+')
     p.add_argument('--reverse', action='store_true')
     p.add_argument('--output', type=Path)
@@ -120,6 +125,7 @@ def main():
             assert a['source_revision'] == b['source_revision'] and a['source_sha256'] == b['source_sha256']
             assert a['settings']['inputs'] == b['settings']['inputs'][::-1]
             assert a['settings']['workers'] == b['settings']['workers'][::-1]
+            assert a['settings'].get('baseline_closure_serial', False) == b['settings'].get('baseline_closure_serial', False)
             assert not a['settings']['reverse'] and b['settings']['reverse']
             for v in a['builds']:
                 assert a['builds'][v]['revision'] == b['builds'][v]['revision']
@@ -145,6 +151,7 @@ def main():
                 compiler=common.command_output(compiler,'--version'), flags=flags,
                 platform=platform.platform(), architecture=platform.machine(),
                 settings=dict(inputs=inputs, workers=workers, reverse=args.reverse,
+                              baseline_closure_serial=args.baseline_closure_serial,
                               process_pairs=2, blocks=6, repetitions=6, warmups=2), builds={}, cases=[])
     for v, ref in [('baseline',args.baseline),('candidate',args.candidate)]:
         snapshot = artifacts / v
@@ -158,6 +165,7 @@ def main():
             headers_sha256=common.header_digest(snapshot/'include'), symbols=str(symbols), symbols_sha256=common.digest(symbols))
         print('Built', v, 'ordinary-only executable', flush=True)
     data['started_utc'] = datetime.now(timezone.utc).isoformat()
+    data['load_average_start'] = os.getloadavg()
     with args.output.open('x') as output:
         try:
             for ci, path in enumerate(inputs):
@@ -173,16 +181,18 @@ def main():
                                 processes[v] = common.Worker(Path(data['builds'][v]['binary']),Path(path),dump)
                                 stack.callback(processes[v].close)
                             assert common.digest(Path(dumps['baseline'])) == common.digest(Path(dumps['candidate']))
-                            for mode in orders(reverse)[0]: common.check_runs(run_mode(processes,mode,count,2),2)
+                            for mode in orders(reverse)[0]:
+                                common.check_runs(run_mode(processes,mode,count,2,args.baseline_closure_serial),2)
                             blocks = []
                             for order in orders(reverse):
-                                blocks.append(dict(order=order,runs={m:run_mode(processes,m,count,6) for m in order}))
+                                blocks.append(dict(order=order,runs={m:run_mode(processes,m,count,6,args.baseline_closure_serial) for m in order}))
                             data['cases'].append(dict(input=path,input_sha256=common.digest(Path(path)),workers=count,
                                 replicate=replicate,reverse=reverse,launch_order=launch,dumps=dumps,
                                 reference_sha256=common.digest(Path(dumps['baseline'])),
                                 metadata={v:w.metadata for v,w in processes.items()},blocks=blocks))
                         print('Measured',Path(path).name,count,'workers, pair',replicate,flush=True)
             data['finished_utc'] = datetime.now(timezone.utc).isoformat()
+            data['load_average_finish'] = os.getloadavg()
             for case in data['cases']: case['summary'] = summarize(case['blocks'])
             data['completed'] = True
         finally:

@@ -66,6 +66,7 @@ The current public alpha can be installed from PyPI:
    rk_parallel_closure_protocol
    rk_parallel_closure_benchmark
    rk_parallel_closure_tables
+   rk_selective_closure_protocol
    reduction_kernel_correctness
    phase0_conventions
 

@@ -19,7 +19,7 @@
 #include "morseframes/complex_view.hpp"
 #include "morseframes/task_executor.hpp"
 
-#define MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION 1
+#define MORSEFRAMES_RK_PARALLEL_CLOSURE_VERSION 2
 
 namespace morseframes {
 
@@ -47,6 +47,9 @@ struct ReductionKernelExecutionOptions {
   // concurrent level tasks. Experimental: mixed benchmark results keep this
   // opt-in until a more selective scheduling/work gate has been validated.
   bool parallel_closure_preparation = false;
+  // Also retain the per-task work gate. Zero reproduces the original broad
+  // experiment; the selective gate is experimental and remains opt-in.
+  std::size_t parallel_closure_min_level_size = 32768;
 };
 
 struct ReductionKernelMetrics {
@@ -964,7 +967,8 @@ class ReductionKernelWorkspace {
       LevelScratch& scratch, LevelCells& cells, ReductionKernelMetrics& metrics) const {
     if (options_.policy != ReductionKernelExecutionPolicy::Parallel ||
         !options_.parallel_closure_preparation || executor_ == nullptr ||
-        executor_->worker_count() <= 1) {
+        executor_->worker_count() <= 1 ||
+        bucket.size() < options_.parallel_closure_min_level_size) {
       return false;
     }
     const std::size_t max_tasks = std::min(executor_->worker_count(), facets.size());

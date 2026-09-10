@@ -96,6 +96,11 @@ slowdown. The one-versus-eight speedup remains positive.
 
 ## Worker imbalance is a stronger lead than global setup
 
+The subsequent [per-level diagnostic study](rk_level_profile_benchmark.md)
+identifies the dominant levels and their phase costs without changing scheduling.
+It also retains an unresolved unprofiled volume-control warning from the
+instrumentation refactor; the frozen comparisons on this page remain unchanged.
+
 The existing coarse metrics measure the elapsed lifetime of each persistent
 level-worker task. They include that task's sequence of level computations
 and scheduling overhead, not CPU time or individual-level durations. Their

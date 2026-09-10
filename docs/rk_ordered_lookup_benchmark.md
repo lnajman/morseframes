@@ -1,5 +1,8 @@
 # RK: ordered lookup inside large local cells
 
+Historical snapshot: the subsequent [eligible-candidate study](rk_eligible_candidates_benchmark.md)
+tests the protected-scan target identified below, with fresh timing and caveats.
+
 **Ordered coface lookup reduces sequential RK time by 7–13% on the tested 7D
 inputs across two clean A/B studies.** It removes about 88% of the measured
 membership comparisons without changing the gradient. Eight-worker results

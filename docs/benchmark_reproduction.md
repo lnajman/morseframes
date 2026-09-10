@@ -8,7 +8,11 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
-The latest [ordered local-lookup study](rk_ordered_lookup_benchmark.md) gives
+The latest [eligible-candidate study](rk_eligible_candidates_benchmark.md) gives
+the scan optimization, initial and retained candidate evidence, two final
+frozen comparisons, and the protected-visit audit option. Loading/construction
+remain separate; PLS, F-Max, scheduling, and TTK are unchanged.
+The preceding [ordered local-lookup study](rk_ordered_lookup_benchmark.md) gives
 local-search counters, a controlled membership optimization, repeated 2D–7D
 timings, and their limitations. Construction remains separate and TTK is not
 rerun. The [on-demand RK closure study](rk_lazy_closure_benchmark.md) gives

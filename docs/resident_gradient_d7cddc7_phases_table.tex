@@ -1,0 +1,66 @@
+\begin{tabular}{lrrllr}
+\hline
+Input & $n$ & Workers & Algorithm & Phase & Time (ms) \\
+\hline
+2D & 64 & 1 & F-Max & Total (boundary clocks) & 18.391 \\
+2D & 64 & 1 & F-Max & representation and filtration & 17.041 \\
+2D & 64 & 1 & F-Max & builder setup & 0.067 \\
+2D & 64 & 1 & F-Max & gradient & 1.254 \\
+2D & 64 & 1 & RK & Total (boundary clocks) & 18.106 \\
+2D & 64 & 1 & RK & representation and filtration & 17.059 \\
+2D & 64 & 1 & RK & builder setup & 0.015 \\
+2D & 64 & 1 & RK & gradient & 0.981 \\
+2D & 64 & 1 & TTK & Total (boundary clocks) & 1.462 \\
+2D & 64 & 1 & TTK & native object init & 0.012 \\
+2D & 64 & 1 & TTK & vertex order & 0.177 \\
+2D & 64 & 1 & TTK & representation setup & 0.063 \\
+2D & 64 & 1 & TTK & connectivity precondition & 0.353 \\
+2D & 64 & 1 & TTK & gradient & 0.842 \\
+2D & 64 & 8 & F-Max & Total (boundary clocks) & 18.478 \\
+2D & 64 & 8 & F-Max & representation and filtration & 17.058 \\
+2D & 64 & 8 & F-Max & builder setup & 0.070 \\
+2D & 64 & 8 & F-Max & gradient & 1.233 \\
+2D & 64 & 8 & RK & Total (boundary clocks) & 17.675 \\
+2D & 64 & 8 & RK & representation and filtration & 17.050 \\
+2D & 64 & 8 & RK & builder setup & 0.016 \\
+2D & 64 & 8 & RK & gradient & 0.604 \\
+2D & 64 & 8 & TTK & Total (boundary clocks) & 1.103 \\
+2D & 64 & 8 & TTK & native object init & 0.012 \\
+2D & 64 & 8 & TTK & vertex order & 0.280 \\
+2D & 64 & 8 & TTK & representation setup & 0.066 \\
+2D & 64 & 8 & TTK & connectivity precondition & 0.416 \\
+2D & 64 & 8 & TTK & gradient & 0.322 \\
+3D & 32 & 1 & F-Max & Total (boundary clocks) & 1030.178 \\
+3D & 32 & 1 & F-Max & representation and filtration & 910.742 \\
+3D & 32 & 1 & F-Max & builder setup & 5.829 \\
+3D & 32 & 1 & F-Max & gradient & 110.013 \\
+3D & 32 & 1 & RK & Total (boundary clocks) & 964.976 \\
+3D & 32 & 1 & RK & representation and filtration & 919.528 \\
+3D & 32 & 1 & RK & builder setup & 0.605 \\
+3D & 32 & 1 & RK & gradient & 42.622 \\
+3D & 32 & 1 & TTK & Total (boundary clocks) & 146.987 \\
+3D & 32 & 1 & TTK & native object init & 0.024 \\
+3D & 32 & 1 & TTK & vertex order & 1.935 \\
+3D & 32 & 1 & TTK & representation setup & 1.605 \\
+3D & 32 & 1 & TTK & connectivity precondition & 54.310 \\
+3D & 32 & 1 & TTK & gradient & 89.154 \\
+3D & 32 & 8 & F-Max & Total (boundary clocks) & 1030.395 \\
+3D & 32 & 8 & F-Max & representation and filtration & 914.886 \\
+3D & 32 & 8 & F-Max & builder setup & 5.734 \\
+3D & 32 & 8 & F-Max & gradient & 107.835 \\
+3D & 32 & 8 & RK & Total (boundary clocks) & 929.507 \\
+3D & 32 & 8 & RK & representation and filtration & 914.737 \\
+3D & 32 & 8 & RK & builder setup & 0.598 \\
+3D & 32 & 8 & RK & gradient & 12.047 \\
+3D & 32 & 8 & TTK & Total (boundary clocks) & 53.486 \\
+3D & 32 & 8 & TTK & native object init & 0.023 \\
+3D & 32 & 8 & TTK & vertex order & 2.113 \\
+3D & 32 & 8 & TTK & representation setup & 1.680 \\
+3D & 32 & 8 & TTK & connectivity precondition & 32.805 \\
+3D & 32 & 8 & TTK & gradient & 16.956 \\
+\hline
+\end{tabular}
+% Non-profiled phase-boundary samples, largest input per family at 1/8 workers.
+% Phases partition each raw performance total; medians and rounded values need not add.
+% Nested RK/F-Max details remain in raw JSON; do not add them to parent phases.
+% TTK gradient includes lower-star construction and matching together.

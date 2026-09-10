@@ -8,9 +8,13 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
-The direct RK/F-Max/TTK tables have been refreshed on revision `5598963`, including
-lightweight RK initialization. Earlier direct comparisons are retained as snapshots.
-The lightweight RK initialization section records the latest ReductionKernel update.
+The [native construction study](native_construction_benchmark.md) records the
+shared-constructor optimization on revision `d7cddc7`, its separate timing
+and memory checks, and the refreshed 16-configuration RK/F-Max/TTK comparison.
+The `5598963` direct RK/F-Max/TTK tables, including lightweight
+RK initialization, remain available below as a pre-construction-optimization
+snapshot. The lightweight RK initialization section records the latest
+kernel-specific initialization update.
 The closure-based incidence, controlled packed-coface A/B, direct TTK comparison,
 and earlier phase-profile sections retain historical snapshots; those timings
 must not be treated as fresh measurements of subsequent changes.
@@ -245,7 +249,7 @@ repetition level. F-Max is sequential at every displayed worker setting; it is
 remeasured alongside RK and TTK. Raw input/binary/source hashes, revision, wait policy,
 orders, exact reference checks and critical counts remain recorded as described below.
 
-### Current construction-separated results (`5598963`)
+### Previous construction-separated results (`5598963`)
 
 The main study reruns the original eight inputs at 1/2/4/8 workers: 32
 configurations with 12 non-profiled performance repetitions, six separate

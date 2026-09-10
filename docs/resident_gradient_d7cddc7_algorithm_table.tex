@@ -1,0 +1,16 @@
+\begin{tabular}{llrrrrr}
+\hline
+Input & $n$ & Workers & F-Max algorithm (ms) & RK algorithm (ms) & TTK algorithm (ms) & RK/TTK \\
+\hline
+2D & 64 & 1 & 1.325 & 0.997 & 1.021 & 0.975 \\
+2D & 64 & 8 & 1.305 & 0.620 & 0.597 & 1.050 \\
+3D & 8 & 1 & 0.730 & 0.396 & 1.235 & 0.317 \\
+3D & 8 & 8 & 0.736 & 0.392 & 0.507 & 0.793 \\
+3D & 16 & 1 & 8.344 & 3.615 & 10.374 & 0.343 \\
+3D & 16 & 8 & 8.497 & 1.434 & 2.553 & 0.580 \\
+3D & 32 & 1 & 116.128 & 43.267 & 91.078 & 0.474 \\
+3D & 32 & 8 & 114.164 & 12.768 & 19.090 & 0.675 \\
+\hline
+\end{tabular}
+% Algorithm time excludes native construction; includes MF builder and TTK ordering/lower stars.
+% Medians over case medians; ratios use paired per-repetition ratios before aggregation.

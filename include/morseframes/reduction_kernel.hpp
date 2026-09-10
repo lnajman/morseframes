@@ -51,6 +51,19 @@ struct ReductionKernelMetrics {
   std::uint64_t aggregation_nanoseconds = 0;
   std::uint64_t merge_nanoseconds = 0;
   std::uint64_t closure_nanoseconds = 0;
+  // Initial includes packed preparation. The remaining timers partition
+  // sparse preparation work, with dispatch/clock overhead left in closure.
+  std::uint64_t closure_initial_nanoseconds = 0;
+  std::uint64_t closure_packed_nanoseconds = 0;
+  std::uint64_t closure_traversal_nanoseconds = 0;
+  std::uint64_t closure_sort_nanoseconds = 0;
+  std::uint64_t closure_materialize_nanoseconds = 0;
+  std::size_t closure_sparse_cells = 0;
+  std::size_t closure_sparse_entries = 0;
+  std::size_t closure_boundary_visits = 0;
+  std::size_t closure_duplicate_faces = 0;
+  std::size_t closure_index_growths = 0;
+  std::size_t closure_entry_growths = 0;
   // Per-level elapsed time, including facet dispatch/wait; do not add this to
   // cumulative core/local times, which are nested inside facet execution.
   std::uint64_t facet_execution_nanoseconds = 0;
@@ -512,8 +525,12 @@ class ReductionKernelWorkspace {
     scratch.prepare(bucket.size(), CollectMetrics);
     scratch.active_simplices.assign(bucket.begin(), bucket.end());
     auto& level_cells = scratch.level_cells;
-    build_level_cells(bucket, cache_level_cells, scratch, level_cells);
-    profile_add<CollectMetrics>(metrics.closure_nanoseconds, closure_start);
+    build_level_cells<CollectMetrics>(bucket, cache_level_cells, scratch, level_cells, metrics);
+    if constexpr (CollectMetrics) {
+      const auto elapsed = elapsed_nanoseconds(closure_start, Clock::now());
+      metrics.closure_nanoseconds += elapsed;
+      metrics.closure_initial_nanoseconds += elapsed;
+    }
 
     while (remaining > 0) {
       bool kernel_round_changed = false;
@@ -531,7 +548,7 @@ class ReductionKernelWorkspace {
         // Complete all cell writes before incidence and local facet tasks read
         // them. Concurrent levels use disjoint scratch and bucket indices.
         const auto facet_closure_start = profile_start<CollectMetrics>();
-        prepare_facet_cells(facets, bucket, scratch, level_cells);
+        prepare_facet_cells<CollectMetrics>(facets, bucket, scratch, level_cells, metrics);
         profile_add<CollectMetrics>(metrics.closure_nanoseconds,
                                     facet_closure_start);
         if constexpr (CollectMetrics) {
@@ -685,6 +702,17 @@ class ReductionKernelWorkspace {
     destination.aggregation_nanoseconds += source.aggregation_nanoseconds;
     destination.merge_nanoseconds += source.merge_nanoseconds;
     destination.closure_nanoseconds += source.closure_nanoseconds;
+    destination.closure_initial_nanoseconds += source.closure_initial_nanoseconds;
+    destination.closure_packed_nanoseconds += source.closure_packed_nanoseconds;
+    destination.closure_traversal_nanoseconds += source.closure_traversal_nanoseconds;
+    destination.closure_sort_nanoseconds += source.closure_sort_nanoseconds;
+    destination.closure_materialize_nanoseconds += source.closure_materialize_nanoseconds;
+    destination.closure_sparse_cells += source.closure_sparse_cells;
+    destination.closure_sparse_entries += source.closure_sparse_entries;
+    destination.closure_boundary_visits += source.closure_boundary_visits;
+    destination.closure_duplicate_faces += source.closure_duplicate_faces;
+    destination.closure_index_growths += source.closure_index_growths;
+    destination.closure_entry_growths += source.closure_entry_growths;
     destination.facet_execution_nanoseconds += source.facet_execution_nanoseconds;
     destination.levels += source.levels;
     destination.kernel_rounds += source.kernel_rounds;
@@ -785,9 +813,10 @@ class ReductionKernelWorkspace {
     }
   }
 
+  template <bool CollectMetrics>
   void build_level_cells(
       const std::vector<SimplexId>& bucket, bool enabled,
-      LevelScratch& scratch, LevelCells& cells) const {
+      LevelScratch& scratch, LevelCells& cells, ReductionKernelMetrics& metrics) const {
     cells.enabled = enabled;
     if (!enabled) {
       return;
@@ -800,6 +829,7 @@ class ReductionKernelWorkspace {
       }
     }
     if (bucket.size() <= kPackedClosureBucketCapacity) {
+      const auto packed_start = profile_start<CollectMetrics>();
       const std::size_t block_count = (bucket.size() + 63) / 64;
       auto& masks = scratch.closure_masks;
       masks.assign(bucket.size() * block_count, 0);
@@ -836,6 +866,7 @@ class ReductionKernelWorkspace {
           }
         }
       }
+      profile_add<CollectMetrics>(metrics.closure_packed_nanoseconds, packed_start);
       return;
     }
     if (cells.entries.capacity() < 4 * bucket.size()) {
@@ -847,10 +878,11 @@ class ReductionKernelWorkspace {
     std::fill(scratch.included.begin(), scratch.included.end(), 0);
   }
 
+  template <bool CollectMetrics>
   void prepare_facet_cells(
       const std::vector<SimplexId>& facets,
       const std::vector<SimplexId>& bucket,
-      LevelScratch& scratch, LevelCells& cells) const {
+      LevelScratch& scratch, LevelCells& cells, ReductionKernelMetrics& metrics) const {
     if (!cells.enabled || cells.packed_masks != nullptr ||
         cells.cached_entries != nullptr) {
       return;
@@ -863,6 +895,10 @@ class ReductionKernelWorkspace {
         continue;
       }
       const std::size_t first = cells.entries.size();
+      const auto traversal_start = profile_start<CollectMetrics>();
+      if constexpr (CollectMetrics) {
+        ++metrics.closure_sparse_cells;
+      }
       cell_indices.clear();
       cell_indices.push_back(facet_index);
       included[facet_index] = 1;
@@ -871,6 +907,9 @@ class ReductionKernelWorkspace {
       for (std::size_t next = 0; next < cell_indices.size(); ++next) {
         const auto simplex_index = cell_indices[next];
         for (SimplexId face : complex_.boundary(bucket[simplex_index])) {
+          if constexpr (CollectMetrics) {
+            ++metrics.closure_boundary_visits;
+          }
           if (complex_.level(face) != complex_.level(facet)) {
             continue;
           }
@@ -881,16 +920,32 @@ class ReductionKernelWorkspace {
           }
           if (!included[face_index]) {
             included[face_index] = 1;
+            if constexpr (CollectMetrics) {
+              metrics.closure_index_growths += cell_indices.size() == cell_indices.capacity();
+            }
             cell_indices.push_back(face_index);
+          } else if constexpr (CollectMetrics) {
+            ++metrics.closure_duplicate_faces;
           }
         }
       }
+      profile_add<CollectMetrics>(metrics.closure_traversal_nanoseconds, traversal_start);
+      if constexpr (CollectMetrics) {
+        metrics.closure_sparse_entries += cell_indices.size();
+      }
+      const auto sort_start = profile_start<CollectMetrics>();
       std::sort(cell_indices.begin(), cell_indices.end());
+      profile_add<CollectMetrics>(metrics.closure_sort_nanoseconds, sort_start);
+      const auto materialize_start = profile_start<CollectMetrics>();
       for (std::size_t local_index : cell_indices) {
+        if constexpr (CollectMetrics) {
+          metrics.closure_entry_growths += cells.entries.size() == cells.entries.capacity();
+        }
         cells.entries.push_back(bucket[local_index]);
         included[local_index] = 0;
       }
       cells.ranges[facet_index] = {first, cells.entries.size()};
+      profile_add<CollectMetrics>(metrics.closure_materialize_nanoseconds, materialize_start);
     }
   }
 

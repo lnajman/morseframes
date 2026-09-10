@@ -63,6 +63,17 @@ struct MorseSequenceBuildMetrics {
   std::uint64_t reduction_kernel_aggregation_nanoseconds = 0;
   std::uint64_t reduction_kernel_merge_nanoseconds = 0;
   std::uint64_t reduction_kernel_closure_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_initial_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_packed_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_traversal_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_sort_nanoseconds = 0;
+  std::uint64_t reduction_kernel_closure_materialize_nanoseconds = 0;
+  std::size_t reduction_kernel_closure_sparse_cells = 0;
+  std::size_t reduction_kernel_closure_sparse_entries = 0;
+  std::size_t reduction_kernel_closure_boundary_visits = 0;
+  std::size_t reduction_kernel_closure_duplicate_faces = 0;
+  std::size_t reduction_kernel_closure_index_growths = 0;
+  std::size_t reduction_kernel_closure_entry_growths = 0;
   std::uint64_t reduction_kernel_facet_execution_nanoseconds = 0;
   std::uint64_t reduction_kernel_setup_nanoseconds = 0;
   std::uint64_t reduction_kernel_level_wall_nanoseconds = 0;
@@ -1955,6 +1966,17 @@ class FSequenceBuilder {
           kernel_metrics.merge_nanoseconds;
       sequence_metrics_->reduction_kernel_closure_nanoseconds =
           kernel_metrics.closure_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_initial_nanoseconds = kernel_metrics.closure_initial_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_packed_nanoseconds = kernel_metrics.closure_packed_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_traversal_nanoseconds = kernel_metrics.closure_traversal_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_sort_nanoseconds = kernel_metrics.closure_sort_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_materialize_nanoseconds = kernel_metrics.closure_materialize_nanoseconds;
+      sequence_metrics_->reduction_kernel_closure_sparse_cells = kernel_metrics.closure_sparse_cells;
+      sequence_metrics_->reduction_kernel_closure_sparse_entries = kernel_metrics.closure_sparse_entries;
+      sequence_metrics_->reduction_kernel_closure_boundary_visits = kernel_metrics.closure_boundary_visits;
+      sequence_metrics_->reduction_kernel_closure_duplicate_faces = kernel_metrics.closure_duplicate_faces;
+      sequence_metrics_->reduction_kernel_closure_index_growths = kernel_metrics.closure_index_growths;
+      sequence_metrics_->reduction_kernel_closure_entry_growths = kernel_metrics.closure_entry_growths;
       sequence_metrics_->reduction_kernel_facet_execution_nanoseconds =
           kernel_metrics.facet_execution_nanoseconds;
       sequence_metrics_->reduction_kernel_levels = kernel_metrics.levels;

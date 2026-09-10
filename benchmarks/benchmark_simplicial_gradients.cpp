@@ -55,6 +55,41 @@ void search_profile(const Metrics& m) {
 #undef RK_SEARCH_COUNT
   }
 }
+template <typename Metrics, typename = void>
+struct HasClosureProfile : std::false_type {};
+template <typename Metrics>
+struct HasClosureProfile<Metrics, std::void_t<
+    decltype(std::declval<Metrics>().reduction_kernel_closure_initial_nanoseconds),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_packed_nanoseconds),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_traversal_nanoseconds),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_sort_nanoseconds),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_materialize_nanoseconds),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_sparse_cells),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_sparse_entries),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_boundary_visits),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_duplicate_faces),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_index_growths),
+    decltype(std::declval<Metrics>().reduction_kernel_closure_entry_growths)>> : std::true_type {};
+template <typename Metrics>
+void closure_profile(const Metrics& m) {
+  if constexpr (HasClosureProfile<Metrics>::value) {
+#define RK_CLOSURE_TIME(name) std::cout << ",\"" #name "_seconds\":" << 1e-9 * m.reduction_kernel_##name##_nanoseconds
+#define RK_CLOSURE_COUNT(name) std::cout << ",\"" #name "\":" << m.reduction_kernel_##name
+    RK_CLOSURE_TIME(closure_initial);
+    RK_CLOSURE_TIME(closure_packed);
+    RK_CLOSURE_TIME(closure_traversal);
+    RK_CLOSURE_TIME(closure_sort);
+    RK_CLOSURE_TIME(closure_materialize);
+    RK_CLOSURE_COUNT(closure_sparse_cells);
+    RK_CLOSURE_COUNT(closure_sparse_entries);
+    RK_CLOSURE_COUNT(closure_boundary_visits);
+    RK_CLOSURE_COUNT(closure_duplicate_faces);
+    RK_CLOSURE_COUNT(closure_index_growths);
+    RK_CLOSURE_COUNT(closure_entry_growths);
+#undef RK_CLOSURE_TIME
+#undef RK_CLOSURE_COUNT
+  }
+}
 std::uint64_t peak_bytes() {
   rusage usage{};
   if (getrusage(RUSAGE_SELF, &usage)) throw std::runtime_error("getrusage failed");
@@ -268,6 +303,7 @@ int main(int argc, char** argv) {
         RK_COUNT(facet_cell_visits); RK_COUNT(local_candidate_visits);
         RK_COUNT(local_coboundary_visits); RK_COUNT(local_membership_tests);
         search_profile(m);
+        closure_profile(m);
         RK_COUNT(inline_cell_overflows); RK_COUNT(inline_event_overflows);
 #undef RK_TIME
 #undef RK_COUNT

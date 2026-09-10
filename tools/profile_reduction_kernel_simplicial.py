@@ -17,6 +17,13 @@ SEARCH_FIELDS = (
     'local_sparse_candidate_visits', 'local_removed_candidate_visits',
     'local_protected_candidate_visits',
 )
+CLOSURE_TIMES = ('closure_initial_seconds', 'closure_packed_seconds',
+                 'closure_traversal_seconds', 'closure_sort_seconds',
+                 'closure_materialize_seconds')
+CLOSURE_COUNTS = ('closure_sparse_cells', 'closure_sparse_entries',
+                  'closure_boundary_visits', 'closure_duplicate_faces',
+                  'closure_index_growths', 'closure_entry_growths')
+CLOSURE_FIELDS = CLOSURE_TIMES + CLOSURE_COUNTS
 
 
 def validate(row):
@@ -38,6 +45,18 @@ def validate(row):
                 or row['local_removed_candidate_visits'] + row['local_protected_candidate_visits']
                    > row['local_sparse_candidate_visits']):
             raise ValueError('Inconsistent RK local-search counters')
+    if any(k in row for k in CLOSURE_FIELDS):
+        if not all(k in row for k in CLOSURE_FIELDS):
+            raise ValueError('Incomplete RK closure profile')
+        # Packed preparation is nested inside initial setup, not additive.
+        children = sum(row[k] for k in CLOSURE_TIMES if k != 'closure_packed_seconds')
+        if (row['closure_packed_seconds'] > row['closure_initial_seconds'] + 1e-10
+                or children > row['closure_seconds'] + 1e-10
+                or row['closure_sparse_cells'] > row['closure_sparse_entries']
+                or row['closure_duplicate_faces'] > row['closure_boundary_visits']
+                or row['closure_index_growths'] > row['closure_sparse_entries']
+                or row['closure_entry_growths'] > row['closure_sparse_entries']):
+            raise ValueError('Inconsistent RK closure phases or counters')
     # Detailed kernel fields sum over levels/tasks, not global elapsed time.
     # Core/local are children of facet execution and must not be added to it.
     return max(0., remainder)

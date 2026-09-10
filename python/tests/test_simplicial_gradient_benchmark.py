@@ -18,6 +18,22 @@ import validate_simplicial_gradient_ab as ab_validation
 
 
 class SimplicialGradientBenchmarkTests(unittest.TestCase):
+    def test_closure_profile_accounting(self):
+        row = dict(builder_seconds=.1, kernel_seconds=1., algorithm_seconds=1.1,
+                   setup_seconds=.1, level_wall_seconds=.6, replay_seconds=.2,
+                   closure_seconds=.4, closure_initial_seconds=.1, closure_packed_seconds=.08,
+                   closure_traversal_seconds=.1, closure_sort_seconds=.1,
+                   closure_materialize_seconds=.05, closure_sparse_cells=2,
+                   closure_sparse_entries=10, closure_boundary_visits=20,
+                   closure_duplicate_faces=5, closure_index_growths=1, closure_entry_growths=1)
+        self.assertAlmostEqual(rk_profile.validate(row), .1)
+        for bad in [dict(row, closure_packed_seconds=.11), dict(row, closure_sort_seconds=.2),
+                    dict(row, closure_sparse_cells=11), dict(row, closure_duplicate_faces=21),
+                    dict(row, closure_index_growths=11), dict(row, closure_entry_growths=11),
+                    {k:v for k,v in row.items() if k != 'closure_traversal_seconds'}]:
+            with self.assertRaises(ValueError):
+                rk_profile.validate(bad)
+
     def test_protected_scan_elision_validation(self):
         before = dict(local_candidate_visits=100, local_sparse_candidate_visits=80,
                       local_protected_candidate_visits=50, local_removed_candidate_visits=10,
@@ -98,7 +114,9 @@ class SimplicialGradientBenchmarkTests(unittest.TestCase):
                     rk_profile.validate(row)
                     self.assertGreater(row['local_large_membership_tests'], 0)
                     self.assertGreater(row['local_removed_candidate_visits'], 0)
-                    identities.append(tuple(row[k] for k in rk_profile.SEARCH_FIELDS))
+                    self.assertGreater(row['closure_sparse_cells'], 0)
+                    self.assertGreater(row['closure_duplicate_faces'], 0)
+                    identities.append(tuple(row[k] for k in rk_profile.SEARCH_FIELDS + rk_profile.CLOSURE_COUNTS[:4]))
                 self.assertEqual(*identities)
             finally:
                 worker.close()
@@ -189,6 +207,7 @@ class SimplicialGradientBenchmarkTests(unittest.TestCase):
                         else:
                             self.assertEqual(row["rounds"], 0)
                             self.assertEqual(row["closure_seconds"], 0)
+                            self.assertTrue(all(row[k] == 0 for k in rk_profile.CLOSURE_FIELDS))
             finally:
                 worker.close()
             self.assertEqual(worker.process.returncode, 0)

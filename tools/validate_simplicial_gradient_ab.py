@@ -97,6 +97,9 @@ def audit(path, allow_protected_scan_elision=False):
         static_counts = tuple(k for k in static_counts if k not in (
             'local_candidate_visits', 'local_sparse_candidate_visits',
             'local_protected_candidate_visits'))
+    if settings['rk_profiles'] and all('closure_sparse_cells' in
+            data['cases'][0]['rk_profiles'][v]['rk_detailed'][0] for v in benchmark.VERSIONS):
+        static_counts += ('closure_sparse_cells', 'closure_sparse_entries', 'closure_duplicate_faces')
     for case in data['cases']:
         assert len(case['samples']) == settings['blocks']
         assert Counter(tuple(s['order']) for s in case['samples']) == {

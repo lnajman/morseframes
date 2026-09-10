@@ -1,5 +1,10 @@
 # RK: level-local boundary indexing
 
+The later [frozen worker-scaling study](rk_worker_scaling_benchmark.md) expands
+the corpus to six seeds per higher dimension without changing the algorithm.
+It retains this study as historical optimization evidence and exposes a
+repeatable 7D counterexample to a general RK-over-PLS advantage.
+
 **Sequential RK is 9–15% faster on both tested 7D inputs across two frozen
 A/B studies.** Eight-worker paired medians improve by 6–15%, but the
 confirmation intervals include one, so the parallel improvement remains
@@ -279,4 +284,3 @@ SHA-256 identities:
 - `rk-closure-breakdown-baseline.json`: `4064dedac42a757b4ca8d3ee499614a628257ff5c9f3224d5c0159b33822620c`.
 - `rk-boundary-index-profile-candidate.json`: `38d4a7f9aa7e703e8320a3339690fc6359b4febe163ffb2f54feffc26171c3db`.
 - Measured candidate headers: `12cb8cedcd884891a7af343c25b63ce3f9d5158ac563e4c081fd7eeecbac69aa`.
-

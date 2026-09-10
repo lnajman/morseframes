@@ -8,7 +8,11 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
-The latest [boundary-index study](rk_boundary_index_benchmark.md) gives the
+The latest [frozen worker-scaling study](rk_worker_scaling_benchmark.md) gives
+the expanded six-seed 5D–7D comparison, balanced worker crossover protocol,
+reversed confirmation, separate regression controls, raw audit, and complete
+phase/critical-count tables. Algorithms are unchanged and TTK is not rerun.
+The preceding [boundary-index study](rk_boundary_index_benchmark.md) gives the
 closure breakdown, measured index-preparation cost, two frozen A/B studies,
 and their raw-evidence audit. Native construction remains separate; no TTK rerun.
 The preceding [eligible-candidate study](rk_eligible_candidates_benchmark.md) gives

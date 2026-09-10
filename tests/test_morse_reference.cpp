@@ -1698,6 +1698,68 @@ void test_reduction_kernel_packed_core_matches_sparse_cache() {
   }
 }
 
+void test_reduction_kernel_lazy_sparse_closures() {
+  // Shared facets expose new facets over multiple rounds. Sparse vertex IDs
+  // and varied filtrations prevent global simplex IDs from standing in for
+  // canonical level-bucket order. The independently prepared eager cache is
+  // unchanged by the on-demand workspace implementation.
+  for (std::size_t dimension : {4, 7, 9}) {
+    for (unsigned filtration : {0, 1, 2}) {
+      FilteredSimplicialComplex complex;
+      std::vector<double> values(10000, 0.0);
+      std::vector<morseframes::VertexId> shared;
+      for (std::size_t i = 0; i < dimension; ++i) {
+        const auto v = static_cast<morseframes::VertexId>(11 + (i * 5 % dimension) * 101);
+        shared.push_back(v);
+        values[v] = filtration == 0 ? 0.0
+                    : filtration == 1 ? static_cast<double>(i % 3)
+                                      : static_cast<double>(i + 1);
+      }
+      // Use a permutation coprime to each tested dimension.
+      std::sort(shared.begin(), shared.end());
+      assert(std::unique(shared.begin(), shared.end()) == shared.end());
+      const std::size_t facet_count = dimension == 4 ? 20 : 3;
+      for (std::size_t i = 0; i < facet_count; ++i) {
+        auto facet = shared;
+        const auto v = static_cast<morseframes::VertexId>(4000 + 73 * i);
+        facet.push_back(v);
+        values[v] = filtration == 2 ? static_cast<double>(dimension + i + 1) : 0.0;
+        add_weighted_closure(complex, facet, values);
+      }
+      // Reuse level scratch for a graph-only level after the large closures.
+      complex.add_simplex({9000}, 100.0);
+      complex.add_simplex({9001}, 100.0);
+      complex.add_simplex({9000, 9001}, 100.0);
+      complex.finalize();
+      bool sparse_level = false;
+      for (morseframes::LevelId level = 0; level < complex.num_levels(); ++level) {
+        sparse_level |= complex.simplices_of_level(level).size() > 128;
+      }
+      // Injective 4D/7D stars are small; retain packed-path controls.
+      assert(sparse_level || (dimension <= 7 && filtration == 2));
+      auto cached = complex;
+      cached.prepare_same_level_closure_cache();
+      const auto expected = FSequenceBuilder(cached).build_flooding_reduction_kernel();
+      for (std::size_t workers : {1, 2, 4, 8}) {
+        for (bool detailed : {false, true}) {
+          morseframes::MorseSequenceBuildMetrics metrics;
+          FSequenceBuilder builder(complex, &metrics, detailed);
+          const auto actual = workers == 1 ? builder.build_flooding_reduction_kernel()
+                                          : builder.build_flooding_reduction_kernel_parallel(workers);
+          morseframes::validate_morse_sequence(complex, actual);
+          assert(expected.steps().size() == actual.steps().size());
+          for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+            const auto& a = expected.steps()[i];
+            const auto& b = actual.steps()[i];
+            assert(a.type == b.type && a.sigma == b.sigma && a.tau == b.tau &&
+                   a.level == b.level);
+          }
+        }
+      }
+    }
+  }
+}
+
 void test_reduction_kernel_linear_sparse_incidence() {
   const auto check = [](FilteredSimplicialComplex complex,
                         std::size_t max_closure_size) {
@@ -2480,6 +2542,7 @@ int main() {
   test_lower_star_three_dimensional_pair();
   test_flooding_reduction_kernel_on_shared_facets();
   test_reduction_kernel_packed_core_matches_sparse_cache();
+  test_reduction_kernel_lazy_sparse_closures();
   test_reduction_kernel_lightweight_initialization();
   test_reduction_kernel_lightweight_persistence();
   test_reduction_kernel_linear_sparse_incidence();

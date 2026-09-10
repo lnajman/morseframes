@@ -509,6 +509,12 @@ class ReductionKernelWorkspace {
             level, bucket, remaining, scratch, metrics,
             allow_intra_level_parallelism);
         profile_add<CollectMetrics>(metrics.facet_nanoseconds, facet_start);
+        // Complete all cell writes before incidence and local facet tasks read
+        // them. Concurrent levels use disjoint scratch and bucket indices.
+        const auto facet_closure_start = profile_start<CollectMetrics>();
+        prepare_facet_cells(facets, bucket, scratch, level_cells);
+        profile_add<CollectMetrics>(metrics.closure_nanoseconds,
+                                    facet_closure_start);
         if constexpr (CollectMetrics) {
           metrics.facet_kernels += facets.size();
         }
@@ -802,36 +808,47 @@ class ReductionKernelWorkspace {
     if (cells.entries.capacity() < 4 * bucket.size()) {
       cells.entries.reserve(4 * bucket.size());
     }
-    if (cells.ranges.capacity() < bucket.size()) {
-      cells.ranges.reserve(bucket.size());
+    // Sparse closures are needed only for simplices exposed as facets. An
+    // empty range marks an unprepared cell (every actual cell contains itself).
+    cells.ranges.assign(bucket.size(), {0, 0});
+    std::fill(scratch.included.begin(), scratch.included.end(), 0);
+  }
+
+  void prepare_facet_cells(
+      const std::vector<SimplexId>& facets,
+      const std::vector<SimplexId>& bucket,
+      LevelScratch& scratch, LevelCells& cells) const {
+    if (!cells.enabled || cells.packed_masks != nullptr ||
+        cells.cached_entries != nullptr) {
+      return;
     }
     auto& included = scratch.included;
-    std::fill(included.begin(), included.end(), 0);
     auto& cell_indices = scratch.cell_indices;
-    for (std::size_t facet_index = 0; facet_index < bucket.size();
-         ++facet_index) {
-      const SimplexId facet = bucket[facet_index];
+    for (SimplexId facet : facets) {
+      const std::size_t facet_index = bucket_index_[facet];
+      if (cells.ranges[facet_index].first != cells.ranges[facet_index].second) {
+        continue;
+      }
       const std::size_t first = cells.entries.size();
       cell_indices.clear();
-      included[facet_index] = 1;
       cell_indices.push_back(facet_index);
-      for (SimplexId face : complex_.boundary(facet)) {
-        if (complex_.level(face) != complex_.level(facet)) {
-          continue;
-        }
-        const std::size_t face_index = bucket_index_[face];
-        if (face_index >= facet_index) {
-          throw std::logic_error(
-              "Reduction-kernel level bucket is not face-first.");
-        }
-        const auto [face_first, face_last] =
-            cells.ranges[face_index];
-        for (std::size_t index = face_first; index < face_last; ++index) {
-          const std::size_t local_index =
-              bucket_index_[cells.entries[index]];
-          if (!included[local_index]) {
-            included[local_index] = 1;
-            cell_indices.push_back(local_index);
+      included[facet_index] = 1;
+      // Visit each same-level face once, including inactive faces so the cell
+      // remains the same immutable closure as in the eager implementation.
+      for (std::size_t next = 0; next < cell_indices.size(); ++next) {
+        const auto simplex_index = cell_indices[next];
+        for (SimplexId face : complex_.boundary(bucket[simplex_index])) {
+          if (complex_.level(face) != complex_.level(facet)) {
+            continue;
+          }
+          const std::size_t face_index = bucket_index_[face];
+          if (face_index >= simplex_index) {
+            throw std::logic_error(
+                "Reduction-kernel level bucket is not face-first.");
+          }
+          if (!included[face_index]) {
+            included[face_index] = 1;
+            cell_indices.push_back(face_index);
           }
         }
       }
@@ -840,7 +857,7 @@ class ReductionKernelWorkspace {
         cells.entries.push_back(bucket[local_index]);
         included[local_index] = 0;
       }
-      cells.ranges.emplace_back(first, cells.entries.size());
+      cells.ranges[facet_index] = {first, cells.entries.size()};
     }
   }
 

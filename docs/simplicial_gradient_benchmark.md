@@ -1,5 +1,9 @@
 # ProcessLowerStars workspaces and higher-dimensional gradients
 
+For the latest PLS optimization and its repeated 4D–7D comparison, see the
+[priority-key storage study](pls_key_arena_benchmark.md). The historical
+workspace study below is unchanged.
+
 The subsequent [direct PLS/TTK study](pls_ttk_gradient_benchmark.md) measures
 the optimized implementation alongside TTK in a shared 2D/3D harness. The
 workspace optimization and higher-dimensional experiments below are unchanged.

@@ -1,5 +1,9 @@
 # Direct comparison of optimized PLS with TTK
 
+The subsequent [PLS key-storage study](pls_key_arena_benchmark.md) profiles and
+optimizes priority-key allocation and repeats the direct TTK comparison.
+The measurements below remain the preceding implementation's results.
+
 **The optimized native ProcessLowerStars (PLS) is still substantially slower
 than the pinned TTK classic backend on the tested 2D/3D meshes.** This is now a
 direct, interleaved comparison, not a ratio assembled from separate historical

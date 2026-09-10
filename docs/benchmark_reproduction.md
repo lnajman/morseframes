@@ -8,6 +8,8 @@ workspace until a public preprint or published version exists.
 The current resident-array comparison reports loading and native construction
 separately and compares the remaining algorithm work. Complete resident-to-gradient
 totals are retained, starting from a common in-memory mesh and vertex function.
+The latest [PLS key-storage study](pls_key_arena_benchmark.md) gives commands
+for fine profiling, the controlled storage optimization and its fresh TTK rerun.
 The [direct optimized-PLS/TTK study](pls_ttk_gradient_benchmark.md) adds PLS to
 the resident-array harness and measures all four methods together, with balanced
 execution order, a confirmation run and unchanged timing boundaries.

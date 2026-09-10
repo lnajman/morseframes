@@ -1756,16 +1756,25 @@ void test_reduction_kernel_lazy_sparse_closures() {
             assert(metrics.reduction_kernel_local_membership_comparisons == 0);
             assert(metrics.reduction_kernel_local_sparse_scan_passes == 0);
           } else if (dimension == 9 && filtration == 0) {
-            // A large sparse plateau plus a graph control: only membership
-            // lookup changes. Verify fewer probes independently of timing,
-            // including threaded facet execution on the plateau.
+            // The external cache retains both linear membership and the full
+            // candidate scan, independently of the workspace optimizations.
+            // Protected cells must remain visible to coface queries. Only
+            // their repeated candidate visits disappear, even with threading.
             assert(metrics.reduction_kernel_local_large_membership_tests > 0);
             assert(metrics.reduction_kernel_local_membership_tests ==
                    linear_metrics.reduction_kernel_local_membership_tests);
             assert(metrics.reduction_kernel_local_membership_comparisons <
                    linear_metrics.reduction_kernel_local_membership_comparisons);
-            assert(metrics.reduction_kernel_local_sparse_candidate_visits ==
+            assert(metrics.reduction_kernel_local_sparse_candidate_visits <
                    linear_metrics.reduction_kernel_local_sparse_candidate_visits);
+            assert(metrics.reduction_kernel_local_sparse_candidate_visits -
+                       metrics.reduction_kernel_local_protected_candidate_visits ==
+                   linear_metrics.reduction_kernel_local_sparse_candidate_visits -
+                       linear_metrics.reduction_kernel_local_protected_candidate_visits);
+            assert(metrics.reduction_kernel_local_removed_candidate_visits ==
+                   linear_metrics.reduction_kernel_local_removed_candidate_visits);
+            assert(metrics.reduction_kernel_local_coboundary_visits ==
+                   linear_metrics.reduction_kernel_local_coboundary_visits);
             assert(metrics.reduction_kernel_local_sparse_scan_passes ==
                    linear_metrics.reduction_kernel_local_sparse_scan_passes);
           }

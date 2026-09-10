@@ -14,9 +14,27 @@ sys.path.insert(0, str(ROOT / "tools"))
 import benchmark_simplicial_gradients as benchmark
 import pls_phase_profile as profile
 import profile_reduction_kernel_simplicial as rk_profile
+import validate_simplicial_gradient_ab as ab_validation
 
 
 class SimplicialGradientBenchmarkTests(unittest.TestCase):
+    def test_protected_scan_elision_validation(self):
+        before = dict(local_candidate_visits=100, local_sparse_candidate_visits=80,
+                      local_protected_candidate_visits=50, local_removed_candidate_visits=10,
+                      local_sparse_scan_passes=5, local_membership_tests=20,
+                      local_large_membership_tests=15, local_membership_comparisons=70,
+                      local_large_membership_comparisons=60, local_coboundary_visits=30)
+        after = dict(before, local_candidate_visits=60, local_sparse_candidate_visits=40,
+                     local_protected_candidate_visits=10)
+        ab_validation.validate_protected_scan_elision(before, before)
+        ab_validation.validate_protected_scan_elision(before, after)
+        # Reject changed queries/removals as well as a false total-visit saving.
+        for key in after:
+            with self.assertRaises(AssertionError, msg=key):
+                ab_validation.validate_protected_scan_elision(before, dict(after, **{key: after[key] + 1}))
+        with self.assertRaises(AssertionError):
+            ab_validation.validate_protected_scan_elision(after, before)
+
     def test_rk_profile_accounting(self):
         row = dict(builder_seconds=.1, kernel_seconds=1., algorithm_seconds=1.1,
                    setup_seconds=.1, level_wall_seconds=.6, replay_seconds=.2)

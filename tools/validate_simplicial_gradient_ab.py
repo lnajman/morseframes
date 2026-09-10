@@ -34,7 +34,25 @@ def equivalent(a, b):
         assert a == b, (a, b)
 
 
-def audit(path):
+def validate_protected_scan_elision(baseline, candidate):
+    """Allow only skipped protected visits, not changed non-protected work.
+
+    Pair this with the ordinary work invariants and complete ordered dumps.
+    Preparation is included in elapsed time, but is not a repeated scan visit.
+    """
+    protected = 'local_protected_candidate_visits'
+    assert candidate[protected] <= baseline[protected]
+    saved = baseline[protected] - candidate[protected]
+    for key in ('local_candidate_visits', 'local_sparse_candidate_visits'):
+        assert baseline[key] - candidate[key] == saved, key
+    for key in ('local_removed_candidate_visits', 'local_sparse_scan_passes',
+                'local_membership_tests', 'local_large_membership_tests',
+                'local_membership_comparisons', 'local_large_membership_comparisons',
+                'local_coboundary_visits'):
+        assert baseline[key] == candidate[key], key
+
+
+def audit(path, allow_protected_scan_elision=False):
     data = json.loads(path.read_text())
     assert data['schema'] == 'simplicial-gradient-ab-v1' and data['completed']
     assert not data['source_status'] and not data['headers_patch']
@@ -73,6 +91,12 @@ def audit(path):
         static_counts += ('local_large_membership_tests', 'local_sparse_scan_passes',
                           'local_sparse_candidate_visits', 'local_removed_candidate_visits',
                           'local_protected_candidate_visits')
+    if allow_protected_scan_elision:
+        assert settings['rk_profiles'] > 0
+        assert 'local_protected_candidate_visits' in static_counts
+        static_counts = tuple(k for k in static_counts if k not in (
+            'local_candidate_visits', 'local_sparse_candidate_visits',
+            'local_protected_candidate_visits'))
     for case in data['cases']:
         assert len(case['samples']) == settings['blocks']
         assert Counter(tuple(s['order']) for s in case['samples']) == {
@@ -101,6 +125,17 @@ def audit(path):
             for rows in case['memory'][version].values():
                 assert len(rows) == settings['memory_repeats']
         assert len(counts) <= 1, 'RK work changed despite expected exact sequence parity'
+        if allow_protected_scan_elision:
+            reference = case['rk_profiles']['baseline']['rk_detailed'][0]
+            for version in benchmark.VERSIONS:
+                rows = case['rk_profiles'][version]['rk_detailed']
+                # Check repeat stability, including counters deliberately
+                # excluded from the cross-version equality check above.
+                for row in rows:
+                    for key in ('local_candidate_visits', 'local_sparse_candidate_visits',
+                                'local_protected_candidate_visits'):
+                        assert row[key] == rows[0][key]
+                    validate_protected_scan_elision(reference, row)
         equivalent(case['summary'], benchmark.summaries(case['samples']))
         equivalent(case['comparison'], benchmark.comparisons(case['samples']))
     print('VALIDATED', path.name, len(data['cases']), 'configurations', digest(path))
@@ -124,8 +159,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('inputs', type=Path, nargs='+')
     parser.add_argument('--reversed-confirmation', action='store_true')
+    parser.add_argument('--allow-protected-scan-elision', action='store_true',
+                        help='allow only protected-visit removal; require all other local work unchanged')
     args = parser.parse_args()
-    datasets = [audit(path) for path in args.inputs]
+    datasets = [audit(path, args.allow_protected_scan_elision) for path in args.inputs]
     if args.reversed_confirmation:
         assert len(datasets) == 2
         a, b = datasets

@@ -1286,6 +1286,22 @@ class ReductionKernelWorkspace {
     // ID order. Preserve arbitrary external cache ordering via the old lookup.
     const bool ordered_lookup = cell.size() > kInlineCellCapacity &&
                                 level_cells.cached_entries == nullptr;
+    // Incidence is an immutable round snapshot: protected simplices cannot
+    // become local reduction candidates. Filter only the scan, never the
+    // full cell used for coface membership, and retain original cell indices.
+    // Small and externally cached cells keep the allocation-free legacy scan.
+    // Preparation (including any overflow allocation) is timed as local work.
+    const bool filter_candidates = ordered_lookup;
+    InlineVector<std::size_t, kInlineCellCapacity> eligible_indices;
+    if (filter_candidates) {
+      for (std::size_t index = 0; index < cell.size(); ++index) {
+        if (facet_incidence_[cell[index]] <= 1) {
+          eligible_indices.push_back(index);
+        }
+      }
+    }
+    const std::size_t candidate_count =
+        filter_candidates ? eligible_indices.size() : cell.size();
     const auto find_coface_index = [&](SimplexId coface,
                                        std::size_t* comparisons = nullptr) {
       if (!ordered_lookup) {
@@ -1326,15 +1342,16 @@ class ReductionKernelWorkspace {
 
       // Cell order is inherited from the level bucket, so local choices and
       // the merged event order are identical under both execution policies.
-      for (std::size_t sigma_index = 0; sigma_index < cell.size();
-           ++sigma_index) {
+      for (std::size_t candidate = 0; candidate < candidate_count; ++candidate) {
+        const std::size_t sigma_index =
+            filter_candidates ? eligible_indices[candidate] : candidate;
         if constexpr (CollectMetrics) {
           ++result.local_candidate_visits;
           ++result.local_sparse_candidate_visits;
         }
         const SimplexId sigma = cell[sigma_index];
         if (is_locally_removed(sigma_index) ||
-            facet_incidence_[sigma] > 1) {
+            (!filter_candidates && facet_incidence_[sigma] > 1)) {
           if constexpr (CollectMetrics) {
             if (is_locally_removed(sigma_index)) {
               ++result.local_removed_candidate_visits;

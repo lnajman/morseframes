@@ -81,8 +81,56 @@ uninstrumented performance measurements.
 `tools/benchmark_complex_construction.py` compares identical resident input
 arrays against two header snapshots, checks exact reference complexes and
 gradients, and measures construction, gradient execution and fresh-process peak
-memory separately. Its per-insertion diagnostic clocks perturb the adapter;
-the enumeration residual explicitly includes clock overhead.
+memory separately. Archived headers use the legacy per-face adapter: its
+per-insertion diagnostic clocks perturb enumeration, whose residual includes
+clock overhead. Current headers use the bulk path below with separate named
+phase diagnostics. Neither diagnostic mode contributes performance samples.
+
+## Bulk construction from a vertex function
+
+For a complex supplied as cells and a function on vertices:
+
+```cpp
+#include <morseframes/lower_star_complex.hpp>
+
+morseframes::FilteredSimplicialComplex complex;
+std::vector<double> values{0, 1, 2, 3};
+std::vector<std::vector<morseframes::VertexId>> cells{{2, 0, 1}, {3}};
+morseframes::add_lower_star_cells(complex, values, cells);
+complex.finalize();
+```
+
+The shared C++ helper inserts every nonempty face of the supplied cells, using
+the maximum vertex value as its filtration. IDs index `values`; isolated
+vertices must appear as singleton cells. Mixed-dimensional, duplicated and
+unordered cells are supported. No dimension-three restriction is imposed:
+faces of cardinality one through four use compact fixed-size temporary records,
+and larger faces use variable-length records. One dimension is enumerated,
+sorted and deduplicated at a time, then its unique faces are merged into the
+ordered pending map. Temporary memory scales with the number of generated
+faces in the largest dimensional batch, not only with the unique faces.
+
+The helper does not finalize the complex or run any gradient algorithm. All
+gradient strategies can consume the resulting complex; RK itself need not use
+a max-vertex filtration. This is an opt-in C++ path, adopted by the resident
+construction/gradient benchmarks, not an automatic Python-constructor change.
+
+Existing entries retain their first filtration value when the new value agrees
+within the existing `1e-12` duplicate tolerance; conflicting values throw.
+Max-vertex ties preserve the first input occurrence, including the sign of zero,
+as in the legacy per-cell enumeration. Empty cells, repeated vertices in a cell,
+missing vertex values and NaN values are rejected before insertion; infinite
+values are allowed. An empty cell collection adds nothing. Insertion/allocation
+errors can leave partial additions, just like a sequence of `add_simplex`
+calls. Finalization still performs closure and monotonicity checks. Input
+arrays are not modified.
+
+For separate diagnostics, pass a `LowerStarConstructionMetrics` object to
+`add_lower_star_cells_with_metrics`. It is reset on entry and reports
+`validation_seconds` (including canonical cell copying), `enumeration_seconds`,
+`sort_and_dedup_seconds`, `insertion_seconds` (including temporary cleanup),
+`generated_faces` and `unique_faces_submitted`. The last counter includes faces
+already in the pending map. The ordinary helper has no internal clock reads.
 
 ## Lightweight ReductionKernel initialization
 

@@ -14,6 +14,8 @@
 
 namespace morseframes {
 
+namespace detail { struct LowerStarComplexBuilder; }
+
 using SimplexId = std::uint32_t;
 using VertexId = std::uint32_t;
 using LevelId = std::uint32_t;
@@ -40,6 +42,7 @@ struct ComplexConstructionMetrics {
 };
 
 class FilteredSimplicialComplex {
+  friend struct detail::LowerStarComplexBuilder;
  public:
   void add_simplex(std::vector<VertexId> vertices, double filtration) {
     canonicalize(vertices);

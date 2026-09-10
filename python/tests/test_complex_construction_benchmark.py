@@ -77,6 +77,10 @@ class ComplexConstructionBenchmarkTest(unittest.TestCase):
             self.assertEqual(metadata["fmax_critical_counts"], [1, 0, 0])
             self.assertEqual(len(runs), 2)
             self.assertEqual(diagnostic["complex_fingerprint"], metadata["complex_fingerprint"])
+            if "generated_faces" in diagnostic: # Archived headers use the legacy adapter.
+                self.assertEqual(diagnostic["generated_faces"], 7)
+                self.assertEqual(diagnostic["unique_faces_submitted"], 7)
+                self.assertGreaterEqual(diagnostic["bulk_sort_and_dedup_seconds"], 0)
             for run in runs:
                 self.assertAlmostEqual(run["construction_seconds"],
                                        run["enumeration_and_insertion_seconds"] + run["finalize_seconds"])

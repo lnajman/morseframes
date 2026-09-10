@@ -6,6 +6,7 @@
 #include <Triangulation.h>
 
 #include "morseframes/debug_checks.hpp"
+#include "morseframes/lower_star_complex.hpp"
 #include "morseframes/reduction_kernel_sequence.hpp"
 
 #include <algorithm>
@@ -111,19 +112,7 @@ struct MorseRun {
 };
 
 void populate_complex(const Input& input, Complex& complex) {
-  for (const auto& cell : input.cells) {
-    for (std::size_t mask = 1; mask < (std::size_t{1} << cell.size()); ++mask) {
-      std::vector<morseframes::VertexId> simplex;
-      double value = -std::numeric_limits<double>::infinity();
-      for (std::size_t i = 0; i < cell.size(); ++i) {
-        if ((mask & (std::size_t{1} << i)) != 0) {
-          simplex.push_back(cell[i]);
-          value = std::max(value, input.values[cell[i]]);
-        }
-      }
-      complex.add_simplex(std::move(simplex), value);
-    }
-  }
+  morseframes::add_lower_star_cells(complex, input.values, input.cells);
   complex.finalize();
 }
 

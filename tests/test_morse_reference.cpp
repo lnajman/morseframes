@@ -21,6 +21,7 @@
 #include "morseframes/filtered_complex.hpp"
 #include "morseframes/instrumentation.hpp"
 #include "morseframes/inverse_annotation_store.hpp"
+#include "morseframes/lower_star_complex.hpp"
 #include "morseframes/morse_reference_api.hpp"
 #include "morseframes/morse_sequence.hpp"
 #include "morseframes/reduction_kernel_sequence.hpp"
@@ -2018,9 +2019,133 @@ void test_complex_construction_contract() {
   assert(rejected);
 }
 
+void test_bulk_lower_star_construction() {
+  using Cells = std::vector<std::vector<morseframes::VertexId>>;
+  const auto legacy = [](auto& complex, const auto& values, const auto& cells) {
+    for (const auto& cell : cells) {
+      for (std::size_t mask = 1; mask < (std::size_t{1} << cell.size()); ++mask) {
+        std::vector<morseframes::VertexId> face;
+        double value = -std::numeric_limits<double>::infinity();
+        for (std::size_t i = 0; i < cell.size(); ++i) if (mask & (std::size_t{1} << i)) {
+          face.push_back(cell[i]);
+          value = std::max(value, values[cell[i]]);
+        }
+        complex.add_simplex(std::move(face), value);
+      }
+    }
+  };
+  const auto same = [](const auto& a, const auto& b) {
+    assert(a.size() == b.size());
+    assert(a.filtration_order() == b.filtration_order());
+    assert(a.level_values() == b.level_values());
+    for (std::size_t i = 0; i < a.num_levels(); ++i) {
+      assert(std::signbit(a.level_values()[i]) == std::signbit(b.level_values()[i]));
+      assert(a.simplices_of_level(i) == b.simplices_of_level(i));
+    }
+    for (morseframes::SimplexId id = 0; id < a.size(); ++id) {
+      assert(a.vertices(id) == b.vertices(id));
+      assert(a.filtration(id) == b.filtration(id));
+      assert(std::signbit(a.filtration(id)) == std::signbit(b.filtration(id)));
+      assert(a.level(id) == b.level(id) && a.dimension(id) == b.dimension(id));
+      assert(a.boundary(id) == b.boundary(id) && a.coboundary(id) == b.coboundary(id));
+      assert(a.find_simplex(a.vertices(id)) == b.find_simplex(a.vertices(id)));
+    }
+  };
+  std::mt19937 rng(290);
+  for (unsigned dimension = 0; dimension <= 7; ++dimension) {
+    for (unsigned trial = 0; trial < 8; ++trial) {
+      // Shared faces, repeated/reversed cells, a lower-dimensional maximal cell
+      // and an isolated vertex. Exercise the vector-backed path above 3D too.
+      Cells cells(2);
+      for (unsigned i = 0; i <= dimension; ++i) {
+        cells[0].push_back(i);
+        cells[1].push_back(i + 1);
+      }
+      cells.push_back({dimension + 2, dimension + 1});
+      cells.push_back({dimension + 3});
+      cells.push_back(cells[0]);
+      for (auto& cell : cells) std::shuffle(cell.begin(), cell.end(), rng);
+      std::shuffle(cells.begin(), cells.end(), rng);
+      std::vector<double> values(dimension + 4);
+      for (auto& value : values) value = trial % 2 ? double(rng() % 5) - 2 : -0.0;
+      values[0] = +0.0;
+      FilteredSimplicialComplex a, b, diagnostic;
+      // Preexisting entries interleave with every dimension's sorted batch.
+      a.add_simplex({dimension + 3}, values.back() + 0.5e-12);
+      b.add_simplex({dimension + 3}, values.back() + 0.5e-12);
+      diagnostic.add_simplex({dimension + 3}, values.back() + 0.5e-12);
+      legacy(a, values, cells);
+      morseframes::add_lower_star_cells(b, values, cells);
+      morseframes::LowerStarConstructionMetrics metrics;
+      metrics.generated_faces = 99999;
+      morseframes::add_lower_star_cells_with_metrics(diagnostic, values, cells, metrics);
+      std::size_t generated = 0;
+      for (const auto& cell : cells) generated += (std::size_t{1} << cell.size()) - 1;
+      assert(metrics.generated_faces == generated);
+      assert(metrics.validation_seconds >= 0 && metrics.enumeration_seconds >= 0);
+      assert(metrics.sort_and_dedup_seconds >= 0 && metrics.insertion_seconds >= 0);
+      a.finalize(); b.finalize(); diagnostic.finalize();
+      assert(metrics.unique_faces_submitted == b.size());
+      same(a, b); same(a, diagnostic);
+      const auto expected = FSequenceBuilder<FilteredSimplicialComplex>(a).build_f_max();
+      const auto actual = FSequenceBuilder<FilteredSimplicialComplex>(b).build_f_max();
+      assert(expected.steps().size() == actual.steps().size());
+      for (std::size_t i = 0; i < expected.steps().size(); ++i) {
+        const auto& x = expected.steps()[i]; const auto& y = actual.steps()[i];
+        assert(x.type == y.type && x.sigma == y.sigma && x.tau == y.tau && x.level == y.level);
+      }
+      auto copied = b;
+      auto moved = std::move(copied);
+      same(a, moved);
+      b.prepare_same_level_closure_cache();
+      morseframes::add_lower_star_cells(b, values, cells);
+      assert(!b.has_same_level_closure_cache());
+      b.finalize(); same(a, b);
+      b.prepare_same_level_closure_cache();
+      morseframes::add_lower_star_cells_with_metrics(b, values, {}, metrics);
+      assert(metrics.generated_faces == 0 && metrics.unique_faces_submitted == 0);
+      assert(b.has_same_level_closure_cache());
+      b.finalize(); same(a, b);
+    }
+  }
+  // All validation precedes mutation, even if an earlier cell would be valid.
+  FilteredSimplicialComplex invalid;
+  invalid.add_simplex({0}, 0); invalid.finalize();
+  const auto original = invalid;
+  invalid.prepare_same_level_closure_cache();
+  for (const auto& cells : {Cells{{1}, {}}, Cells{{1}, {0, 0}}, Cells{{1}, {2}}}) {
+    bool rejected = false;
+    try { morseframes::add_lower_star_cells(invalid, {0, 1}, cells); }
+    catch (const std::exception&) { rejected = true; }
+    assert(rejected && invalid.has_same_level_closure_cache());
+    same(original, invalid);
+  }
+  bool rejected = false;
+  try { morseframes::add_lower_star_cells(invalid, {0, std::nan("")}, {{1}}); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected && invalid.has_same_level_closure_cache());
+  invalid.finalize(); same(original, invalid); // No hidden pending insertions.
+  rejected = false;
+  try { morseframes::add_lower_star_cells(invalid, {2}, {{0}}); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected);
+  invalid.finalize(); same(original, invalid);
+  const double infinity = std::numeric_limits<double>::infinity();
+  FilteredSimplicialComplex a, b;
+  legacy(a, std::vector<double>{-infinity, infinity}, Cells{{1, 0}, {0, 1}});
+  morseframes::add_lower_star_cells(b, {-infinity, infinity}, {{1, 0}, {0, 1}});
+  a.finalize(); b.finalize(); same(a, b);
+  assert(morseframes::detail::LowerStarComplexBuilder::combinations(10, 3) == 120);
+  rejected = false;
+  try { (void)morseframes::detail::LowerStarComplexBuilder::combinations(1000, 500); }
+  catch (const std::length_error&) { rejected = true; }
+  assert(rejected);
+}
+
 }  // namespace
 
 int main() {
+  test_bulk_lower_star_construction();
   test_complex_construction_contract();
   test_bounded_task_executor();
   test_boundary_and_coboundary();

@@ -103,8 +103,10 @@ def main():
         arguments={k: ([str(x) for x in v] if k == "inputs" else str(v) if isinstance(v, Path) else v)
                    for k, v in vars(args).items()},
         timing_scope="Resident arrays to finalized complex; gradient timers separately include fresh builders. "
-                     "Loading, validation, protocol, output destruction excluded. F-Max/RK order alternates. "
-                     "Diagnostic insertion clocks perturb enumeration; their residual includes clock overhead.",
+                     "Loading, result validation, protocol, output destruction excluded. Input validation "
+                     "inside the constructor is included. F-Max/RK order alternates. Bulk builds time "
+                     "validation, enumeration, sort/dedup and insertion within the adapter. Legacy "
+                     "diagnostic insertion clocks perturb enumeration; their residual includes clock overhead.",
         memory_scope="Fresh-process peak RSS after construction, before gradients/validation; "
                      "includes runtime, resident input, allocator and constructor temporaries. Not live heap size.",
         interval_note="Paired-block bootstrap describes this session, not independent-session uncertainty.",
@@ -184,6 +186,11 @@ def main():
                             "insertion_attempts"
                         ] != case["insertion_attempts"]:
                             raise AssertionError("Diagnostic counters differ")
+                        if "generated_faces" in diagnostic and (
+                            diagnostic["generated_faces"] != case["insertion_attempts"] or
+                            diagnostic["unique_faces_submitted"] != case["simplices"]
+                        ):
+                            raise AssertionError("Bulk diagnostic counters differ")
                         case["diagnostics"][name].append(diagnostic)
             result["cases"].append(case)
             args.output.write_text(json.dumps(result, indent=2) + "\n")

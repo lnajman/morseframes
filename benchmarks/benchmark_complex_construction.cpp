@@ -1,6 +1,10 @@
 // Resident-input construction A/B worker. Diagnostics and validation are not
 // performance samples. Output destruction is outside both reported timers.
 #include "morseframes/filtered_complex.hpp"
+#if __has_include("morseframes/lower_star_complex.hpp")
+#include "morseframes/lower_star_complex.hpp"
+#define MORSEFRAMES_BULK_LOWER_STAR 1
+#endif
 #include "morseframes/morse_sequence.hpp"
 #include "morseframes/reduction_kernel_sequence.hpp"
 #include <chrono>
@@ -58,6 +62,11 @@ Input read_input(const char* path) {
 }
 template <bool Diagnostic>
 double populate(const Input& input, Complex& complex) {
+#ifdef MORSEFRAMES_BULK_LOWER_STAR
+  static_assert(!Diagnostic, "Bulk diagnostics use named phase metrics.");
+  morseframes::add_lower_star_cells(complex, input.values, input.cells);
+  return 0;
+#else
   double insertion = 0;
   for (const auto& cell : input.cells) {
     for (std::size_t mask = 1; mask < (std::size_t{1} << cell.size()); ++mask) {
@@ -74,6 +83,7 @@ double populate(const Input& input, Complex& complex) {
     }
   }
   return insertion;
+#endif
 }
 struct Fingerprint {
   std::uint64_t value = 14695981039346656037ull;
@@ -121,13 +131,29 @@ Sequence gradient(const Complex& complex, bool rk, std::size_t workers) {
 void profile(const Input& input) {
   Complex complex;
   auto start = Clock::now();
+#ifdef MORSEFRAMES_BULK_LOWER_STAR
+  morseframes::LowerStarConstructionMetrics bulk;
+  morseframes::add_lower_star_cells_with_metrics(complex, input.values, input.cells, bulk);
+#else
   double insertion = populate<true>(input, complex);
+#endif
   double adapter = elapsed(start, Clock::now());
   morseframes::ComplexConstructionMetrics m;
   complex.finalize_with_metrics(m);
-  std::cout << "{\"adapter_inclusive_seconds\":" << adapter
+  std::cout << "{\"adapter_inclusive_seconds\":" << adapter;
+#ifdef MORSEFRAMES_BULK_LOWER_STAR
+  std::cout << ",\"bulk_validation_seconds\":" << bulk.validation_seconds
+            << ",\"bulk_enumeration_seconds\":" << bulk.enumeration_seconds
+            << ",\"bulk_sort_and_dedup_seconds\":" << bulk.sort_and_dedup_seconds
+            << ",\"bulk_insertion_seconds\":" << bulk.insertion_seconds
+            << ",\"generated_faces\":" << bulk.generated_faces
+            << ",\"unique_faces_submitted\":" << bulk.unique_faces_submitted;
+#else
+  std::cout
             << ",\"canonicalization_and_dedup_seconds\":" << insertion
-            << ",\"enumeration_and_clock_overhead_seconds\":" << adapter - insertion
+            << ",\"enumeration_and_clock_overhead_seconds\":" << adapter - insertion;
+#endif
+  std::cout
             << ",\"reset_seconds\":" << m.reset_seconds
             << ",\"index_and_simplices_seconds\":" << m.index_and_simplices_seconds
             << ",\"levels_seconds\":" << m.levels_seconds

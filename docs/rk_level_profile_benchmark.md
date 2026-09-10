@@ -20,6 +20,12 @@ measurements do **not** establish zero performance impact from the refactor.
 Before adopting a new performance baseline, isolate this warning with an
 ordinary-only driver/binary comparison and repeat the volume control.
 
+**Follow-up:** the [ordinary-binary isolation study](rk_binary_isolation_benchmark.md)
+has now completed. The larger slowdown is not consistently reproduced, and
+same-executable process controls show comparable variability. A small sequential
+cost remains possible; the original observations above are preserved, not
+reclassified as proof of zero overhead.
+
 ## Implementation and timing scope
 
 Candidate `8edb1ec7ee459c6036a4817f7e2e52907b20b5cc` adds a separate optional

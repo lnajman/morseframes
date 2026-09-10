@@ -61,6 +61,8 @@ The current public alpha can be installed from PyPI:
    rk_level_profile_benchmark
    rk_level_profile_tables
    rk_binary_isolation_protocol
+   rk_binary_isolation_benchmark
+   rk_binary_isolation_tables
    reduction_kernel_correctness
    phase0_conventions
 

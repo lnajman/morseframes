@@ -12,9 +12,18 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools'))
 import benchmark_rk_binary_isolation as isolation
 import benchmark_rk_same_binary as same_binary
+import render_rk_binary_isolation as render
 
 
 class BinaryIsolationTests(unittest.TestCase):
+    def test_independent_summary_and_corruption(self):
+        blocks = self.blocks()
+        data = dict(cases=[dict(blocks=blocks, summary=isolation.summaries(blocks))])
+        self.assertEqual(render.independently_check(data), 36)
+        data['cases'][0]['summary']['candidate_ordinary/baseline_ordinary']['f_max']['algorithm_seconds']['median_paired_ratio'] += .01
+        with self.assertRaises(AssertionError):
+            render.independently_check(data)
+
     def test_same_binary_schedule_and_ratios(self):
         for reverse in (0, 1):
             orders = same_binary.orders(reverse)

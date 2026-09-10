@@ -44,8 +44,9 @@ struct ReductionKernelExecutionOptions {
   std::size_t max_workers = 0;
   bool collect_metrics = false;
   // Independent read-only closure preparation may share the executor with
-  // concurrent level tasks. Disable separately for controlled experiments.
-  bool parallel_closure_preparation = true;
+  // concurrent level tasks. Experimental: mixed benchmark results keep this
+  // opt-in until a more selective scheduling/work gate has been validated.
+  bool parallel_closure_preparation = false;
 };
 
 struct ReductionKernelMetrics {

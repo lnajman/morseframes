@@ -66,6 +66,10 @@ def validate(row, mode, identity, values, workers):
             raise ValueError('Unexpected level trace')
         return
     trace = row['level_trace']
+    if any(k in flat or any(k in item for item in trace['levels']) for k in PARALLEL_CLOSURE_FIELDS):
+        if (not all(k in flat for k in PARALLEL_CLOSURE_FIELDS)
+                or any(not all(k in item for k in PARALLEL_CLOSURE_FIELDS) for item in trace['levels'])):
+            raise ValueError('Incomplete global/per-level parallel closure profile')
     owners = level_owners(values)
     detailed = mode == 'rk_levels_detailed'
     if (trace['completed'] is not True or trace['detailed'] is not detailed

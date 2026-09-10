@@ -90,3 +90,7 @@ for the frozen results.
 The data-validation skill informs the independent recomputation and distinction
 between within-process and between-process evidence. The deliverable remains the
 requested repository implementation and its reproducible benchmark notes.
+
+**Post-measurement decision:** [the two frozen sessions](rk_parallel_closure_benchmark.md)
+show mixed results, so the broad feature is disabled by default. The original
+work gate and all measurements are retained unchanged for opt-in experiments.

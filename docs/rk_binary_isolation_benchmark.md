@@ -22,6 +22,10 @@ independent process replication to future performance guards. Keep existing
 paper-facing benchmark results frozen: this is a diagnostic study, not a new
 TTK/PLS/RK ranking or a claim of zero tracing-refactor overhead.
 
+**Follow-up:** the [parallel closure experiment](rk_parallel_closure_benchmark.md)
+is complete. Its benefit is input-dependent and the new feature stays opt-in;
+the original isolation measurements and caveats here are preserved.
+
 ## Volume-32 results
 
 These are candidate/baseline paired-block ratios for complete gradient time;

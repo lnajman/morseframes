@@ -15,6 +15,18 @@ from benchmark_simplicial_gradients import grid_input
 
 
 class LevelProfileTests(unittest.TestCase):
+    def test_parallel_closure_global_coverage(self):
+        from profile_reduction_kernel_simplicial import PARALLEL_CLOSURE_FIELDS, CLOSURE_FIELDS, BOUNDARY_INDEX_FIELDS
+        identity, row = self.fixture(False)
+        row.update({k: 0 for k in PARALLEL_CLOSURE_FIELDS + CLOSURE_FIELDS + BOUNDARY_INDEX_FIELDS})
+        row['closure_seconds'] = 0
+        for item in row['level_trace']['levels']:
+            item.update({k: 0 for k in PARALLEL_CLOSURE_FIELDS})
+        levels.validate(row, 'rk_levels_coarse', identity, [1, 0], 2)
+        for k in PARALLEL_CLOSURE_FIELDS: row.pop(k)
+        with self.assertRaises(ValueError):
+            levels.validate(row, 'rk_levels_coarse', identity, [1, 0], 2)
+
     def test_parallel_closure_elapsed_and_cumulative(self):
         from profile_reduction_kernel_simplicial import validate_parallel_closure, PARALLEL_CLOSURE_FIELDS
         row = {k: 0 for k in PARALLEL_CLOSURE_FIELDS}

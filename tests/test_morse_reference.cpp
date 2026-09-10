@@ -2160,6 +2160,7 @@ void test_reduction_kernel_facet_failure_drains_tasks() {
 }
 
 void test_reduction_kernel_parallel_closures() {
+  assert(!morseframes::ReductionKernelExecutionOptions{}.parallel_closure_preparation);
   for (std::size_t groups : {1, 3}) {
     FilteredSimplicialComplex complex;
     std::vector<double> values(10000, 0.0);

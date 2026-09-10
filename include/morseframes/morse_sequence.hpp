@@ -930,8 +930,10 @@ class FSequenceBuilder {
         }
       }
       sequence.add_critical(simplex, simplex_level(simplex));
-      const auto callback_start = profile_start();
       profile_add(&MorseSequenceBuildMetrics::emit_nanoseconds, emit_start);
+      // Close emission before opening the callback interval. Reversing these
+      // reads double-counts any pause inside the emission timer bookkeeping.
+      const auto callback_start = profile_start();
       callback(sequence, sequence.steps().back());
       profile_add(&MorseSequenceBuildMetrics::callback_nanoseconds, callback_start);
       const auto emit_resume = profile_start();
@@ -959,8 +961,8 @@ class FSequenceBuilder {
         }
       }
       sequence.add_regular_pair(sigma, tau, simplex_level(tau));
-      const auto callback_start = profile_start();
       profile_add(&MorseSequenceBuildMetrics::emit_nanoseconds, emit_start);
+      const auto callback_start = profile_start();
       callback(sequence, sequence.steps().back());
       profile_add(&MorseSequenceBuildMetrics::callback_nanoseconds, callback_start);
       const auto emit_resume = profile_start();

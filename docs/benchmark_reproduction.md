@@ -962,7 +962,8 @@ tests also check the dispatch count on both sides of the threshold. Graph-only
 local-cell construction is not changed by this scheduling update.
 
 The controlled A/B baseline is `d466174`. Its gradient headers are the same as
-the preceding `ec408dc` facet-task batching revision. Timing starts from an
+the preceding `ec408dc` facet-task batching revision. The measured scheduling
+candidate is `3c18fa7`. Timing starts from an
 already finalized native complex and includes fresh builder/workspace/pool
 creation, gradient computation, replay and internal teardown. Input loading and
 native complex construction remain outside this algorithm comparison. This RK
@@ -970,7 +971,7 @@ implementation A/B study is not a fresh comparison against TTK or F-Max.
 
 ```sh
 LC_ALL=C python3 tools/benchmark_reduction_kernel_ab.py \
-  --baseline d466174 --candidate WORKTREE \
+  --baseline d466174 --candidate 3c18fa7 \
   --family volume --filtration plateau --sizes 4 8 12 --seeds 0 \
   --workers 1 2 4 8 --blocks 8 --repeats 3 --warmups 2 \
   --input-dir ../rk-ab-inputs \
@@ -1067,6 +1068,24 @@ python3 tools/render_reduction_kernel_phases.py \
   --input ../rk-phases-discovery.json \
   --table-output docs/reduction_kernel_discovery_phases_table.tex
 ```
+
+### F-Max diagnostic timer correction
+
+Final integration checks exposed an existing overlap between F-Max's emission
+and callback timers: the callback interval began before emission's final clock
+read. A scheduling pause between those reads could be charged to both phases.
+A separate profiling-only correction closes emission before opening callback
+timing, for both critical insertions and regular pairs. It changes no gradient
+choices or callbacks and leaves any timer bookkeeping gap in the residual.
+Repeated tiny native diagnostics retain the strict no-double-counting check.
+
+The RK A/B evidence above belongs to `3c18fa7`. Building its unprofiled RK driver
+before and after this F-Max correction gives **identical executable bytes**
+(SHA-256 `82cbc63155869348b18aff704560b00ae9c34e567799572d06bd355f79664910`),
+so the correction does not alter that measured RK executable. Historical
+non-profiled comparisons do not depend on the overlapping counters. Older
+F-Max fine diagnostic components, however, should not be treated as a strictly
+disjoint partition even when their sum happens to fit inside the outer total.
 
 ## Facet-Task Batching Update (Historical `ec408dc`)
 

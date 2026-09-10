@@ -205,8 +205,10 @@ class ResidentGradientNativeTest(unittest.TestCase):
             for source in examples:
                 path.write_text(source)
                 for workers in (1, 4):
-                    raw = bench.run_native(executable, path, workers, 1, 1, 0)
-                    summary = bench.summarize(raw, 1, 1)
+                    # Repeated tiny diagnostics exercise emission/callback
+                    # boundary accounting as well as exact gradient checks.
+                    raw = bench.run_native(executable, path, workers, 1, 6, 0)
+                    summary = bench.summarize(raw, 1, 6)
                     self.assertTrue(raw["exact_reference_checks"])
                     self.assertEqual(raw["schema"], "resident-gradient-v2")
                     self.assertGreater(raw["input_loading_seconds"], 0)
